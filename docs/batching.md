@@ -103,7 +103,7 @@ one group; unselected cases have `group_id: null`. A group row contains:
 | `case_ids` | Ordered selected opaque member identities. |
 | `outcome` | `executed`, `reused`, `failed`, `incomplete`, or `infrastructure_error`. |
 | `complete` | Every requested member produced a validated final teardown outcome. |
-| `cache_eligible` | Complete successful group evidence accepted after required lifecycle. |
+| `cache_eligible` | Complete successful evidence accepted after lifecycle and enabled reuse policy; false for `--no-cache` or `cache=False`. |
 | `attempts` | Worker attempts for this group; zero on reuse or before worker start. |
 | `worker_seconds`, `cpu_seconds` | Group worker totals, counted once, zero for reuse. |
 | `passed`, `failed`, `skipped`, `not_run` | Final-attempt member totals. |
@@ -119,7 +119,11 @@ group once plus collection. Per-worker limits and aggregate concurrency remain i
 
 Case `outcome` keeps the existing vocabulary. Observed passed/skipped members are
 `executed` even in a failed/incomplete group; observed failures are `failed`; missing
-members are `infrastructure_error` with `result_status: "not-run"`. Reuse applies to all
+members are `infrastructure_error` with `result_status: "not-run"`. An intentional
+pytest stop is distinguished by group `outcome: "incomplete"` and `stop_reason:
+"pytest-stop"`; dependency outages use `stop_reason: "infrastructure"`, cancellation
+uses `"cancelled"`, and complete groups use `null`. A pytest-stop run reports status
+`failed`, not a dependency outage, even though missing-member count vocabulary is retained. Reuse applies to all
 members together and preserves their passed/skipped statuses. Group `cache_eligible`
 distinguishes observed results from reusable evidence. Complete inventory does not imply
 complete execution. A refusal or incomplete inventory never proves no earlier member
