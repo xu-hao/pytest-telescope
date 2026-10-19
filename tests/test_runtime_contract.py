@@ -1,6 +1,7 @@
 """Behavioral controls for bounded workers and strict result records."""
 
 import copy
+import hashlib
 import json
 import sys
 
@@ -195,10 +196,10 @@ def run_worker(root, image, source, *, arguments=(), timeout=10, conftest=None, 
             json.dumps(
                 sorted(
                     (
-                        {"nodeid": row["nodeid"], "origins": row["origins"]}
+                        {"case_id": row["case_id"], "origins": row["origins"]}
                         for row in inventory["items"]
                     ),
-                    key=lambda row: row["nodeid"],
+                    key=lambda row: row["case_id"],
                 ),
                 sort_keys=True,
                 separators=(",", ":"),
@@ -222,7 +223,7 @@ def run_worker(root, image, source, *, arguments=(), timeout=10, conftest=None, 
                             request={
                                 "mode": "execution",
                                 "registry": registry,
-                                "case_nodeid": item["nodeid"],
+                                "case_id": item["case_id"],
                                 "expected_digest": digest,
                             },
                         )
@@ -369,12 +370,13 @@ with runtime.invocation(root) as directory:
     (project/'test_subject.py').chmod(0o444)
     import hashlib, json
     nodeid = 'test_subject.py::test_wait'
-    digest = hashlib.sha256(json.dumps([{'nodeid': nodeid, 'origins': []}],
+    case_id = hashlib.sha256(json.dumps(['default', nodeid], separators=(',',':')).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps([{'case_id': case_id, 'origins': []}],
                                       sort_keys=True,separators=(',',':')).encode()).hexdigest()
     runtime.execute(sys.argv[3],project,['test_subject.py'],{},40,root=root,
                     invocation_directory=directory,
                     request={'mode':'execution','registry':[],
-                             'case_nodeid':nodeid,'expected_digest':digest})
+                             'case_id':case_id,'expected_digest':digest})
 """
     process = subprocess.Popen(
         [sys.executable, "-c", program, source_root, str(root), image],
@@ -588,7 +590,7 @@ def test_real_equivalent_checkouts_reuse_across_owned_runtime_images(tmp_path, d
 
 def collection_record():
     return {
-        "protocol": 2,
+        "protocol": 3,
         "kind": "collection",
         "nonce": "a" * 32,
         "exit_code": 0,
@@ -596,10 +598,10 @@ def collection_record():
         "leaked_descendants": False,
         "items": [
             {
-                "nodeid": "test_subject.py::test_one",
+                "case_id": "c" * 64,
                 "file": "test_subject.py",
                 "origins": [],
-                "aliases": ["test_subject.py", "test_subject.py::test_one"],
+                "aliases": sorted(["c" * 64, hashlib.sha256(b"test_subject.py").hexdigest()]),
                 "selected": True,
             }
         ],
@@ -718,7 +720,7 @@ def test_fresh_execution_result_must_match_requested_case(tmp_path, monkeypatch)
                 request={
                     "mode": "execution",
                     "registry": [],
-                    "case_nodeid": "test_subject.py::test_requested",
+                    "case_id": "d" * 64,
                     "expected_digest": "a" * 64,
                 },
             )
@@ -738,5 +740,4 @@ def test_collection_node_identity_must_belong_to_reported_file():
     result = collection_record()
     item = result["items"][0]
     item["file"] = "other_subject.py"
-    item["aliases"] = sorted([item["file"], item["nodeid"]])
     assert not validate_collection(result)

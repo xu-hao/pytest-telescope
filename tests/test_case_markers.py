@@ -105,7 +105,13 @@ def project(tmp_path):
 
 
 def assert_outcomes(summary, *, executed=0, reused=0, failed=0, unselected=0):
-    assert summary["counts"] == {
+    assert summary["counts"]["selected"] == executed + reused + failed
+    assert summary["counts"]["unsupported"] == 0
+    assert {
+        key: value
+        for key, value in summary["counts"].items()
+        if key not in {"selected", "unsupported"}
+    } == {
         "executed": executed,
         "reused": reused,
         "failed": failed,

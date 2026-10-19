@@ -2,8 +2,9 @@
 
 The [quickstart](index.md) provides every file for a runnable project. The
 [execution contract](execution-contract.md) is authoritative for the supported boundary.
-This interface is for 0.1.0a2; old central `targets` declarations are rejected with a
-migration message.
+The base marker interface is available in 0.1.0a2; old central `targets` declarations
+are rejected with a migration message. Next-alpha additions are specified in the
+[scoped execution guide](scoped-execution.md) and [result reference](result-schema.md).
 
 ## Markers beside cases
 
@@ -103,8 +104,8 @@ and host Python environments (`.venv`, `venv`, or a directory with validated
 `pyvenv.cfg`). Other large trees such as `build`, `dist`, and `node_modules` count toward
 snapshot limits. Explicit declarations into excluded namespaces are errors.
 
-Keep pytest settings in `[tool.pytest.ini_options]`; other pytest configuration files
-are rejected. Forwarding environment names is not a secret-distribution mechanism.
+The default suite keeps pytest settings in `[tool.pytest.ini_options]`. Next-alpha
+[independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
 Only named user variables are forwarded; runtime-controlled variables remain reserved.
 
 ## Select and control execution
@@ -126,3 +127,23 @@ Each case gets a new pytest session. Fixtures with broader pytest scopes are rec
 for each case; tests depending on cross-case mutable state need rewriting. See the
 [execution contract](execution-contract.md) for supported options, runtime requirements,
 bounded failures, exact cache identity, and outcome accounting.
+
+
+## Next-alpha scoped execution
+
+A literal `distributions=["core"]` marker adds selected local metadata and establishes
+narrow scope, including an empty list. Distribution names also compose through defaults
+and bundles. Metadata does not grant application source: declare package modules through
+`inputs` as usual. Broad cases receive every configured distribution.
+
+The [complete scoped guide](scoped-execution.md) provides versioned static metadata,
+independent suite and worker-budget configuration. A suite's `root`, `config`,
+`test_roots`, `include` and `exclude` paths are all outer-project-relative. Exclusions
+remove files before parsing or importing them. `args` preserve argument order; `plugins`
+name installed explicit plugins with autoload disabled. A project using explicit suites
+cannot also set top-level `test_roots`.
+
+Configured `addopts` are resolved before scheduler validation. For a suite configuration
+containing `addopts = -n auto`, an explicit `-o addopts=` removes that option; the run
+then uses telescope's declared resource envelope. Without that override, nested scheduler
+options return an explicit unsupported capability. This does not enable xdist workers.

@@ -320,6 +320,11 @@ reference](specification.md) for exact syntax, defaults, bundles, absence, and e
 the [execution contract](execution-contract.md) covers isolation, collection, cache
 identity, limits, and failure recovery.
 
+The next-alpha [scoped execution guide](scoped-execution.md) adds local distribution
+metadata, independent suites and bounded parallel workers. Its [result reference](result-schema.md)
+describes versioned inventories and explicit capability refusals. These additions are not
+available in the published 0.1.0a2 tutorial above.
+
 ```{toctree}
 :hidden:
 :maxdepth: 1
@@ -328,6 +333,7 @@ Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
 Scoped execution extension <scoped-execution>
+Run result reference <result-schema>
 Benchmark <benchmark>
 Development <development>
 Publishing <publishing>

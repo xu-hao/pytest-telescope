@@ -4,7 +4,9 @@
 
 Version 0.1.0a2 implements this per-case marker contract with Linux Docker
 enforcement and lifecycle recovery. Version 0.1.0a1 remains immutable and uses
-the earlier file/group target interface.
+the earlier file/group target interface. The [next-alpha scoped extension](scoped-execution.md)
+and [result schema](result-schema.md) describe additions under qualification; those additions
+are not shipped in 0.1.0a2.
 
 ## User interface and scope
 
@@ -66,9 +68,9 @@ Full current inventory is accounted for before selectors: selected cases are exe
 
 Bounded defaults: 100,000 actual cases; 100,000 visible files; 200,000 visited entries; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual execution response. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
 
-Retain up to 100,000 successful case records within a 256 MiB total cache budget, plus at most eight inventory records within a 64 MiB inventory budget. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete frozen-pool invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
+Retain up to 100,000 successful case records within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete frozen-pool invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
 
-Freeze each distinct file once per invocation. Derive case keys from immutable frozen-file records and memoized scope identities. Materialize only missed cases, using immutable files from the frozen pool without exposing its broader parent directory. Broad scopes can reuse a complete immutable snapshot; narrow snapshots contain only their own selected paths. Do not copy/hash the whole project once per case. Cold execution remains serial and starts one isolated pytest session per case; repeated collection of a large parametrized module is a real cost, not hidden by file-group benchmark claims. Warm inventory/result hits start no worker containers.
+Freeze each distinct file once per invocation. Derive case keys from immutable frozen-file records and memoized scope identities. Materialize only missed cases, using immutable files from the frozen pool without exposing its broader parent directory. Broad scopes can reuse a complete immutable snapshot; narrow snapshots contain only their own selected paths. Do not copy/hash the whole project once per case. The default budget runs one worker; explicit resource envelopes permit bounded parallel fresh workers as specified in the [scoped execution extension](scoped-execution.md). Each miss starts one isolated pytest session per case; repeated collection of a large parametrized module is a real cost, not hidden by file-group benchmark claims. Warm inventory/result hits start no worker containers.
 
 ## Project configuration
 
@@ -104,8 +106,9 @@ absent in the source project and participate in identity. Relative leaf symlinks
 require their destination in the effective scope; absolute links and directory
 symlinks are unsupported. Explicit hidden glob components are supported.
 
-Keep pytest configuration in this pyproject's `[tool.pytest.ini_options]`; other
-pytest configuration files are rejected. Discovery honors configured `python_files`
+The default suite keeps pytest configuration in this pyproject's `[tool.pytest.ini_options]`.
+The next-alpha [independent suite declarations](scoped-execution.md) also support explicit
+pytest.ini, .pytest.ini, tox.ini and setup.cfg files. Discovery honors configured `python_files`
 and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
 truncates matching files. Only named `env` variables are forwarded and keyed, including
 presence. Controlled Python/pytest variables and `TELESCOPE_*` protocol names are
@@ -181,6 +184,10 @@ dependencies. If Docker cannot establish the required restrictions, report
 infrastructure failure without running an unrestricted substitute.
 
 ## Outcome accounting
+
+The next-alpha [result schema](result-schema.md) adds versioned complete/incomplete
+inventory accounting, opaque case identities and explicit unsupported-capability refusals.
+
 
 The controller reports current collected cases, selection, independent execution units,
 and collection work separately. Each selected case has one outcome: executed success,

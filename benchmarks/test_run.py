@@ -1,14 +1,13 @@
 """Behavioral checks for benchmark outcome validation and external accounting."""
 
 import copy
-import hashlib
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from run import measure, result_from_log, validate_result
+from run import measure, result_from_log, safe_case_id, validate_result
 
 
 def result():
@@ -26,7 +25,7 @@ def result():
         executed = node.startswith(("tests/test_scoring.py", "tests/test_broad.py"))
         units.append(
             {
-                "name": hashlib.sha256(node.encode()).hexdigest(),
+                "name": safe_case_id(node),
                 "file": node.split("::")[0],
                 "outcome": "executed" if executed else "reused",
                 "collected": 1,
@@ -44,6 +43,8 @@ def result():
             "failed": 0,
             "infrastructure_error": 0,
             "not-selected": 0,
+            "unsupported": 0,
+            "selected": 7,
         },
         "cases": {"collected": 7, "passed": 7, "failed": 0, "skipped": 0},
         "case_outcomes": {

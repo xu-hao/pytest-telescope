@@ -59,8 +59,9 @@ installation. Console-script metadata is discoverable, but no launchers are gene
 Wheel-specific files and arbitrary backend-generated resources are outside this format.
 
 Freeze source bytes before deriving generated files. The generated representation has a
-versioned identity and read-only normalized modes/timestamps, participates in the exact
-case key, and is mounted at `/metadata` only for that worker. The worker adds this
+versioned identity, files with mode `0444`, directories with mode `0755`, and epoch
+access/modification times. The worker mount is read-only. This representation participates
+in the exact case key and is mounted at `/metadata` only for that worker. The worker adds this
 metadata-only directory to Python's search path before pytest startup. All application
 imports still resolve through the declared `/project` snapshot and explicit pytest
 configuration. No application source enters the shared image or metadata tree.
@@ -192,6 +193,28 @@ under their own policy. Missing files or invalid syntax remain declaration error
 backend outages remain infrastructure errors. Runtime code that invokes an undeclared
 missing executable remains a test failure: telescope does not guess capabilities from
 arbitrary test bodies or retry under relaxed restrictions.
+
+## Result and privacy contract
+
+The [run result reference](result-schema.md) defines schema 1, complete/incomplete
+inventories, selected-case accounting and typed refusals for CLI and Python callers.
+Collection protocol 3 emits opaque case identities and hashed selector aliases. Raw
+parameter IDs remain transient inside the worker; requests, inventory records and public
+results use the opaque identity. Structural file names and configured suite names remain
+visible. Terminal cleanup failures preserve known accounting and prevent new cache
+publication.
+
+A project supports at most 64 suites and 100,000 combined actual cases across the
+selected suites. Concurrent fresh workers are capped at 32. Inventory storage retains
+at most `max(8, selected_suite_count)` records, bounded by 64 records and 64 MiB total.
+These are independent bounds: increasing suite count never raises the case, worker or
+aggregate inventory-byte limit.
+
+Static translation accepts at most 256 distributions, 1 MiB per source pyproject,
+4 MiB generated metadata per distribution, 16 MiB generated metadata total, and 4,096
+combined dependency/entry-point items per distribution. Optional extras are normalized
+and their environment markers combine with the extra condition. Metadata source symlinks
+and host-environment paths are not supported inputs.
 
 ## Qualification
 
