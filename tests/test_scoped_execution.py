@@ -419,6 +419,12 @@ def test_suite_preserves_ordinary_nodeid_root_and_working_directory(project, cwd
             "    assert Path.cwd() == Path(__file__).resolve().parents[1]\n"
             if cwd is None
             else f'    assert Path.cwd() == Path(__file__).resolve().parents[3] / "{cwd}"\n'
+        )
+        + (
+            '    if Path.cwd().is_relative_to("/project"):\n'
+            '        assert all(path.stat().st_mtime_ns == 0 for path in (Path.cwd(), Path.cwd().parent, Path("/project")))\n'
+            if cwd == "empty/work"
+            else ""
         ),
     )
     ordinary = subprocess.run(

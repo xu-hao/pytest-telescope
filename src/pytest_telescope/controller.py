@@ -40,8 +40,11 @@ def suite_directories(snapshot, suite):
     for name in (suite.root, suite.cwd):
         directory = snapshot / name
         directory.mkdir(parents=True, exist_ok=True)
-        while directory != snapshot:
+        while True:
             directory.chmod(0o755)
+            os.utime(directory, ns=(0, 0))
+            if directory == snapshot:
+                break
             directory = directory.parent
 
 
