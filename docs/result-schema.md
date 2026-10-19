@@ -24,10 +24,22 @@ fixtures only within one suite/module and an exactly equal expanded scope. `plan
 
 The equivalent Python entry point is `pytest_telescope.controller.run(root, *, force=False,
 no_cache=False, explain=False, cache_dir=None, timeout=60, arguments=(), budget=None,
-suites=None, execution_mode=None)`. `root` identifies the outer project directory. `budget` is a dictionary of
+suites=None, execution_mode=None, structural_files=None)`. `root` identifies the outer project directory. `budget` is a dictionary of
 `cpus`, `memory_bytes`, `processes`, and `scratch_bytes`; `suites` is a list of configured
 names. Arguments and node-selector paths remain relative to the outer project, including
 when a suite uses another working directory.
+
+`structural_files` optionally maps selected suite names to exact lists of project-relative
+test files for this invocation. It narrows membership before marker parsing and collection
+imports; ordinary node selectors do not. Unspecified suites retain configured membership,
+`{}` has no effect, and an explicit `[]` gives that suite an empty inventory. Lists are
+sorted, must contain no duplicates, and are limited to 4,096 existing regular Python test
+files each. Files must satisfy the suite's roots and patterns, with canonical paths and
+no symlinks. Unknown or unselected suite keys are errors. See the
+[structural narrowing contract](scoped-execution.md#invocation-only-structural-file-narrowing).
+The static Python preview `pytest_telescope.plan.make_plan(root, suites=None,
+structural_files=None)` applies the same validation without importing tests or contacting
+Docker. There is no corresponding CLI override flag.
 
 The Python API raises `DeclarationError` for invalid declarations and
 `UnsupportedCapability` for unqualified capabilities. `UnsupportedCapability` subclasses
@@ -43,7 +55,7 @@ A run result has `schema: 2` and `kind: "run"`. These fields distinguish it from
 | Field | Meaning |
 | --- | --- |
 | `status` | `passed`, `failed`, `infrastructure_error`, or `no_tests`. |
-| `inventory_complete` | Whether every selected suite produced a validated real inventory. |
+| `inventory_complete` | Whether every selected suite produced a validated real inventory within its effective structural file boundary. |
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
 | `execution` | Effective `mode` (`case` or `batch`) and versioned `profile` (`case-v1` or `batch-v1`). |
@@ -61,6 +73,11 @@ A run result has `schema: 2` and `kind: "run"`. These fields distinguish it from
 membership is available even before real collection succeeds. A suite not collected has
 `outcome: "not-started"`, `collected: null`, and a null inventory digest. Known files do
 not establish a complete case inventory: dynamic and parametrized items require pytest.
+With `structural_files`, these are the effective exact file lists. Files outside them
+produce neither case rows nor `not-selected` counts; a complete inventory does not claim
+coverage of those files. Adding a new file outside an explicit list does not add it to
+that invocation's inventory. The caller must expand the list or omit the override to
+discover it.
 
 Each `units` row has `suite`, `file`, opaque `case_id`, `selected`, `outcome`, `attempts`,
 counts, timings and bounded failure evidence. `name` is the same opaque case identity.
