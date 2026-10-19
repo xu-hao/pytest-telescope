@@ -29,6 +29,7 @@ def main() -> None:
         raise RuntimeError("expected exactly one built wheel")
     run("-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheels[0]))
     run("-m", "pytest", "-q", "--basetemp", str(output / "tests"))
+    run("-m", "unittest", "discover", "-s", "benchmarks", "-p", "test_*.py")
 
 
 if __name__ == "__main__":

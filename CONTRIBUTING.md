@@ -1,9 +1,11 @@
 # Contributing
 
-The current package supports static declaration planning only. See [local development](docs/development.md)
-for installation and the complete check command, and the
-[specification](docs/specification.md) for intended behavior.
+See [development](docs/development.md) for installation and checks, and the
+[execution contract](docs/specification.md) for the complete first release.
 
-Keep changes small enough to validate. Add behavioral regression tests for new
-behavior and update its documentation. Do not claim an isolation or reuse
-guarantee before a real worker test proves it. Contributions are licensed under the project's MIT License.
+Add behavioral regression tests and relevant documentation together. Real worker
+integration tests must establish isolation before it is claimed; skipped sandbox
+tests are not a qualifying result. Keep the synthetic benchmark reproducible and
+publish observed measurements, including overhead and unfavorable results.
+
+Contributions are licensed under the project's MIT License.

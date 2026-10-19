@@ -1,6 +1,7 @@
-"""Opt-in static planning with explicit refusal of unfinished isolation."""
+"""Optional pytest adapter; the dedicated CLI avoids host plugin startup."""
 
 import json
+import os
 
 import pytest
 
@@ -13,7 +14,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--telescope",
         action="store_true",
         default=False,
-        help="Request isolated execution (not implemented).",
+        help="Run declared targets through the isolated cache-first controller.",
     )
     group.addoption(
         "--telescope-plan",
@@ -26,12 +27,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 @pytest.hookimpl(tryfirst=True)
 def pytest_load_initial_conftests(early_config: pytest.Config) -> None:
     options = early_config.known_args_namespace
+    if options.telescope and options.telescope_plan:
+        raise pytest.UsageError("choose execution or plan-only mode, not both")
+    if options.telescope or options.telescope_plan:
+        requested = "--telescope" if options.telescope else "--telescope-plan"
+        if requested not in early_config.invocation_params.args or os.environ.get("PYTEST_ADDOPTS"):
+            raise pytest.UsageError(
+                "use an explicit command-line telescope flag without PYTEST_ADDOPTS; dedicated CLI supports declared pytest addopts"
+            )
     if options.telescope:
-        raise pytest.UsageError(
-            "pytest-telescope: isolated execution is not implemented; "
-            "no tests were collected or run by telescope. "
-            "Omit --telescope to use ordinary, unrestricted pytest."
-        )
+        from pytest_telescope.controller import main
+
+        forwarded = [arg for arg in early_config.invocation_params.args if arg != "--telescope"]
+        raise SystemExit(main(["run", "--", *forwarded]))
     if options.telescope_plan:
         try:
             plan = make_plan(early_config.invocation_params.dir)

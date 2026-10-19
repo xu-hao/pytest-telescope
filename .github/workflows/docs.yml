@@ -1,0 +1,36 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  request-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Request the latest Read the Docs build
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${READTHEDOCS_TOKEN}" ]]; then
+            echo "READTHEDOCS_TOKEN must be configured as a repository secret."
+            exit 1
+          fi
+          status=$(curl --silent --show-error --fail \
+            --connect-timeout 10 --max-time 30 \
+            --retry 2 --retry-delay 2 --retry-max-time 90 --retry-all-errors \
+            --request POST \
+            --header "Authorization: Token ${READTHEDOCS_TOKEN}" \
+            --output /dev/null --write-out '%{http_code}' \
+            https://app.readthedocs.org/api/v3/projects/pytest-telescope/versions/latest/builds/)
+          if [[ "${status}" != 2?? ]]; then
+            echo "Read the Docs returned HTTP ${status}; the build was not confirmed."
+            exit 1
+          fi
+          echo "Read the Docs accepted the build request; verify the hosted build separately."

@@ -45,12 +45,15 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/pytest-telescope
-    permissions:
-      id-token: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: distributions
           path: dist/
-      - name: Publish verified distributions with Trusted Publishing
+      - name: Publish verified distributions with the PyPI API token
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          repository-url: https://upload.pypi.org/legacy/
+          attestations: false

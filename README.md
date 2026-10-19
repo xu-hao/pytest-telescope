@@ -2,60 +2,100 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-**Pre-alpha: static declaration planning only; no sandbox or result cache.**
-The completed plugin will use one declaration of test inputs both to enforce file
-access and to decide which successful results can be reused.
+pytest-telescope uses one manifest to define which project files a test target can read
+and which changes invalidate its previous successful result. Each target is a fresh
+pytest session inside a Linux Docker container. Successful unchanged targets can reuse
+their recorded results; reused cases are reported separately from executed cases.
 
-## Try the scaffold
+**Alpha (0.1.0a1):** implemented and qualified on Linux with real Docker workers. The
+[benchmark](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md)
+records measured cold, warm, and selective reruns, including their overhead. The
+supported boundary and reuse assumptions are explicit; arbitrary Python determinism is
+not guaranteed.
 
-Use Python 3.11 or newer in a dedicated virtual environment. From a checkout:
+## Quickstart
+
+Requirements: Linux, Python 3.11+, and a working local Docker daemon exposed through a
+Unix socket, with permission to build and run Linux containers. Runtime preparation
+needs network access; test workers have no network. Install from this checkout in a
+virtual environment:
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install .
-python -m pytest
 ```
 
-The installed `pytest11` entry point is inactive unless requested. Ordinary pytest
-runs normally, with its usual filesystem access and outcomes. To prevent plugin
-loading entirely, use `python -m pytest -p no:telescope`.
+From your project's root, add a manifest to `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.pytest_telescope]
+test_roots = ["tests"]
+
+[tool.pytest_telescope.bundles.common]
+inputs = ["tests/conftest.py", "app/__init__.py"]
+
+[tool.pytest_telescope.targets.parser]
+tests = ["tests/test_parser.py"]
+inputs = ["app/parser.py", "tests/data/input.json"]
+bundles = ["common"]
+```
+
+Declare every fixture, helper, application module, and resource your target needs. Then
+prepare a clean runtime and execute:
 
 ```sh
-python -m pytest --telescope
+python -m pytest_telescope runtime
+python -m pytest_telescope plan
+python -m pytest_telescope run --explain -- -q
+python -m pytest_telescope run --explain -- -q
 ```
 
-This currently exits with pytest usage status **4**, before initial conftest and
-test-module imports. It does not execute an unrestricted substitute or claim a
-cache hit. Other installed pytest plugins still participate in normal pytest
-startup; this scaffold is not a security boundary.
-
-## What comes next
-
-The [specification](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md) describes the intended Linux sandbox,
-pre-import declarations, fresh workers, exact-snapshot reuse, and qualification
-requirements. These are requirements, not current guarantees. No sandbox backend
-has been selected or validated and no performance results are available.
-
-Start with [contributor instructions](https://github.com/xu-hao/pytest-telescope/blob/main/CONTRIBUTING.md). The
-[implementation epic](https://github.com/xu-hao/pytest-telescope/issues/3) tracks
-manifests, the first enforcement slice, selection/cache, lifecycle, and qualification
-in dependency order. [Publishing](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md) covers documentation hosting
-and the separate package release workflow.
-
-Licensed under the [MIT License](https://github.com/xu-hao/pytest-telescope/blob/main/LICENSE).
-
-## Plan declared inputs
-
-Add the target/bundle tables shown in the [planner specification](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md)
-to your project's `pyproject.toml`, then run from that project's root:
+The second identical run can reuse complete successful targets. A missing input is an
+error, not permission to expose more of your checkout. See the
+[specification](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md)
+for declarations, grouping, invalidation, limits, and troubleshooting, and the
+[synthetic
+example](https://github.com/xu-hao/pytest-telescope/blob/main/examples/analytics/README.md)
+for an executable three-target project.
 
 ```sh
-python -m pytest --telescope-plan
+python -m pytest_telescope run --force -- -q
+python -m pytest_telescope run --no-cache -- -q
+python -m pytest_telescope run --timeout 120 -- -k parser
 ```
 
-This validates explicit existing file paths and dependency bundles, prints a
-sorted JSON plan, and exits before importing conftest or test modules. It does not
-execute tests, enforce file access, freeze inputs, or reuse previous results.
-Unknown references, cycles, malformed declarations, and paths escaping the project
-root fail clearly. Globs and absent-input declarations are not supported yet.
+`--force` executes even when a successful record exists. `--no-cache` disables reuse and
+recording. For permanently non-cacheable targets, set `cache = false`. Clocks,
+randomness, environment, native state, and external services can invalidate assumptions
+about reuse: filesystem isolation does not prove arbitrary Python programs
+deterministic.
+
+## Runtime and pytest integration
+
+The runtime contains a pinned Python base image and wheel-installed dependencies, not
+your host virtual environment or an editable copy of your application. For additional
+third-party packages, pass a requirements file containing the complete transitive
+dependency closure as exact `name==version` wheel dependencies:
+
+```sh
+python -m pytest_telescope runtime --requirements requirements.txt
+```
+
+The dedicated CLI starts no host pytest session. `pytest --telescope` also routes to
+isolated workers, but other installed plugins may execute during host pytest startup.
+`pytest --telescope-plan` remains available for static planning. Ordinary pytest stays
+ordinary when telescope mode is disabled; use `-p no:telescope` to disable plugin
+loading entirely.
+
+See
+[development](https://github.com/xu-hao/pytest-telescope/blob/main/docs/development.md),
+[benchmark
+methodology](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md),
+and
+[publishing](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md).
+Licensed under the [MIT
+License](https://github.com/xu-hao/pytest-telescope/blob/main/LICENSE).

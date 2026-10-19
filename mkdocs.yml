@@ -5,5 +5,7 @@ strict: true
 nav:
   - Overview: index.md
   - Specification: specification.md
+  - Execution contract: execution-contract.md
+  - Benchmark: benchmark.md
   - Development: development.md
   - Publishing: publishing.md
