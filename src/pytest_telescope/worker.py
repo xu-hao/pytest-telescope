@@ -67,7 +67,7 @@ def main():
     suite_root = request["suite_root"]
 
     def case_identity(nodeid):
-        return identity(canonical([request["suite"], nodeid]))
+        return identity(canonical([request["suite"], canonical_nodeid(nodeid)]))
 
     def canonical_nodeid(value):
         filename, separator, suffix = value.partition("::")
@@ -226,7 +226,7 @@ def main():
             aliases.update(
                 (
                     filename,
-                    nodeid,
+                    canonical_nodeid(nodeid),
                     originalname,
                     canonical_nodeid(item.parent.nodeid) + "::" + originalname,
                 )
@@ -248,9 +248,6 @@ def main():
             }
 
         def pytest_itemcollected(self, item):
-            item._nodeid = project_file(item.path) + (
-                "::" + item.nodeid.split("::", 1)[1] if "::" in item.nodeid else ""
-            )
             row = self.describe(item)
             if item.nodeid in self.captured or len(self.captured) >= 100_000:
                 invalid("duplicate case identity or inventory limit exceeded")

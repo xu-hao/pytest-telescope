@@ -2,6 +2,9 @@
 
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -389,6 +392,63 @@ test_roots = ["tests/empty"]
     assert report["inventory_complete"] is True
     assert report["units"] == []
     assert report["collection"]["suites"][0]["files"] == []
+
+
+@pytest.mark.parametrize("cwd", [None, ".", "empty/work"])
+def test_suite_preserves_ordinary_nodeid_root_and_working_directory(project, cwd):
+    if cwd is not None:
+        (project / cwd).mkdir(parents=True, exist_ok=True)
+    put(
+        project,
+        "pyproject.toml",
+        '[tool.pytest_telescope.suites.core]\nroot="packages/core"\n'
+        'config="packages/core/pytest.ini"\ntest_roots=["packages/core/tests"]\n'
+        + (f'cwd="{cwd}"\n' if cwd is not None else ""),
+    )
+    put(project, "packages/core/pytest.ini", "[pytest]\n")
+    put(
+        project,
+        "packages/core/tests/test_context.py",
+        "import pytest\nfrom pathlib import Path\n"
+        "pytestmark = pytest.mark.telescope(inputs=[])\n"
+        '@pytest.mark.parametrize("value", [pytest.param(1, id="variant")])\n'
+        "def test_context(request, pytestconfig, value):\n"
+        '    assert request.node.nodeid == "tests/test_context.py::test_context[variant]"\n'
+        "    assert pytestconfig.rootpath == Path(__file__).resolve().parents[1]\n"
+        + (
+            "    assert Path.cwd() == Path(__file__).resolve().parents[1]\n"
+            if cwd is None
+            else f'    assert Path.cwd() == Path(__file__).resolve().parents[3] / "{cwd}"\n'
+        ),
+    )
+    ordinary = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "telescope",
+            "-q",
+            "-c",
+            str(project / "packages/core/pytest.ini"),
+            "--rootdir=" + str(project / "packages/core"),
+            str(project / "packages/core/tests/test_context.py"),
+        ],
+        cwd=project / (cwd if cwd is not None else "packages/core"),
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert ordinary.returncode == 0, ordinary.stdout + ordinary.stderr
+    nodeid = "packages/core/tests/test_context.py::test_context[variant]"
+    expected = hashlib.sha256(
+        json.dumps(["core", nodeid], separators=(",", ":")).encode()
+    ).hexdigest()
+    cold = passed(project, arguments=[nodeid])
+    assert cold["counts"]["executed"] == 1
+    assert cold["units"][0]["case_id"] == expected
+    assert passed(project, arguments=[nodeid])["counts"]["reused"] == 1
 
 
 def test_broad_metadata_and_explicit_empty_metadata_scope(project):

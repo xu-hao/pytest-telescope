@@ -94,7 +94,11 @@ plugins = []
 
 Suite names identify separate pytest invocations. Each has its own collection worker,
 working directory, actual pytest root directory, explicit configuration, options and
-plugin activation. Configuration supports pytest.ini, .pytest.ini, pyproject.toml,
+plugin activation. `root` sets pytest's root directory. Optional `cwd` sets the worker's
+working directory independently and defaults to `root`; both are existing directories
+relative to the outer project. For example, `root = "packages/core"` with `cwd = "."`
+preserves an invocation from the workspace directory with a nested pytest root.
+Configuration supports pytest.ini, .pytest.ini, pyproject.toml,
 tox.ini and setup.cfg; unsupported configuration syntax refuses. Suite configuration
 and applicable conftest files remain inputs. Narrow cases must declare conftest files
 and common collection support; their test source and both project and suite configuration
@@ -117,10 +121,12 @@ matching selected paths accounts its cases as unselected. Nonexistent selectors 
 across the complete configured inventory. A suite selector restricts the set of
 invocations explicitly; the summary names those configured invocation boundaries.
 
-The worker normalizes pytest root-relative node IDs using the actual item path, retaining
-class/function/parameter suffixes. Collection and execution use identical normalization;
+The worker hashes a project-relative representation of pytest's root-relative node IDs,
+retaining class/function/parameter suffixes without mutating pytest item node IDs.
+Fixtures observing `request.node.nodeid` retain ordinary suite-local pytest semantics.
+Collection and execution use identical normalization;
 marker origin paths and containing-file inventory digests stay project-relative. The
-suite identity, root, configuration bytes, arguments, plugins, structural membership,
+suite identity, root, working directory, configuration bytes, arguments, plugins, structural membership,
 collection inputs and runtime all key inventory reuse. Case keys cover the same suite
 contract and their own actual scopes. Additions/removals refresh the affected suite's
 inventory; unrelated suite resource changes do not invalidate narrow case results.

@@ -47,7 +47,7 @@ def test_cli_refusals_have_versioned_incomplete_inventory(
 
 @pytest.mark.parametrize("environment", [".venv", "custom-environment"])
 @pytest.mark.parametrize(
-    "input_kind", ["suite-root", "suite-config", "test-root-file", "distribution"]
+    "input_kind", ["suite-root", "suite-cwd", "suite-config", "test-root-file", "distribution"]
 )
 def test_automatic_inputs_cannot_include_host_environments(tmp_path, environment, input_kind):
     directory = tmp_path / environment
@@ -61,6 +61,8 @@ def test_automatic_inputs_cannot_include_host_environments(tmp_path, environment
     configuration = "[tool.pytest_telescope]\n"
     if input_kind == "suite-root":
         configuration += f'[tool.pytest_telescope.suites.private]\nroot="{environment}"\nconfig="pyproject.toml"\ntest_roots=["test_public.py"]\n'
+    elif input_kind == "suite-cwd":
+        configuration += f'[tool.pytest_telescope.suites.private]\nroot="."\ncwd="{environment}"\nconfig="pyproject.toml"\ntest_roots=["test_public.py"]\n'
     elif input_kind == "suite-config":
         configuration += f'[tool.pytest_telescope.suites.private]\nroot="."\nconfig="{environment}/pytest.ini"\ntest_roots=["test_public.py"]\n'
     elif input_kind == "test-root-file":

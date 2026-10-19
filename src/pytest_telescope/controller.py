@@ -35,6 +35,16 @@ from .model import (
 SCHEMA = 3
 
 
+def suite_directories(snapshot, suite):
+    """Create only structural directories needed for rootdir and cwd."""
+    for name in (suite.root, suite.cwd):
+        directory = snapshot / name
+        directory.mkdir(parents=True, exist_ok=True)
+        while directory != snapshot:
+            directory.chmod(0o755)
+            directory = directory.parent
+
+
 @contextlib.contextmanager
 def lock(path, timeout):
     if fcntl is None:
@@ -527,6 +537,8 @@ def run(
                         True,
                     )
                     records = snapshot(manifest, pool_unit, pool)
+                    for suite, _ in configured:
+                        suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
                     pool_is_broad = pool_unit.inputs == manifest.broad_inputs
                     frozen_scope_hashes = {}
@@ -602,9 +614,7 @@ def run(
                                     with runtime.invocation(manifest.root) as directory:
                                         frozen = directory / "project"
                                         materialize(pool, collection_unit, frozen, record_map)
-                                        # Empty roots still exist for an empty structural inventory.
-                                        (frozen / suite.root).mkdir(parents=True, exist_ok=True)
-                                        (frozen / suite.root).chmod(0o755)
+                                        suite_directories(frozen, suite)
                                         metadata = directory / "metadata"
                                         materialize_metadata(
                                             manifest.distributions,
@@ -635,6 +645,7 @@ def run(
                                             root=manifest.root,
                                             invocation_directory=directory,
                                             suite_root=suite.root,
+                                            suite_cwd=suite.cwd,
                                             suite=suite.name,
                                             metadata_directory=metadata,
                                             limits=resources.worker,
@@ -839,8 +850,7 @@ def run(
                                     else:
                                         frozen = directory / "project"
                                         materialize(pool, unit, frozen, record_map)
-                                        (frozen / suite.root).mkdir(parents=True, exist_ok=True)
-                                        (frozen / suite.root).chmod(0o755)
+                                        suite_directories(frozen, suite)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
@@ -869,6 +879,7 @@ def run(
                                         root=manifest.root,
                                         invocation_directory=directory,
                                         suite_root=suite.root,
+                                        suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
                                         limits=resources.worker,

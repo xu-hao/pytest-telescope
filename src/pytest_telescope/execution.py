@@ -62,6 +62,7 @@ def envelope(config, override=None):
 class Suite:
     name: str
     root: str
+    cwd: str
     config: str
     test_roots: list
     include: list
@@ -79,6 +80,7 @@ class Suite:
             for key in (
                 "name",
                 "root",
+                "cwd",
                 "config",
                 "test_roots",
                 "include",
@@ -161,6 +163,7 @@ def suites(root, spec, selected=None):
             "suite",
             {
                 "root",
+                "cwd",
                 "config",
                 "test_roots",
                 "include",
@@ -171,20 +174,27 @@ def suites(root, spec, selected=None):
             },
         )
         sequence(
-            [entry.get("root", "."), entry.get("config", "pyproject.toml")], "suite root/config"
+            [
+                entry.get("root", "."),
+                entry.get("cwd", entry.get("root", ".")),
+                entry.get("config", "pyproject.toml"),
+            ],
+            "suite root/cwd/config",
         )
-        directory, configuration = (
+        directory, cwd, configuration = (
             relative(entry.get("root", ".")),
+            relative(entry.get("cwd", entry.get("root", "."))),
             relative(entry.get("config", "pyproject.toml")),
         )
-        if excluded_namespace(root, directory) or excluded_namespace(root, configuration):
-            raise DeclarationError("suite root/config cannot expose excluded namespaces")
-        if (
-            not (root / directory).is_dir()
-            or (root / directory).is_symlink()
-            or not (root / directory).resolve().is_relative_to(root)
-        ):
-            raise DeclarationError("suite root must be an existing project directory")
+        if any(excluded_namespace(root, path) for path in (directory, cwd, configuration)):
+            raise DeclarationError("suite root/cwd/config cannot expose excluded namespaces")
+        for path in (directory, cwd):
+            if (
+                not (root / path).is_dir()
+                or (root / path).is_symlink()
+                or not (root / path).resolve().is_relative_to(root)
+            ):
+                raise DeclarationError("suite root/cwd must be existing project directories")
         for capability in sequence(entry.get("capabilities", []), "capabilities"):
             if capability not in {"python", "project:readonly", "scratch:noexec", "network:none"}:
                 raise UnsupportedCapability(
@@ -215,6 +225,7 @@ def suites(root, spec, selected=None):
             Suite(
                 name,
                 directory,
+                cwd,
                 configuration,
                 roots,
                 includes,
