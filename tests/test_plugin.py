@@ -81,12 +81,12 @@ def test_execution_request_refuses_before_imports(project, source):
             '[tool.pytest.ini_options]\naddopts = "--telescope"\n'
         )
     result = invoke(project, *args, extra_env=env)
-    assert result.returncode == 4
+    assert result.returncode == (3 if source == "argument" else 4)
     assert "error" in (result.stdout + result.stderr).lower()
     assert_not_imported(project)
 
 
-def manifest(project, extra=""):
+def manifest(project):
     (project / "data.json").write_text('{"answer": 42}')
     (project / "helper.py").write_text("VALUE = 42\n")
     (project / "pyproject.toml").write_text(
@@ -94,33 +94,44 @@ def manifest(project, extra=""):
         '[tool.pytest_telescope.bundles.base]\ninputs = ["helper.py"]\n'
         '[tool.pytest_telescope.bundles.common]\nbundles = ["base"]\n'
         'inputs = ["conftest.py", "helper.py"]\n'
-        '[tool.pytest_telescope.targets.subject]\ntests = ["test_subject.py"]\n'
-        'inputs = ["data.json"]\nbundles = ["common"]\n' + extra
+    )
+    source = project / "test_subject.py"
+    source.write_text(
+        "import pytest\n"
+        'pytestmark = pytest.mark.telescope(inputs=["data.json"], bundles=["common"])\n'
+        + source.read_text()
     )
 
 
 def test_plan_is_sorted_complete_and_does_not_import(project):
     forbid_imports(project)
     manifest(project)
+    (project / "test_another.py").write_text((project / "test_subject.py").read_text())
     result = invoke(project, "--telescope-plan")
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {
         "mode": "plan-only",
-        "inventory": ["test_subject.py"],
-        "targets": [
+        "case_inventory": "requires isolated pytest collection",
+        "inventory": ["test_another.py", "test_subject.py"],
+        "discovery_scope": "declared-union",
+        "inputs": [
+            "conftest.py",
+            "data.json",
+            "helper.py",
+            "pyproject.toml",
+            "test_another.py",
+            "test_subject.py",
+        ],
+        "declarations": [
             {
-                "name": "subject",
+                "file": name,
+                "line": 2,
+                "scope": [],
+                "inputs": ["conftest.py", "data.json", "helper.py"],
                 "absent": [],
                 "cache": True,
-                "tests": ["test_subject.py"],
-                "inputs": [
-                    "conftest.py",
-                    "data.json",
-                    "helper.py",
-                    "pyproject.toml",
-                    "test_subject.py",
-                ],
             }
+            for name in ["test_another.py", "test_subject.py"]
         ],
     }
     repeated = invoke(project, "--telescope-plan")
@@ -129,24 +140,33 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
     assert_not_imported(project)
 
 
+def test_unmarked_plan_includes_broad_project_without_imports(project):
+    forbid_imports(project)
+    (project / ".hidden.json").write_text("{}")
+    result = invoke(project, "--telescope-plan")
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["inventory"] == ["test_subject.py"]
+    assert plan["discovery_scope"] == "broad-potential"
+    assert plan["inputs"] == [".hidden.json", "conftest.py", "pyproject.toml", "test_subject.py"]
+    assert plan["declarations"] == []
+    assert_not_imported(project)
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ("[tool.pytest_telescope]\ntargets = {}", "1 to 256"),
-        ('[tool.pytest_telescope.targets.a]\ntests = "test_subject.py"', "nonempty strings"),
-        ("[tool.pytest_telescope.targets.a]\ntests = []", "must not be empty"),
+        ("[tool.pytest_telescope]\ntargets = {}", "migrate inputs"),
+        ('[tool.pytest_telescope.defaults]\ninputs = "test_subject.py"', "nonempty strings"),
+        ("[tool.pytest_telescope.defaults]\ncache = 1", "cache must be a boolean"),
+        ("[tool.pytest_telescope.defaults]\nunknown = 1", "unsupported fields"),
         (
-            '[tool.pytest_telescope.targets.a]\ntests = ["test_subject.py"]\nunknown = 1',
-            "unsupported fields",
-        ),
-        (
-            '[tool.pytest_telescope.targets.a]\ntests = ["test_subject.py"]\nbundles = ["missing"]',
+            '[tool.pytest_telescope.defaults]\nbundles = ["missing"]',
             "unknown dependency bundle",
         ),
         (
             '[tool.pytest_telescope.bundles.a]\nbundles = ["b"]\n'
-            '[tool.pytest_telescope.bundles.b]\nbundles = ["a"]\n'
-            '[tool.pytest_telescope.targets.a]\ntests = ["test_subject.py"]',
+            '[tool.pytest_telescope.bundles.b]\nbundles = ["a"]\n',
             "bundle cycle",
         ),
     ],
@@ -156,7 +176,7 @@ def test_invalid_declarations_refuse_before_imports(project, body, message):
     (project / "pyproject.toml").write_text(body)
     result = invoke(project, "--telescope-plan")
     assert result.returncode == 4
-    assert message in result.stderr or "conftest" in result.stderr
+    assert message in result.stderr
     assert_not_imported(project)
 
 
@@ -164,8 +184,7 @@ def test_invalid_declarations_refuse_before_imports(project, body, message):
 def test_invalid_paths_refuse_without_importing(project, path):
     forbid_imports(project)
     (project / "pyproject.toml").write_text(
-        '[tool.pytest_telescope.targets.a]\ntests = ["test_subject.py"]\n'
-        f"inputs = [{json.dumps(path)}]\n"
+        f"[tool.pytest_telescope.defaults]\ninputs = [{json.dumps(path)}]\n"
     )
     result = invoke(project, "--telescope-plan")
     assert result.returncode == 4
@@ -178,7 +197,7 @@ def test_escaping_symlink_refuses(project, tmp_path_factory):
     outside.write_text("{}")
     (project / "data.json").symlink_to(outside)
     (project / "pyproject.toml").write_text(
-        '[tool.pytest_telescope.targets.a]\ntests = ["test_subject.py"]\ninputs = ["data.json"]\n'
+        '[tool.pytest_telescope.defaults]\ninputs = ["data.json"]\n'
     )
     result = invoke(project, "--telescope-plan")
     assert result.returncode == 4
@@ -198,7 +217,7 @@ def test_execution_request_cannot_be_hidden_by_plan_flag(project):
 @pytest.mark.parametrize("kind", ["nul", "large", "deep", "count", "entries", "path_length"])
 def test_planner_limits_refuse_cleanly_before_imports(project, kind):
     forbid_imports(project)
-    body = '[tool.pytest_telescope.targets.a]\ntests = ["test_subject.py"]\n'
+    body = "[tool.pytest_telescope.defaults]\n"
     if kind == "nul":
         body += 'inputs = ["bad\\u0000name"]\n'
     elif kind == "large":
@@ -214,9 +233,31 @@ def test_planner_limits_refuse_cleanly_before_imports(project, kind):
     elif kind == "entries":
         body += "inputs = " + json.dumps(["test_subject.py"] * 4097)
     else:
-        body += "inputs = " + json.dumps(["a" * 513])
+        body += "inputs = " + json.dumps(["a" * 4097])
     (project / "pyproject.toml").write_text(body)
     result = invoke(project, "--telescope-plan")
     assert result.returncode == 4
+    assert "Traceback" not in result.stderr
+    assert_not_imported(project)
+
+
+def test_policy_marker_is_inert_during_ordinary_pytest(project):
+    (project / "test_subject.py").write_text(
+        "import pytest\n"
+        '@pytest.mark.telescope(inputs=["missing.json"], cache=False)\n'
+        "def test_normal():\n    assert True\n"
+    )
+    result = invoke(project, "--strict-markers")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+def test_fifo_declaration_refuses_cleanly_before_imports(project):
+    forbid_imports(project)
+    os.mkfifo(project / "pipe")
+    (project / "pyproject.toml").write_text('[tool.pytest_telescope.defaults]\ninputs = ["pipe"]\n')
+    result = invoke(project, "--telescope-plan")
+    assert result.returncode == 4
+    assert "regular files" in result.stderr
     assert "Traceback" not in result.stderr
     assert_not_imported(project)

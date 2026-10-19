@@ -1,8 +1,6 @@
-"""The same validated declaration inventory used by execution."""
+"""Static scope preview; actual case enumeration belongs to isolated collection."""
 
-import json
-
-from .model import DeclarationError, load
+from .model import DeclarationError, InfrastructureError, load, render_json
 
 PlanError = DeclarationError
 
@@ -11,18 +9,24 @@ def make_plan(root):
     manifest = load(root)
     result = {
         "mode": "plan-only",
+        "case_inventory": "requires isolated pytest collection",
         "inventory": manifest.inventory,
-        "targets": [
+        "discovery_scope": "broad-potential" if manifest.broad_inputs else "declared-union",
+        "inputs": manifest.units[0].inputs,
+        "declarations": [
             {
-                "name": unit.name,
-                "tests": unit.tests,
-                "inputs": unit.inputs,
-                "absent": unit.absent,
-                "cache": unit.cache,
+                "file": row["file"],
+                "line": row["position"][0],
+                "scope": row["owner"],
+                "inputs": manifest.declarations[row["id"]].inputs,
+                "absent": manifest.declarations[row["id"]].absent,
+                "cache": manifest.declarations[row["id"]].cache,
             }
-            for unit in manifest.units
+            for row in manifest.registry
         ],
     }
-    if len(json.dumps(result, indent=2, sort_keys=True).encode()) > 1_048_576:
-        raise DeclarationError("plan exceeds the 1 MiB output limit")
+    try:
+        render_json(result)
+    except InfrastructureError as exc:
+        raise DeclarationError(str(exc)) from exc
     return result

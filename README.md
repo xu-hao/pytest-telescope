@@ -11,13 +11,11 @@ import pytest
 
 
 @pytest.mark.telescope(inputs=["data/red.json"], bundles=["pricing"])
-def test_red():
-    ...
+def test_red(): ...
 
 
 @pytest.mark.telescope(inputs=["data/blue.json"], bundles=["pricing"])
-def test_blue():
-    ...
+def test_blue(): ...
 ```
 
 **Unmarked cases see and hash the whole project-file snapshot.** Literal `inputs` or

@@ -166,9 +166,12 @@ def docker_runtime(tmp_path_factory):
         runtime.command(["docker", "image", "rm", image])
 
 
-def run_worker(root, image, source, *, arguments=(), timeout=10, conftest=None):
-    with runtime.invocation(root) as directory:
-        project = directory / "project"
+def run_worker(root, image, source, *, arguments=(), timeout=10, conftest=None, registry=None):
+    import hashlib
+
+    registry = [] if registry is None else registry
+    with runtime.invocation(root) as pool:
+        project = pool / "project"
         project.mkdir(mode=0o755)
         project.chmod(0o755)
         (project / "test_subject.py").write_text(source)
@@ -176,14 +179,67 @@ def run_worker(root, image, source, *, arguments=(), timeout=10, conftest=None):
         if conftest:
             (project / "conftest.py").write_text(conftest)
             (project / "conftest.py").chmod(0o444)
-        return runtime.execute(
-            image,
-            project,
-            ["-p", "no:cacheprovider", "-s", *arguments, "test_subject.py"],
-            {},
-            timeout,
-            root=root,
-        )
+        args = ["-p", "no:cacheprovider", "-s", *arguments, "test_subject.py"]
+        with runtime.invocation(root) as directory:
+            inventory = runtime.execute(
+                image,
+                project,
+                args,
+                {},
+                max(timeout, 10),
+                root=root,
+                invocation_directory=directory,
+                request={"mode": "collection", "registry": registry, "selectors": []},
+            )
+        digest = hashlib.sha256(
+            json.dumps(
+                sorted(
+                    (
+                        {"nodeid": row["nodeid"], "origins": row["origins"]}
+                        for row in inventory["items"]
+                    ),
+                    key=lambda row: row["nodeid"],
+                ),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        results = []
+        if inventory["exit_code"] == 0:
+            for item in inventory["items"]:
+                if not item["selected"]:
+                    continue
+                with runtime.invocation(root) as directory:
+                    results.append(
+                        runtime.execute(
+                            image,
+                            project,
+                            args,
+                            {},
+                            timeout,
+                            root=root,
+                            invocation_directory=directory,
+                            request={
+                                "mode": "execution",
+                                "registry": registry,
+                                "case_nodeid": item["nodeid"],
+                                "expected_digest": digest,
+                            },
+                        )
+                    )
+        return {
+            "inventory": inventory,
+            "exit_code": max(
+                (result["exit_code"] for result in results), default=inventory["exit_code"]
+            ),
+            "complete": all(result["complete"] for result in results) and inventory["complete"],
+            "collected": sum(result["collected"] for result in results),
+            "passed": sum(result["passed"] for result in results),
+            "failed": sum(result["failed"] for result in results),
+            "skipped": sum(result["skipped"] for result in results),
+            "failures": inventory["failures"]
+            + [failure for result in results for failure in result["failures"]],
+        }
 
 
 def test_real_worker_outcomes_and_safe_failure_evidence(docker_runtime):
@@ -311,7 +367,14 @@ with runtime.invocation(root) as directory:
         "Path('/tmp/ready').touch(); time.sleep(30)\\n"
     )
     (project/'test_subject.py').chmod(0o444)
-    runtime.execute(sys.argv[3],project,['test_subject.py'],{},40,root=root)
+    import hashlib, json
+    nodeid = 'test_subject.py::test_wait'
+    digest = hashlib.sha256(json.dumps([{'nodeid': nodeid, 'origins': []}],
+                                      sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    runtime.execute(sys.argv[3],project,['test_subject.py'],{},40,root=root,
+                    invocation_directory=directory,
+                    request={'mode':'execution','registry':[],
+                             'case_nodeid':nodeid,'expected_digest':digest})
 """
     process = subprocess.Popen(
         [sys.executable, "-c", program, source_root, str(root), image],
@@ -505,9 +568,7 @@ def test_real_equivalent_checkouts_reuse_across_owned_runtime_images(tmp_path, d
     try:
         for root in roots:
             root.mkdir()
-        (roots[0] / "pyproject.toml").write_text(
-            '[tool.pytest_telescope.targets.subject]\ntests = ["test_subject.py"]\n'
-        )
+        (roots[0] / "pyproject.toml").write_text('[tool.pytest_telescope]\ntest_roots = ["."]\n')
         (roots[0] / "test_subject.py").write_text("def test_value(): assert 2 + 2 == 4\n")
         for name in ("pyproject.toml", "test_subject.py"):
             (roots[1] / name).write_bytes((roots[0] / name).read_bytes())
@@ -523,3 +584,159 @@ def test_real_equivalent_checkouts_reuse_across_owned_runtime_images(tmp_path, d
         for root, image in images:
             runtime._image_info(image, runtime._project(root))
             runtime.command(["docker", "image", "rm", image])
+
+
+def collection_record():
+    return {
+        "protocol": 2,
+        "kind": "collection",
+        "nonce": "a" * 32,
+        "exit_code": 0,
+        "complete": True,
+        "leaked_descendants": False,
+        "items": [
+            {
+                "nodeid": "test_subject.py::test_one",
+                "file": "test_subject.py",
+                "origins": [],
+                "aliases": ["test_subject.py", "test_subject.py::test_one"],
+                "selected": True,
+            }
+        ],
+        "worker_seconds": 0.1,
+        "cpu_seconds": 0.1,
+        "failures": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("protocol", True),
+        ("kind", "execution"),
+        ("complete", 1),
+        ("items", None),
+        ("exit_code", False),
+        ("cpu_seconds", float("nan")),
+    ],
+)
+def test_collection_protocol_rejects_malformed_records(field, value):
+    from pytest_telescope.result import validate_collection
+
+    result = collection_record()
+    result[field] = value
+    assert not validate_collection(result)
+
+
+def test_collection_protocol_separates_inventory_from_executed_success():
+    from pytest_telescope.result import validate_collection
+
+    result = collection_record()
+    assert validate_collection(result, nonce="a" * 32, successful_only=True)
+    result["passed"] = 1
+    assert not validate_collection(result)
+    result.pop("passed")
+    result["items"].append(copy.deepcopy(result["items"][0]))
+    assert not validate_collection(result)
+
+
+@pytest.mark.parametrize("pytest_version", ["8.3.5", "9.1.1"])
+def test_real_marker_inheritance_and_immutable_arguments_on_supported_pytest_versions(
+    tmp_path, monkeypatch, pytest_version
+):
+    from pytest_telescope.markers import discover
+
+    root = tmp_path / "runtime"
+    root.mkdir()
+    monkeypatch.setattr(
+        runtime,
+        "DEFAULT_REQUIREMENTS",
+        runtime.DEFAULT_REQUIREMENTS.replace("pytest==9.1.1", "pytest==" + pytest_version),
+    )
+    image = runtime.build_runtime(root)["image"]
+    source = """
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+class TestOrigins:
+    pytestmark = pytest.mark.telescope(inputs=[])
+    @pytest.mark.telescope(inputs=[])
+    @pytest.mark.parametrize('value', [
+        pytest.param(1, marks=pytest.mark.telescope(inputs=[]), id='one'),
+        pytest.param(2, marks=pytest.mark.telescope(inputs=[]), id='two'),
+    ])
+    def test_origin(self, value):
+        assert value in (1, 2)
+"""
+    try:
+        registry, _ = discover(source.encode(), "test_subject.py")
+        result = run_worker(root, image, source, registry=registry)
+        assert result["exit_code"] == 0
+        assert result["passed"] == 2
+        assert all(len(row["origins"]) == 4 for row in result["inventory"]["items"])
+        mutation = (
+            "\nTestOrigins.test_origin.pytestmark[-1].kwargs['inputs'].append('undeclared.txt')\n"
+        )
+        registry, _ = discover((source + mutation).encode(), "test_subject.py")
+        rejected = run_worker(root, image, source + mutation, registry=registry)
+        assert rejected["exit_code"] == 4
+        assert rejected["passed"] == 0
+    finally:
+        runtime._image_info(image, runtime._project(root))
+        runtime.command(["docker", "image", "rm", image])
+
+
+def test_execution_success_cannot_claim_zero_cases():
+    from pytest_telescope.result import validate_result
+
+    empty = good_result()
+    empty.update(collected=0, passed=0, case_ids=[])
+    assert not validate_result(empty, successful_only=True)
+
+
+def test_fresh_execution_result_must_match_requested_case(tmp_path, monkeypatch):
+    from pytest_telescope.model import InfrastructureError
+
+    def wrong_case(directory, data, args, timeout, **kwargs):
+        result = good_result()
+        result.update(nonce=data["token"], case_ids=["c" * 64])
+        return 0, b"TELESCOPE_RESULT " + json.dumps(result).encode() + b"\n"
+
+    monkeypatch.setattr(runtime, "_owned_capture", wrong_case)
+    monkeypatch.setattr(runtime, "_stop_container", lambda data: None)
+    with runtime.invocation(tmp_path) as directory:
+        project = directory / "project"
+        project.mkdir()
+        with pytest.raises(InfrastructureError, match="identity"):
+            runtime.execute(
+                "sha256:" + "a" * 64,
+                project,
+                ["test_subject.py"],
+                {},
+                10,
+                root=tmp_path,
+                invocation_directory=directory,
+                request={
+                    "mode": "execution",
+                    "registry": [],
+                    "case_nodeid": "test_subject.py::test_requested",
+                    "expected_digest": "a" * 64,
+                },
+            )
+
+
+def test_execution_case_binding_accepts_only_the_expected_case():
+    from pytest_telescope.result import validate_result
+
+    record = good_result()
+    assert validate_result(record, successful_only=True, case_id="b" * 64)
+    assert not validate_result(record, successful_only=True, case_id="c" * 64)
+
+
+def test_collection_node_identity_must_belong_to_reported_file():
+    from pytest_telescope.result import validate_collection
+
+    result = collection_record()
+    item = result["items"][0]
+    item["file"] = "other_subject.py"
+    item["aliases"] = sorted([item["file"], item["nodeid"]])
+    assert not validate_collection(result)

@@ -8,30 +8,34 @@ from pytest_telescope.model import DeclarationError, load, regular_bytes
 
 
 def declaration(root, tests):
-    import json
-
     for name in tests:
-        (root / name).write_text("raise AssertionError('must not import')\n")
-    (root / "pyproject.toml").write_text(
-        "[tool.pytest_telescope.targets.group]\ntests = " + json.dumps(tests) + "\n"
-    )
+        (root / name).write_text(
+            "import pytest\n"
+            "pytestmark = pytest.mark.telescope(inputs=[])\n"
+            "raise AssertionError('must not import')\n"
+        )
+    (root / "pyproject.toml").write_text("[tool.pytest_telescope.defaults]\n")
 
 
-def test_explicit_group_file_order_is_preserved(tmp_path):
+def test_automatic_file_discovery_is_sorted_and_complete(tmp_path):
     declaration(tmp_path, ["test_second.py", "test_first.py"])
-    assert load(tmp_path).units[0].tests == ["test_second.py", "test_first.py"]
+    manifest = load(tmp_path)
+    assert manifest.inventory == ["test_first.py", "test_second.py"]
+    assert manifest.units[0].tests == manifest.inventory
+    (tmp_path / "test_added.py").write_text("raise AssertionError('must not import')\n")
+    assert load(tmp_path).inventory == ["test_added.py", "test_first.py", "test_second.py"]
 
 
-def test_custom_python_files_inventory_cannot_hide_new_test(tmp_path):
+def test_custom_python_files_inventory_includes_new_test(tmp_path):
     declaration(tmp_path, ["check_one.py"])
     config = tmp_path / "pyproject.toml"
     config.write_text(
         '[tool.pytest.ini_options]\npython_files = ["check_*.py"]\n' + config.read_text()
     )
-    load(tmp_path)
+    assert load(tmp_path).inventory == ["check_one.py"]
     (tmp_path / "check_new.py").write_text("raise AssertionError('must not import')\n")
-    with pytest.raises(DeclarationError, match="undeclared"):
-        load(tmp_path)
+    (tmp_path / "test_ordinary.py").write_text("raise AssertionError('must not import')\n")
+    assert load(tmp_path).inventory == ["check_new.py", "check_one.py"]
 
 
 @pytest.mark.parametrize("filename", ["pytest.ini", "tox.ini", "setup.cfg", ".pytest.ini"])
@@ -107,4 +111,22 @@ def test_explicit_hidden_directory_glob_declares_actual_resources(tmp_path):
     (assets / "value.json").write_text("{}")
     config = tmp_path / "pyproject.toml"
     config.write_text(config.read_text() + 'inputs = ["data/.assets/*.json"]\n')
-    assert "data/.assets/value.json" in load(tmp_path).units[0].inputs
+    (assets / "unrelated.txt").write_text("not selected by the glob")
+    inputs = load(tmp_path).units[0].inputs
+    assert "data/.assets/value.json" in inputs
+    assert "data/.assets/unrelated.txt" not in inputs
+
+
+def test_total_discovery_budget_bounds_repeated_nonmatching_globs(tmp_path):
+    import json
+
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+    for number in range(100):
+        (tmp_path / f"data-{number}.txt").write_text("x")
+    patterns = [f"missing-{number}*" for number in range(2000)]
+    (tmp_path / "test_subject.py").write_text(
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=" + json.dumps(patterns) + ")\n"
+        "def test_subject(): pass\n"
+    )
+    with pytest.raises(DeclarationError, match="discovery"):
+        load(tmp_path)

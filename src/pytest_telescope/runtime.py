@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .model import DeclarationError, InfrastructureError
-from .result import validate_result
+from .result import validate_collection, validate_result
 
 try:
     import fcntl
@@ -29,6 +29,7 @@ DEFAULT_REQUIREMENTS = (
     "pytest==9.1.1\niniconfig==2.3.0\npackaging==25.0\npluggy==1.6.0\npygments==2.19.2\n"
 )
 MAX_OUTPUT = 1_048_576
+MAX_COLLECTION = 67_108_864
 MAX_IMAGE_SIZE = 2_147_483_648
 MAX_IMAGES = 4
 MAX_INVOCATIONS = 64
@@ -58,7 +59,7 @@ def _terminate(process):
             stream.close()
 
 
-def _capture(args, timeout, *, merged=False, on_start=None):
+def _capture(args, timeout, *, merged=False, on_start=None, limit=MAX_OUTPUT):
     """Bound both streams while running; never retain unrestricted stderr."""
     process = None
     output = bytearray()
@@ -83,13 +84,15 @@ def _capture(args, timeout, *, merged=False, on_start=None):
                 if remaining <= 0:
                     raise InfrastructureError("container command deadline exceeded")
                 for key, _ in selector.select(min(0.1, remaining)):
-                    chunk = os.read(key.fileobj.fileno(), min(65536, MAX_OUTPUT + 1 - total))
+                    chunk = os.read(key.fileobj.fileno(), min(65536, limit + 1 - total))
                     if not chunk:
                         selector.unregister(key.fileobj)
                         continue
                     total += len(chunk)
-                    if total > MAX_OUTPUT:
-                        raise InfrastructureError("container command output exceeded 1 MiB")
+                    if total > limit:
+                        raise InfrastructureError(
+                            f"container command output exceeded {limit // 1_048_576} MiB"
+                        )
                     if key.data:
                         output.extend(chunk)
         code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
@@ -568,7 +571,7 @@ def identity(root):
         ) from exc
 
 
-def _owned_capture(directory, data, args, timeout, *, merged=False):
+def _owned_capture(directory, data, args, timeout, *, merged=False, limit=MAX_OUTPUT):
     data["cleaned"] = False
     _durable(directory / "journal.json", data)
 
@@ -576,15 +579,24 @@ def _owned_capture(directory, data, args, timeout, *, merged=False):
         data["client_pid"], data["client_start"] = process.pid, _start_identity(process.pid)
         _durable(directory / "journal.json", data)
 
-    return _capture(args, timeout, merged=merged, on_start=started)
+    return _capture(args, timeout, merged=merged, on_start=started, limit=limit)
 
 
-def execute(image, snapshot, args, environment, timeout, *, root=None):
+def execute(image, snapshot, args, environment, timeout, *, root, request, invocation_directory):
     snapshot = Path(snapshot).resolve()
-    root = Path(root).resolve() if root is not None else snapshot.parents[3]
-    directory = snapshot.parent
-    if directory.parent != _state(root) / "scratch" or snapshot.name != "project":
+    root = Path(root).resolve()
+    directory = Path(invocation_directory).resolve()
+    if (
+        directory.parent != _state(root) / "scratch"
+        or snapshot.parent.parent != _state(root) / "scratch"
+        or snapshot.name != "project"
+    ):
         raise InfrastructureError("worker requires an owned invocation snapshot")
+    frozen_owner = _journal(root, snapshot.parent)
+    if frozen_owner["owner_pid"] != os.getpid() or frozen_owner["owner_start"] != _start_identity(
+        os.getpid()
+    ):
+        raise InfrastructureError("snapshot pool is not owned by this controller")
     data = _journal(root, directory)
     if data["owner_pid"] != os.getpid() or data["owner_start"] != _start_identity(os.getpid()):
         raise InfrastructureError("worker invocation is not owned by this controller")
@@ -601,7 +613,28 @@ def execute(image, snapshot, args, environment, timeout, *, root=None):
         path.write_text(text)
         path.chmod(0o444)
         os.utime(path, ns=(0, 0))
-    request = json.dumps({"args": args, "nonce": data["token"]}, separators=(",", ":"))
+    if type(request) is not dict or request.get("mode") not in ("collection", "execution"):
+        raise InfrastructureError("worker requires an explicit request protocol")
+    required = (
+        {"mode", "registry", "selectors"}
+        if request["mode"] == "collection"
+        else {"mode", "registry", "case_nodeid", "expected_digest"}
+    )
+    if set(request) != required or type(request["registry"]) is not list:
+        raise InfrastructureError("worker request fields do not match its protocol")
+    request_path = control / "request.json"
+    budget = 0
+    with request_path.open("wb") as stream:
+        for chunk in json.JSONEncoder(separators=(",", ":"), allow_nan=False).iterencode(
+            {**request, "args": args, "nonce": data["token"]}
+        ):
+            encoded = chunk.encode()
+            budget += len(encoded)
+            if budget > MAX_COLLECTION:
+                raise InfrastructureError("worker request exceeded 64 MiB")
+            stream.write(encoded)
+    request_path.chmod(0o444)
+    os.utime(request_path, ns=(0, 0))
     cmd = [
         "docker",
         "run",
@@ -634,7 +667,9 @@ def execute(image, snapshot, args, environment, timeout, *, root=None):
         "--mount",
         f"type=bind,src={snapshot},dst=/project,readonly",
         "--env",
-        "TELESCOPE_REQUEST=" + request,
+        "TELESCOPE_REQUEST=/telescope-request.json",
+        "--mount",
+        f"type=bind,src={request_path},dst=/telescope-request.json,readonly",
     ]
     for filename in ("hosts", "hostname", "resolv.conf"):
         cmd += ["--mount", f"type=bind,src={control / filename},dst=/etc/{filename},readonly"]
@@ -643,7 +678,14 @@ def execute(image, snapshot, args, environment, timeout, *, root=None):
             cmd += ["--env", key + "=" + value]
     cmd += ["--entrypoint", "python", image, "-I", "/opt/telescope/worker.py"]
     try:
-        code, output = _owned_capture(directory, data, cmd, timeout, merged=True)
+        code, output = _owned_capture(
+            directory,
+            data,
+            cmd,
+            timeout,
+            merged=True,
+            limit=MAX_COLLECTION if request["mode"] == "collection" else MAX_OUTPUT,
+        )
         reports = [
             line[len(b"TELESCOPE_RESULT ") :]
             for line in output.splitlines()
@@ -654,7 +696,16 @@ def execute(image, snapshot, args, environment, timeout, *, root=None):
         result = json.loads(reports[0])
         if type(result) is dict and result.get("leaked_descendants") is True:
             raise InfrastructureError("worker left descendant processes running")
-        if not validate_result(result, nonce=data["token"]) or result["exit_code"] != code:
+        valid = (
+            validate_collection(result, nonce=data["token"])
+            if request["mode"] == "collection"
+            else validate_result(
+                result,
+                nonce=data["token"],
+                case_id=hashlib.sha256(request["case_nodeid"].encode()).hexdigest(),
+            )
+        )
+        if not valid or result["exit_code"] != code:
             raise InfrastructureError("worker result identity, completion or exit status mismatch")
         return result
     except (OSError, ValueError, TypeError) as exc:

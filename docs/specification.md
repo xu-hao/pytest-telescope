@@ -12,8 +12,7 @@ import pytest
 
 
 @pytest.mark.telescope(inputs=["data/red.json"], bundles=["pricing"])
-def test_red():
-    ...
+def test_red(): ...
 ```
 
 | Marker field | Meaning |
@@ -45,8 +44,7 @@ pytestmark = pytest.mark.telescope(bundles=["application"])
 @pytest.mark.telescope(inputs=["data/common.json"])
 class TestParsing:
     @pytest.mark.telescope(inputs=["data/valid.json"])
-    def test_valid(self):
-        ...
+    def test_valid(self): ...
 ```
 
 This case receives the application bundle, common JSON, valid JSON, project defaults,

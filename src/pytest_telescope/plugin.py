@@ -1,10 +1,10 @@
 """Optional pytest adapter; the dedicated CLI avoids host plugin startup."""
 
-import json
 import os
 
 import pytest
 
+from pytest_telescope.model import render_json
 from pytest_telescope.plan import PlanError, make_plan
 
 
@@ -14,13 +14,20 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--telescope",
         action="store_true",
         default=False,
-        help="Run declared targets through the isolated cache-first controller.",
+        help="Run individual pytest cases through the isolated cache-first controller.",
     )
     group.addoption(
         "--telescope-plan",
         action="store_true",
         default=False,
         help="Validate declarations and print a static plan without importing tests.",
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "telescope(inputs=(), bundles=(), absent=(), cache=True): declared case inputs and reuse policy",
     )
 
 
@@ -45,5 +52,5 @@ def pytest_load_initial_conftests(early_config: pytest.Config) -> None:
             plan = make_plan(early_config.invocation_params.dir)
         except PlanError as exc:
             raise pytest.UsageError(f"pytest-telescope: {exc}") from exc
-        print(json.dumps(plan, indent=2, sort_keys=True))
+        print(render_json(plan))
         raise SystemExit(0)
