@@ -1,10 +1,10 @@
 {
-  "started_at": "2026-10-19T07:44:57.111821+00:00",
+  "started_at": "2026-10-19T08:10:23.147568+00:00",
   "versions": {
     "python": "3.12.3",
     "runner": {
       "version": "0.1.0a2",
-      "implementation": "ff861454f8cd57f6efead99bdfe1ce1f1d7c195d02172d98b31ca8db2765c7e3"
+      "implementation": "aa2c7163a04d8a6885e002f7fafb61e74237052481d1d2beac240333f8578019"
     },
     "pytest": "9.1.1",
     "pytest_telescope": "0.1.0a2"
@@ -33,8 +33,8 @@
       "phases": [
         {
           "phase": "ordinary",
-          "elapsed_seconds": 0.9150026899878867,
-          "controller_cpu_seconds": 0.9117279999999999,
+          "elapsed_seconds": 0.9650979519938119,
+          "controller_cpu_seconds": 0.922345,
           "cases": {
             "collected": 7,
             "passed": 7,
@@ -45,10 +45,10 @@
         },
         {
           "phase": "runtime_setup",
-          "elapsed_seconds": 0.4144067569868639,
-          "controller_cpu_seconds": 0.2615289999999999,
+          "elapsed_seconds": 0.8650921510125045,
+          "controller_cpu_seconds": 0.270313,
           "runtime": {
-            "image": "sha256:2af91025f39113e8eb90ae8b1baae61e650926c233596de5460e45f28f3ca346",
+            "image": "sha256:adf57641b0f386d5485a8344ae1caa6536273abab7ec06094d50566f047e2382",
             "policy": "docker-nonroot-ro-none-v2",
             "recipe": "beb8d1c88f83cb029021d107cad601b9a47fd468154781e2f84178224a5d1e66",
             "worker": "d5be3684b300c831294ef2b4bfc8a9d71ad3131fd637353695e11022927ed95a"
@@ -56,8 +56,8 @@
         },
         {
           "phase": "cold",
-          "elapsed_seconds": 4.87105104100192,
-          "controller_cpu_seconds": 0.9887869999999999,
+          "elapsed_seconds": 6.674039189005271,
+          "controller_cpu_seconds": 1.018553,
           "counts": {
             "executed": 7,
             "failed": 0,
@@ -79,16 +79,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.205445,
+            "cpu_seconds": 0.20552,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07927891999133863
+            "worker_seconds": 0.08062691500526853
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.185089,
+              "cpu_seconds": 0.20491499999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -97,12 +97,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06522731701261364
+              "worker_seconds": 0.07522453099954873
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.502819,
+              "cpu_seconds": 0.510698,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -111,12 +111,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3798526909959037
+              "worker_seconds": 0.3857122940244153
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.193963,
+              "cpu_seconds": 0.200496,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -125,12 +125,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06958052900154144
+              "worker_seconds": 0.07394963401020505
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.18462699999999999,
+              "cpu_seconds": 0.19647399999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -139,12 +139,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06612887297524139
+              "worker_seconds": 0.07008074299665168
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.495131,
+              "cpu_seconds": 0.525395,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -153,12 +153,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3745821909978986
+              "worker_seconds": 0.39946239098208025
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.506151,
+              "cpu_seconds": 0.514016,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -167,12 +167,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.38344681198941544
+              "worker_seconds": 0.3889595800137613
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.186007,
+              "cpu_seconds": 0.196174,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -181,23 +181,23 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06586689100367948
+              "worker_seconds": 0.07112575299106538
             }
           ],
-          "setup_seconds": 0.5239002660091501,
+          "setup_seconds": 0.6858980109973345,
           "executed_cases": 7,
           "reused_cases": 0,
-          "worker_cpu_seconds": 2.459232,
-          "collection_cpu_seconds": 0.205445,
-          "case_cpu_seconds": 2.253787,
-          "collection_worker_seconds": 0.07927891999133863,
-          "non_session_elapsed_seconds": 3.3870868170342874,
-          "controller_reported_elapsed_seconds": 4.795743616006803
+          "worker_cpu_seconds": 2.5536879999999997,
+          "collection_cpu_seconds": 0.20552,
+          "case_cpu_seconds": 2.348168,
+          "collection_worker_seconds": 0.08062691500526853,
+          "non_session_elapsed_seconds": 5.128897347982274,
+          "controller_reported_elapsed_seconds": 6.583467361022485
         },
         {
           "phase": "warm",
-          "elapsed_seconds": 0.16397812901414,
-          "controller_cpu_seconds": 0.19129699999999983,
+          "elapsed_seconds": 0.21403718399233185,
+          "controller_cpu_seconds": 0.1978979999999998,
           "counts": {
             "executed": 0,
             "failed": 0,
@@ -324,20 +324,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.10114133101888001,
+          "setup_seconds": 0.11292724599479698,
           "executed_cases": 0,
           "reused_cases": 7,
           "worker_cpu_seconds": 0,
           "collection_cpu_seconds": 0,
           "case_cpu_seconds": 0,
           "collection_worker_seconds": 0,
-          "non_session_elapsed_seconds": 0.16397812901414,
-          "controller_reported_elapsed_seconds": 0.1067551750165876
+          "non_session_elapsed_seconds": 0.21403718399233185,
+          "controller_reported_elapsed_seconds": 0.12286055900040083
         },
         {
           "phase": "narrow_code",
-          "elapsed_seconds": 2.367557471996406,
-          "controller_cpu_seconds": 0.5827719999999997,
+          "elapsed_seconds": 3.3190545530233067,
+          "controller_cpu_seconds": 0.6002259999999998,
           "counts": {
             "executed": 3,
             "failed": 0,
@@ -359,16 +359,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.196849,
+            "cpu_seconds": 0.20831999999999998,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07615488101146184
+            "worker_seconds": 0.08221884301747195
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.194329,
+              "cpu_seconds": 0.193865,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -377,7 +377,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07021962100407109
+              "worker_seconds": 0.06853142700856552
             },
             {
               "attempts": 0,
@@ -438,7 +438,7 @@
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.5052209999999999,
+              "cpu_seconds": 0.514293,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -447,12 +447,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.38220509298844263
+              "worker_seconds": 0.3869263999804389
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19124999999999998,
+              "cpu_seconds": 0.18957799999999997,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -461,23 +461,23 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07044458400923759
+              "worker_seconds": 0.0678591969772242
             }
           ],
-          "setup_seconds": 0.48042844398878515,
+          "setup_seconds": 0.7181699279753957,
           "executed_cases": 3,
           "reused_cases": 4,
-          "worker_cpu_seconds": 1.0876489999999999,
-          "collection_cpu_seconds": 0.196849,
-          "case_cpu_seconds": 0.8907999999999999,
-          "collection_worker_seconds": 0.07615488101146184,
-          "non_session_elapsed_seconds": 1.768533292983193,
-          "controller_reported_elapsed_seconds": 2.2665963010222185
+          "worker_cpu_seconds": 1.106056,
+          "collection_cpu_seconds": 0.20831999999999998,
+          "case_cpu_seconds": 0.897736,
+          "collection_worker_seconds": 0.08221884301747195,
+          "non_session_elapsed_seconds": 2.713518686039606,
+          "controller_reported_elapsed_seconds": 3.235377848992357
         },
         {
           "phase": "resource",
-          "elapsed_seconds": 2.3175222509889863,
-          "controller_cpu_seconds": 0.5826950000000005,
+          "elapsed_seconds": 3.3190550089930184,
+          "controller_cpu_seconds": 0.5959020000000004,
           "counts": {
             "executed": 3,
             "failed": 0,
@@ -499,16 +499,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.199242,
+            "cpu_seconds": 0.206007,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07646327000111341
+            "worker_seconds": 0.0786488050071057
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.20787699999999998,
+              "cpu_seconds": 0.194964,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -517,12 +517,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06807084800675511
+              "worker_seconds": 0.06913137700757943
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.487131,
+              "cpu_seconds": 0.499534,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -531,12 +531,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3689758160035126
+              "worker_seconds": 0.3667602490168065
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.190797,
+              "cpu_seconds": 0.198368,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -545,7 +545,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06764337301137857
+              "worker_seconds": 0.07154077099403366
             },
             {
               "attempts": 0,
@@ -604,20 +604,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.4819050499936566,
+          "setup_seconds": 0.6990319579781499,
           "executed_cases": 3,
           "reused_cases": 4,
-          "worker_cpu_seconds": 1.0850469999999999,
-          "collection_cpu_seconds": 0.199242,
-          "case_cpu_seconds": 0.885805,
-          "collection_worker_seconds": 0.07646327000111341,
-          "non_session_elapsed_seconds": 1.7363689439662267,
-          "controller_reported_elapsed_seconds": 2.2418388689984567
+          "worker_cpu_seconds": 1.098873,
+          "collection_cpu_seconds": 0.206007,
+          "case_cpu_seconds": 0.8928659999999999,
+          "collection_worker_seconds": 0.0786488050071057,
+          "non_session_elapsed_seconds": 2.732973806967493,
+          "controller_reported_elapsed_seconds": 3.2156002119882032
         },
         {
           "phase": "case_resource",
-          "elapsed_seconds": 1.916649791994132,
-          "controller_cpu_seconds": 0.48462999999999967,
+          "elapsed_seconds": 2.6181657850102056,
+          "controller_cpu_seconds": 0.4922550000000001,
           "counts": {
             "executed": 2,
             "failed": 0,
@@ -639,16 +639,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.20917499999999997,
+            "cpu_seconds": 0.201317,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.0797531110001728
+            "worker_seconds": 0.07815336700878106
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.192273,
+              "cpu_seconds": 0.200244,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -657,7 +657,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06800356999156065
+              "worker_seconds": 0.07052868098253384
             },
             {
               "attempts": 0,
@@ -718,7 +718,7 @@
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.517741,
+              "cpu_seconds": 0.521372,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -727,7 +727,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3933330999861937
+              "worker_seconds": 0.39745836801012047
             },
             {
               "attempts": 0,
@@ -744,20 +744,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.49646213100641035,
+          "setup_seconds": 0.7096285590087064,
           "executed_cases": 2,
           "reused_cases": 5,
-          "worker_cpu_seconds": 0.919189,
-          "collection_cpu_seconds": 0.20917499999999997,
-          "case_cpu_seconds": 0.710014,
-          "collection_worker_seconds": 0.0797531110001728,
-          "non_session_elapsed_seconds": 1.375560011016205,
-          "controller_reported_elapsed_seconds": 1.8395316499809269
+          "worker_cpu_seconds": 0.9229329999999999,
+          "collection_cpu_seconds": 0.201317,
+          "case_cpu_seconds": 0.7216159999999999,
+          "collection_worker_seconds": 0.07815336700878106,
+          "non_session_elapsed_seconds": 2.07202536900877,
+          "controller_reported_elapsed_seconds": 2.5430160950054415
         },
         {
           "phase": "shared_input",
-          "elapsed_seconds": 4.821297850023257,
-          "controller_cpu_seconds": 0.9871890000000001,
+          "elapsed_seconds": 6.674157089000801,
+          "controller_cpu_seconds": 1.0237540000000005,
           "counts": {
             "executed": 7,
             "failed": 0,
@@ -779,16 +779,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.20041799999999999,
+            "cpu_seconds": 0.201985,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07917278801323846
+            "worker_seconds": 0.07796774597954936
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.18001299999999998,
+              "cpu_seconds": 0.20642,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -797,12 +797,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06339396600378677
+              "worker_seconds": 0.07625400202232413
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.511425,
+              "cpu_seconds": 0.509678,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -811,12 +811,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.38880856399191543
+              "worker_seconds": 0.38567890200647525
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.195134,
+              "cpu_seconds": 0.19457999999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -825,12 +825,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06966641900362447
+              "worker_seconds": 0.06958373499219306
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19369799999999998,
+              "cpu_seconds": 0.196451,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -839,12 +839,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07021278599859215
+              "worker_seconds": 0.07193359898519702
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.493766,
+              "cpu_seconds": 0.5031749999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -853,12 +853,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3728830539912451
+              "worker_seconds": 0.38198818199452944
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.510435,
+              "cpu_seconds": 0.531585,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -867,12 +867,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3871903670078609
+              "worker_seconds": 0.40603638999164104
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19547599999999998,
+              "cpu_seconds": 0.19752399999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -881,18 +881,18 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07125371598522179
+              "worker_seconds": 0.07045516700600274
             }
           ],
-          "setup_seconds": 0.5008872360049281,
+          "setup_seconds": 0.6854274200159125,
           "executed_cases": 7,
           "reused_cases": 0,
-          "worker_cpu_seconds": 2.480365,
-          "collection_cpu_seconds": 0.20041799999999999,
-          "case_cpu_seconds": 2.279947,
-          "collection_worker_seconds": 0.07917278801323846,
-          "non_session_elapsed_seconds": 3.3187161900277715,
-          "controller_reported_elapsed_seconds": 4.7600044880236965
+          "worker_cpu_seconds": 2.541398,
+          "collection_cpu_seconds": 0.201985,
+          "case_cpu_seconds": 2.339413,
+          "collection_worker_seconds": 0.07796774597954936,
+          "non_session_elapsed_seconds": 5.134259366022889,
+          "controller_reported_elapsed_seconds": 6.581015506992117
         }
       ]
     },
@@ -901,8 +901,8 @@
       "phases": [
         {
           "phase": "ordinary",
-          "elapsed_seconds": 0.9155813239922281,
-          "controller_cpu_seconds": 0.9127810000000007,
+          "elapsed_seconds": 0.9651137869805098,
+          "controller_cpu_seconds": 0.942669,
           "cases": {
             "collected": 7,
             "passed": 7,
@@ -913,10 +913,10 @@
         },
         {
           "phase": "runtime_setup",
-          "elapsed_seconds": 0.4143744199827779,
-          "controller_cpu_seconds": 0.26388200000000017,
+          "elapsed_seconds": 0.8149142710026354,
+          "controller_cpu_seconds": 0.2671260000000002,
           "runtime": {
-            "image": "sha256:ff569b62fdc79523862e71918ef0552e76b1adbd1c80efe8d9aefddaeb437403",
+            "image": "sha256:a4c2d1c73209dfdea4e1f1ab129fc4362eefccd8bb38d15655a57405f43b981d",
             "policy": "docker-nonroot-ro-none-v2",
             "recipe": "beb8d1c88f83cb029021d107cad601b9a47fd468154781e2f84178224a5d1e66",
             "worker": "d5be3684b300c831294ef2b4bfc8a9d71ad3131fd637353695e11022927ed95a"
@@ -924,8 +924,8 @@
         },
         {
           "phase": "cold",
-          "elapsed_seconds": 4.920895508985268,
-          "controller_cpu_seconds": 0.9958849999999995,
+          "elapsed_seconds": 6.523584639973706,
+          "controller_cpu_seconds": 1.0058320000000003,
           "counts": {
             "executed": 7,
             "failed": 0,
@@ -947,16 +947,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.205316,
+            "cpu_seconds": 0.20504299999999998,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07830166799249128
+            "worker_seconds": 0.0788064009975642
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19009500000000001,
+              "cpu_seconds": 0.204556,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -965,12 +965,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06710465700598434
+              "worker_seconds": 0.0742463179922197
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.5078779999999999,
+              "cpu_seconds": 0.5006929999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -979,12 +979,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3840990860189777
+              "worker_seconds": 0.3749757810146548
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.190245,
+              "cpu_seconds": 0.20466399999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -993,12 +993,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.0683826619933825
+              "worker_seconds": 0.07293470198055729
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.189764,
+              "cpu_seconds": 0.19683199999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -1007,12 +1007,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06789401301648468
+              "worker_seconds": 0.0705137439945247
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.519098,
+              "cpu_seconds": 0.500193,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -1021,12 +1021,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.39467637898633257
+              "worker_seconds": 0.3764884560077917
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.51066,
+              "cpu_seconds": 0.5126149999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1035,12 +1035,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.38598455299506895
+              "worker_seconds": 0.38594269900931977
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.201072,
+              "cpu_seconds": 0.20210699999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1049,23 +1049,23 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07408447097986937
+              "worker_seconds": 0.07208584898035042
             }
           ],
-          "setup_seconds": 0.49822588099050336,
+          "setup_seconds": 0.6899034910020418,
           "executed_cases": 7,
           "reused_cases": 0,
-          "worker_cpu_seconds": 2.514128,
-          "collection_cpu_seconds": 0.205316,
-          "case_cpu_seconds": 2.308812,
-          "collection_worker_seconds": 0.07830166799249128,
-          "non_session_elapsed_seconds": 3.4003680199966766,
-          "controller_reported_elapsed_seconds": 4.851936049992219
+          "worker_cpu_seconds": 2.5267029999999995,
+          "collection_cpu_seconds": 0.20504299999999998,
+          "case_cpu_seconds": 2.3216599999999996,
+          "collection_worker_seconds": 0.0788064009975642,
+          "non_session_elapsed_seconds": 5.017590689996723,
+          "controller_reported_elapsed_seconds": 6.4248461049865
         },
         {
           "phase": "warm",
-          "elapsed_seconds": 0.21396977599943057,
-          "controller_cpu_seconds": 0.20051500000000022,
+          "elapsed_seconds": 0.2141502180020325,
+          "controller_cpu_seconds": 0.19901900000000028,
           "counts": {
             "executed": 0,
             "failed": 0,
@@ -1192,20 +1192,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.11128975401516072,
+          "setup_seconds": 0.11315192299662158,
           "executed_cases": 0,
           "reused_cases": 7,
           "worker_cpu_seconds": 0,
           "collection_cpu_seconds": 0,
           "case_cpu_seconds": 0,
           "collection_worker_seconds": 0,
-          "non_session_elapsed_seconds": 0.21396977599943057,
-          "controller_reported_elapsed_seconds": 0.11708409801940434
+          "non_session_elapsed_seconds": 0.2141502180020325,
+          "controller_reported_elapsed_seconds": 0.1230964949936606
         },
         {
           "phase": "narrow_code",
-          "elapsed_seconds": 2.4173460400197655,
-          "controller_cpu_seconds": 0.5944050000000001,
+          "elapsed_seconds": 3.269562091998523,
+          "controller_cpu_seconds": 0.6047660000000019,
           "counts": {
             "executed": 3,
             "failed": 0,
@@ -1227,16 +1227,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.204925,
+            "cpu_seconds": 0.19866799999999998,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.0789423230162356
+            "worker_seconds": 0.07646039099199697
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.206493,
+              "cpu_seconds": 0.19171699999999997,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -1245,7 +1245,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07429432700155303
+              "worker_seconds": 0.06763904800754972
             },
             {
               "attempts": 0,
@@ -1306,7 +1306,7 @@
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.519821,
+              "cpu_seconds": 0.508216,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1315,12 +1315,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.39330059799249284
+              "worker_seconds": 0.3842679070075974
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19324,
+              "cpu_seconds": 0.233028,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1329,23 +1329,23 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07052725701942109
+              "worker_seconds": 0.10743272100808099
             }
           ],
-          "setup_seconds": 0.5080208679719362,
+          "setup_seconds": 0.7192137959937099,
           "executed_cases": 3,
           "reused_cases": 4,
-          "worker_cpu_seconds": 1.124479,
-          "collection_cpu_seconds": 0.204925,
-          "case_cpu_seconds": 0.919554,
-          "collection_worker_seconds": 0.0789423230162356,
-          "non_session_elapsed_seconds": 1.800281534990063,
-          "controller_reported_elapsed_seconds": 2.3413998360047117
+          "worker_cpu_seconds": 1.131629,
+          "collection_cpu_seconds": 0.19866799999999998,
+          "case_cpu_seconds": 0.9329609999999999,
+          "collection_worker_seconds": 0.07646039099199697,
+          "non_session_elapsed_seconds": 2.633762024983298,
+          "controller_reported_elapsed_seconds": 3.1884482719760854
         },
         {
           "phase": "resource",
-          "elapsed_seconds": 2.3671010679972824,
-          "controller_cpu_seconds": 0.582476999999999,
+          "elapsed_seconds": 3.1189191910088994,
+          "controller_cpu_seconds": 0.6017450000000002,
           "counts": {
             "executed": 3,
             "failed": 0,
@@ -1367,16 +1367,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.19966499999999998,
+            "cpu_seconds": 0.215347,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07643786899279803
+            "worker_seconds": 0.0857579680159688
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.190627,
+              "cpu_seconds": 0.192638,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -1385,12 +1385,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06598840601509437
+              "worker_seconds": 0.0674284890119452
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.5013679999999999,
+              "cpu_seconds": 0.49788,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -1399,12 +1399,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3799771040212363
+              "worker_seconds": 0.37318076999508776
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.190959,
+              "cpu_seconds": 0.19753199999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -1413,7 +1413,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06840676697902381
+              "worker_seconds": 0.06935862899990752
             },
             {
               "attempts": 0,
@@ -1472,20 +1472,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.501886221987661,
+          "setup_seconds": 0.6710918289900292,
           "executed_cases": 3,
           "reused_cases": 4,
-          "worker_cpu_seconds": 1.0826189999999998,
-          "collection_cpu_seconds": 0.19966499999999998,
-          "case_cpu_seconds": 0.8829539999999999,
-          "collection_worker_seconds": 0.07643786899279803,
-          "non_session_elapsed_seconds": 1.7762909219891299,
-          "controller_reported_elapsed_seconds": 2.2717860759876203
+          "worker_cpu_seconds": 1.103397,
+          "collection_cpu_seconds": 0.215347,
+          "case_cpu_seconds": 0.88805,
+          "collection_worker_seconds": 0.0857579680159688,
+          "non_session_elapsed_seconds": 2.52319333498599,
+          "controller_reported_elapsed_seconds": 3.054268941981718
         },
         {
           "phase": "case_resource",
-          "elapsed_seconds": 1.8665420570177957,
-          "controller_cpu_seconds": 0.4877560000000001,
+          "elapsed_seconds": 2.517945517989574,
+          "controller_cpu_seconds": 0.49414700000000034,
           "counts": {
             "executed": 2,
             "failed": 0,
@@ -1507,16 +1507,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.202984,
+            "cpu_seconds": 0.20332499999999998,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07823263600585051
+            "worker_seconds": 0.07871840699226595
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19091899999999998,
+              "cpu_seconds": 0.196521,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -1525,7 +1525,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06738639599643648
+              "worker_seconds": 0.07107180001912639
             },
             {
               "attempts": 0,
@@ -1586,7 +1586,7 @@
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.511548,
+              "cpu_seconds": 0.501681,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1595,7 +1595,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3889696740079671
+              "worker_seconds": 0.37743831300758757
             },
             {
               "attempts": 0,
@@ -1612,20 +1612,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.48550963299931027,
+          "setup_seconds": 0.7243089060066268,
           "executed_cases": 2,
           "reused_cases": 5,
-          "worker_cpu_seconds": 0.905451,
-          "collection_cpu_seconds": 0.202984,
-          "case_cpu_seconds": 0.702467,
-          "collection_worker_seconds": 0.07823263600585051,
-          "non_session_elapsed_seconds": 1.3319533510075416,
-          "controller_reported_elapsed_seconds": 1.7968752699962351
+          "worker_cpu_seconds": 0.901527,
+          "collection_cpu_seconds": 0.20332499999999998,
+          "case_cpu_seconds": 0.698202,
+          "collection_worker_seconds": 0.07871840699226595,
+          "non_session_elapsed_seconds": 1.990716997970594,
+          "controller_reported_elapsed_seconds": 2.457959331019083
         },
         {
           "phase": "shared_input",
-          "elapsed_seconds": 4.921190890978323,
-          "controller_cpu_seconds": 0.991384,
+          "elapsed_seconds": 6.42373773700092,
+          "controller_cpu_seconds": 1.0124240000000002,
           "counts": {
             "executed": 7,
             "failed": 0,
@@ -1647,16 +1647,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.21561999999999998,
+            "cpu_seconds": 0.206233,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.08408211302594282
+            "worker_seconds": 0.07865477501763962
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.191462,
+              "cpu_seconds": 0.198962,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -1665,12 +1665,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06747031401027925
+              "worker_seconds": 0.07107420297688805
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.5382359999999999,
+              "cpu_seconds": 0.518973,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -1679,12 +1679,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.41008567801327445
+              "worker_seconds": 0.3923311679973267
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.20004099999999997,
+              "cpu_seconds": 0.195926,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -1693,12 +1693,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07242356400820427
+              "worker_seconds": 0.07169909100048244
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19447399999999998,
+              "cpu_seconds": 0.199559,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -1707,12 +1707,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07034836002276279
+              "worker_seconds": 0.07203530499828048
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.511308,
+              "cpu_seconds": 0.517913,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -1721,12 +1721,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3879964090010617
+              "worker_seconds": 0.39205572198261507
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.525646,
+              "cpu_seconds": 0.514308,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1735,12 +1735,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.40180000400869176
+              "worker_seconds": 0.3907500350032933
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19819099999999998,
+              "cpu_seconds": 0.193929,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1749,18 +1749,18 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.0718673369847238
+              "worker_seconds": 0.06987298402236775
             }
           ],
-          "setup_seconds": 0.4981779989611823,
+          "setup_seconds": 0.6747818359872326,
           "executed_cases": 7,
           "reused_cases": 0,
-          "worker_cpu_seconds": 2.5749779999999998,
-          "collection_cpu_seconds": 0.21561999999999998,
-          "case_cpu_seconds": 2.359358,
-          "collection_worker_seconds": 0.08408211302594282,
-          "non_session_elapsed_seconds": 3.3551171119033825,
-          "controller_reported_elapsed_seconds": 4.848390626983019
+          "worker_cpu_seconds": 2.5458030000000003,
+          "collection_cpu_seconds": 0.206233,
+          "case_cpu_seconds": 2.33957,
+          "collection_worker_seconds": 0.07865477501763962,
+          "non_session_elapsed_seconds": 4.8852644540020265,
+          "controller_reported_elapsed_seconds": 6.3412763820088
         }
       ]
     },
@@ -1769,8 +1769,8 @@
       "phases": [
         {
           "phase": "ordinary",
-          "elapsed_seconds": 0.9659469939942937,
-          "controller_cpu_seconds": 0.9569039999999998,
+          "elapsed_seconds": 0.9649988840101287,
+          "controller_cpu_seconds": 0.9432890000000005,
           "cases": {
             "collected": 7,
             "passed": 7,
@@ -1781,10 +1781,10 @@
         },
         {
           "phase": "runtime_setup",
-          "elapsed_seconds": 0.41447661598795094,
-          "controller_cpu_seconds": 0.2536550000000002,
+          "elapsed_seconds": 0.7649133529921528,
+          "controller_cpu_seconds": 0.25826800000000105,
           "runtime": {
-            "image": "sha256:02d327cf91d7413b2dc6e339f3d91f95f7b90e90e7e13bb15472b8d142b1f8c4",
+            "image": "sha256:eb63708bb8a83819133ecee24bead9273c30ee2e071c48210c209ef3b1e41b49",
             "policy": "docker-nonroot-ro-none-v2",
             "recipe": "beb8d1c88f83cb029021d107cad601b9a47fd468154781e2f84178224a5d1e66",
             "worker": "d5be3684b300c831294ef2b4bfc8a9d71ad3131fd637353695e11022927ed95a"
@@ -1792,8 +1792,8 @@
         },
         {
           "phase": "cold",
-          "elapsed_seconds": 4.871509697986767,
-          "controller_cpu_seconds": 0.9852810000000005,
+          "elapsed_seconds": 6.424112114997115,
+          "controller_cpu_seconds": 1.0205959999999985,
           "counts": {
             "executed": 7,
             "failed": 0,
@@ -1815,16 +1815,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.211779,
+            "cpu_seconds": 0.204126,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.08548073499696329
+            "worker_seconds": 0.07928290401468985
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.18351800000000001,
+              "cpu_seconds": 0.19736399999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -1833,12 +1833,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06433162701432593
+              "worker_seconds": 0.07010459899902344
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.505559,
+              "cpu_seconds": 0.514814,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -1847,12 +1847,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.38370179501362145
+              "worker_seconds": 0.3912545589846559
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19187300000000002,
+              "cpu_seconds": 0.19536699999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -1861,12 +1861,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06890298801590689
+              "worker_seconds": 0.07003588799852878
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19039899999999998,
+              "cpu_seconds": 0.18476399999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -1875,12 +1875,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06771757800015621
+              "worker_seconds": 0.06616949499584734
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.509034,
+              "cpu_seconds": 0.500008,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -1889,12 +1889,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3858761249866802
+              "worker_seconds": 0.38071635298547335
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.5093,
+              "cpu_seconds": 0.522043,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1903,12 +1903,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3855347220087424
+              "worker_seconds": 0.39443914699950255
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19653299999999999,
+              "cpu_seconds": 0.18544,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -1917,23 +1917,23 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07062265498097986
+              "worker_seconds": 0.06599212801665999
             }
           ],
-          "setup_seconds": 0.4955749440123327,
+          "setup_seconds": 0.6613170479831751,
           "executed_cases": 7,
           "reused_cases": 0,
-          "worker_cpu_seconds": 2.497995,
-          "collection_cpu_seconds": 0.211779,
-          "case_cpu_seconds": 2.286216,
-          "collection_worker_seconds": 0.08548073499696329,
-          "non_session_elapsed_seconds": 3.3593414729693905,
-          "controller_reported_elapsed_seconds": 4.78250671600108
+          "worker_cpu_seconds": 2.503926,
+          "collection_cpu_seconds": 0.204126,
+          "case_cpu_seconds": 2.2998,
+          "collection_worker_seconds": 0.07928290401468985,
+          "non_session_elapsed_seconds": 4.906117042002734,
+          "controller_reported_elapsed_seconds": 6.355421373998979
         },
         {
           "phase": "warm",
-          "elapsed_seconds": 0.164061983989086,
-          "controller_cpu_seconds": 0.1893749999999983,
+          "elapsed_seconds": 0.21399186499183998,
+          "controller_cpu_seconds": 0.1949070000000015,
           "counts": {
             "executed": 0,
             "failed": 0,
@@ -2060,20 +2060,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.10178227900178172,
+          "setup_seconds": 0.11239471199223772,
           "executed_cases": 0,
           "reused_cases": 7,
           "worker_cpu_seconds": 0,
           "collection_cpu_seconds": 0,
           "case_cpu_seconds": 0,
           "collection_worker_seconds": 0,
-          "non_session_elapsed_seconds": 0.164061983989086,
-          "controller_reported_elapsed_seconds": 0.10744509499636479
+          "non_session_elapsed_seconds": 0.21399186499183998,
+          "controller_reported_elapsed_seconds": 0.1346406869997736
         },
         {
           "phase": "narrow_code",
-          "elapsed_seconds": 2.3176828979921993,
-          "controller_cpu_seconds": 0.5790470000000001,
+          "elapsed_seconds": 3.218768324004486,
+          "controller_cpu_seconds": 0.6084779999999999,
           "counts": {
             "executed": 3,
             "failed": 0,
@@ -2095,16 +2095,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.21034799999999998,
+            "cpu_seconds": 0.198018,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.0805988670035731
+            "worker_seconds": 0.07606299500912428
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.188101,
+              "cpu_seconds": 0.194189,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -2113,7 +2113,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06708648899802938
+              "worker_seconds": 0.06997188398963772
             },
             {
               "attempts": 0,
@@ -2174,7 +2174,7 @@
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.503747,
+              "cpu_seconds": 0.534392,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -2183,12 +2183,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3790487340011168
+              "worker_seconds": 0.40863915099180304
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.188087,
+              "cpu_seconds": 0.19331399999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -2197,23 +2197,23 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06759313301881775
+              "worker_seconds": 0.06915189800201915
             }
           ],
-          "setup_seconds": 0.495586300996365,
+          "setup_seconds": 0.6989371649979148,
           "executed_cases": 3,
           "reused_cases": 4,
-          "worker_cpu_seconds": 1.090283,
-          "collection_cpu_seconds": 0.21034799999999998,
-          "case_cpu_seconds": 0.8799349999999999,
-          "collection_worker_seconds": 0.0805988670035731,
-          "non_session_elapsed_seconds": 1.7233556749706622,
-          "controller_reported_elapsed_seconds": 2.261515194986714
+          "worker_cpu_seconds": 1.119913,
+          "collection_cpu_seconds": 0.198018,
+          "case_cpu_seconds": 0.9218949999999999,
+          "collection_worker_seconds": 0.07606299500912428,
+          "non_session_elapsed_seconds": 2.594942396011902,
+          "controller_reported_elapsed_seconds": 3.116278057015734
         },
         {
           "phase": "resource",
-          "elapsed_seconds": 2.3176732400024775,
-          "controller_cpu_seconds": 0.573792000000001,
+          "elapsed_seconds": 3.1186894919956103,
+          "controller_cpu_seconds": 0.5983390000000002,
           "counts": {
             "executed": 3,
             "failed": 0,
@@ -2235,16 +2235,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.202716,
+            "cpu_seconds": 0.200245,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07839838598738424
+            "worker_seconds": 0.07775739900534973
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.191097,
+              "cpu_seconds": 0.190987,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -2253,12 +2253,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06768976498278789
+              "worker_seconds": 0.06665872200392187
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.48864199999999997,
+              "cpu_seconds": 0.49064699999999994,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -2267,12 +2267,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.3697524490125943
+              "worker_seconds": 0.36780941000324674
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19252599999999997,
+              "cpu_seconds": 0.19029,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -2281,7 +2281,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06907403998775408
+              "worker_seconds": 0.06834537399117835
             },
             {
               "attempts": 0,
@@ -2340,20 +2340,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.48154782102210447,
+          "setup_seconds": 0.6887856179964729,
           "executed_cases": 3,
           "reused_cases": 4,
-          "worker_cpu_seconds": 1.074981,
-          "collection_cpu_seconds": 0.202716,
-          "case_cpu_seconds": 0.872265,
-          "collection_worker_seconds": 0.07839838598738424,
-          "non_session_elapsed_seconds": 1.732758600031957,
-          "controller_reported_elapsed_seconds": 2.239716384006897
+          "worker_cpu_seconds": 1.072169,
+          "collection_cpu_seconds": 0.200245,
+          "case_cpu_seconds": 0.8719239999999999,
+          "collection_worker_seconds": 0.07775739900534973,
+          "non_session_elapsed_seconds": 2.5381185869919136,
+          "controller_reported_elapsed_seconds": 3.0617550020106137
         },
         {
           "phase": "case_resource",
-          "elapsed_seconds": 1.86665518998052,
-          "controller_cpu_seconds": 0.48214999999999897,
+          "elapsed_seconds": 2.4674959650146775,
+          "controller_cpu_seconds": 0.4823239999999984,
           "counts": {
             "executed": 2,
             "failed": 0,
@@ -2375,16 +2375,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.20356399999999997,
+            "cpu_seconds": 0.20377099999999998,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.07901661901269108
+            "worker_seconds": 0.07846524301567115
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19019799999999998,
+              "cpu_seconds": 0.190786,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -2393,7 +2393,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06663517002016306
+              "worker_seconds": 0.06692594598280266
             },
             {
               "attempts": 0,
@@ -2454,7 +2454,7 @@
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.48837699999999995,
+              "cpu_seconds": 0.524565,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -2463,7 +2463,7 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.37182858400046825
+              "worker_seconds": 0.39532197898370214
             },
             {
               "attempts": 0,
@@ -2480,20 +2480,20 @@
               "worker_seconds": 0
             }
           ],
-          "setup_seconds": 0.48619971197331324,
+          "setup_seconds": 0.688909831980709,
           "executed_cases": 2,
           "reused_cases": 5,
-          "worker_cpu_seconds": 0.8821389999999999,
-          "collection_cpu_seconds": 0.20356399999999997,
-          "case_cpu_seconds": 0.6785749999999999,
-          "collection_worker_seconds": 0.07901661901269108,
-          "non_session_elapsed_seconds": 1.3491748169471975,
-          "controller_reported_elapsed_seconds": 1.788808261975646
+          "worker_cpu_seconds": 0.919122,
+          "collection_cpu_seconds": 0.20377099999999998,
+          "case_cpu_seconds": 0.715351,
+          "collection_worker_seconds": 0.07846524301567115,
+          "non_session_elapsed_seconds": 1.9267827970325015,
+          "controller_reported_elapsed_seconds": 2.402618063002592
         },
         {
           "phase": "shared_input",
-          "elapsed_seconds": 4.82118315200205,
-          "controller_cpu_seconds": 0.9902189999999989,
+          "elapsed_seconds": 6.474125774024287,
+          "controller_cpu_seconds": 1.0049110000000008,
           "counts": {
             "executed": 7,
             "failed": 0,
@@ -2515,16 +2515,16 @@
           },
           "collection": {
             "collected": 7,
-            "cpu_seconds": 0.206268,
+            "cpu_seconds": 0.20188899999999999,
             "failures": [],
             "outcome": "executed",
-            "worker_seconds": 0.0812270579917822
+            "worker_seconds": 0.07757339900126681
           },
           "units": [
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19200499999999998,
+              "cpu_seconds": 0.197423,
               "failed": 0,
               "failures": [],
               "file": "tests/test_broad.py",
@@ -2533,12 +2533,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06735589599702507
+              "worker_seconds": 0.07054627200704999
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.48968199999999995,
+              "cpu_seconds": 0.5168079999999999,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -2547,12 +2547,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.37271321698790416
+              "worker_seconds": 0.39374824200058356
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.19223099999999999,
+              "cpu_seconds": 0.191798,
               "failed": 0,
               "failures": [],
               "file": "tests/test_demand.py",
@@ -2561,12 +2561,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.06876991700846702
+              "worker_seconds": 0.06913133300258778
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.20066399999999998,
+              "cpu_seconds": 0.19550499999999998,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -2575,12 +2575,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07183701798203401
+              "worker_seconds": 0.0736616569920443
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.49517,
+              "cpu_seconds": 0.49736199999999997,
               "failed": 0,
               "failures": [],
               "file": "tests/test_pricing.py",
@@ -2589,12 +2589,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.37445866997586563
+              "worker_seconds": 0.37317908398108557
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.499004,
+              "cpu_seconds": 0.521841,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -2603,12 +2603,12 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.37627757200971246
+              "worker_seconds": 0.39589036101824604
             },
             {
               "attempts": 1,
               "collected": 1,
-              "cpu_seconds": 0.195751,
+              "cpu_seconds": 0.203045,
               "failed": 0,
               "failures": [],
               "file": "tests/test_scoring.py",
@@ -2617,90 +2617,90 @@
               "passed": 1,
               "reason": "no valid successful case record",
               "skipped": 0,
-              "worker_seconds": 0.07005386298988014
+              "worker_seconds": 0.06952183699468151
             }
           ],
-          "setup_seconds": 0.49105312302708626,
+          "setup_seconds": 0.6887608069810085,
           "executed_cases": 7,
           "reused_cases": 0,
-          "worker_cpu_seconds": 2.470775,
-          "collection_cpu_seconds": 0.206268,
-          "case_cpu_seconds": 2.264507,
-          "collection_worker_seconds": 0.0812270579917822,
-          "non_session_elapsed_seconds": 3.338489941059379,
-          "controller_reported_elapsed_seconds": 4.750429573003203
+          "worker_cpu_seconds": 2.525671,
+          "collection_cpu_seconds": 0.20188899999999999,
+          "case_cpu_seconds": 2.323782,
+          "collection_worker_seconds": 0.07757339900126681,
+          "non_session_elapsed_seconds": 4.950873589026742,
+          "controller_reported_elapsed_seconds": 6.399198748986237
         }
       ]
     }
   ],
   "medians": {
     "ordinary": {
-      "controller_cpu_seconds": 0.9127810000000007,
-      "elapsed_seconds": 0.9155813239922281
+      "controller_cpu_seconds": 0.942669,
+      "elapsed_seconds": 0.9650979519938119
     },
     "runtime_setup": {
-      "controller_cpu_seconds": 0.2615289999999999,
-      "elapsed_seconds": 0.4144067569868639
+      "controller_cpu_seconds": 0.2671260000000002,
+      "elapsed_seconds": 0.8149142710026354
     },
     "cold": {
-      "case_cpu_seconds": 2.286216,
-      "collection_cpu_seconds": 0.205445,
-      "collection_worker_seconds": 0.07927891999133863,
-      "controller_cpu_seconds": 0.9887869999999999,
-      "elapsed_seconds": 4.871509697986767,
-      "non_session_elapsed_seconds": 3.3870868170342874,
-      "setup_seconds": 0.49822588099050336,
-      "worker_cpu_seconds": 2.497995
+      "case_cpu_seconds": 2.3216599999999996,
+      "collection_cpu_seconds": 0.20504299999999998,
+      "collection_worker_seconds": 0.07928290401468985,
+      "controller_cpu_seconds": 1.018553,
+      "elapsed_seconds": 6.523584639973706,
+      "non_session_elapsed_seconds": 5.017590689996723,
+      "setup_seconds": 0.6858980109973345,
+      "worker_cpu_seconds": 2.5267029999999995
     },
     "warm": {
       "case_cpu_seconds": 0,
       "collection_cpu_seconds": 0,
       "collection_worker_seconds": 0,
-      "controller_cpu_seconds": 0.19129699999999983,
-      "elapsed_seconds": 0.164061983989086,
-      "non_session_elapsed_seconds": 0.164061983989086,
-      "setup_seconds": 0.10178227900178172,
+      "controller_cpu_seconds": 0.1978979999999998,
+      "elapsed_seconds": 0.21403718399233185,
+      "non_session_elapsed_seconds": 0.21403718399233185,
+      "setup_seconds": 0.11292724599479698,
       "worker_cpu_seconds": 0
     },
     "narrow_code": {
-      "case_cpu_seconds": 0.8907999999999999,
-      "collection_cpu_seconds": 0.204925,
-      "collection_worker_seconds": 0.0789423230162356,
-      "controller_cpu_seconds": 0.5827719999999997,
-      "elapsed_seconds": 2.367557471996406,
-      "non_session_elapsed_seconds": 1.768533292983193,
-      "setup_seconds": 0.495586300996365,
-      "worker_cpu_seconds": 1.090283
+      "case_cpu_seconds": 0.9218949999999999,
+      "collection_cpu_seconds": 0.19866799999999998,
+      "collection_worker_seconds": 0.07646039099199697,
+      "controller_cpu_seconds": 0.6047660000000019,
+      "elapsed_seconds": 3.269562091998523,
+      "non_session_elapsed_seconds": 2.633762024983298,
+      "setup_seconds": 0.7181699279753957,
+      "worker_cpu_seconds": 1.119913
     },
     "resource": {
-      "case_cpu_seconds": 0.8829539999999999,
-      "collection_cpu_seconds": 0.19966499999999998,
-      "collection_worker_seconds": 0.07646327000111341,
-      "controller_cpu_seconds": 0.582476999999999,
-      "elapsed_seconds": 2.3176732400024775,
-      "non_session_elapsed_seconds": 1.7363689439662267,
-      "setup_seconds": 0.4819050499936566,
-      "worker_cpu_seconds": 1.0826189999999998
+      "case_cpu_seconds": 0.88805,
+      "collection_cpu_seconds": 0.206007,
+      "collection_worker_seconds": 0.0786488050071057,
+      "controller_cpu_seconds": 0.5983390000000002,
+      "elapsed_seconds": 3.1189191910088994,
+      "non_session_elapsed_seconds": 2.5381185869919136,
+      "setup_seconds": 0.6887856179964729,
+      "worker_cpu_seconds": 1.098873
     },
     "case_resource": {
-      "case_cpu_seconds": 0.702467,
-      "collection_cpu_seconds": 0.20356399999999997,
-      "collection_worker_seconds": 0.07901661901269108,
-      "controller_cpu_seconds": 0.48462999999999967,
-      "elapsed_seconds": 1.86665518998052,
-      "non_session_elapsed_seconds": 1.3491748169471975,
-      "setup_seconds": 0.48619971197331324,
-      "worker_cpu_seconds": 0.905451
+      "case_cpu_seconds": 0.715351,
+      "collection_cpu_seconds": 0.20332499999999998,
+      "collection_worker_seconds": 0.07846524301567115,
+      "controller_cpu_seconds": 0.4922550000000001,
+      "elapsed_seconds": 2.517945517989574,
+      "non_session_elapsed_seconds": 1.990716997970594,
+      "setup_seconds": 0.7096285590087064,
+      "worker_cpu_seconds": 0.919122
     },
     "shared_input": {
-      "case_cpu_seconds": 2.279947,
-      "collection_cpu_seconds": 0.206268,
-      "collection_worker_seconds": 0.0812270579917822,
-      "controller_cpu_seconds": 0.9902189999999989,
-      "elapsed_seconds": 4.821297850023257,
-      "non_session_elapsed_seconds": 3.338489941059379,
-      "setup_seconds": 0.4981779989611823,
-      "worker_cpu_seconds": 2.480365
+      "case_cpu_seconds": 2.339413,
+      "collection_cpu_seconds": 0.201985,
+      "collection_worker_seconds": 0.07796774597954936,
+      "controller_cpu_seconds": 1.0124240000000002,
+      "elapsed_seconds": 6.474125774024287,
+      "non_session_elapsed_seconds": 4.950873589026742,
+      "setup_seconds": 0.6854274200159125,
+      "worker_cpu_seconds": 2.541398
     }
   }
 }

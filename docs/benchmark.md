@@ -78,14 +78,14 @@ computed independently, so component medians need not sum exactly to the total m
 
 | Scenario | External elapsed | Host process CPU | Total worker CPU | Collection CPU | Case-worker CPU |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Ordinary pytest | 0.916 | 0.913 | — | — | — |
-| Runtime preparation | 0.414 | 0.262 | — | — | — |
-| Cold isolated | 4.872 | 0.989 | 2.498 | 0.205 | 2.286 |
-| Warm unchanged | 0.164 | 0.191 | 0.000 | 0.000 | 0.000 |
-| Scoring Python change | 2.368 | 0.583 | 1.090 | 0.205 | 0.891 |
-| Demand JSON change | 2.318 | 0.582 | 1.083 | 0.200 | 0.883 |
-| Single-case JSON change | 1.867 | 0.485 | 0.905 | 0.204 | 0.702 |
-| Shared helper change | 4.821 | 0.990 | 2.480 | 0.206 | 2.280 |
+| Ordinary pytest | 0.965 | 0.943 | — | — | — |
+| Runtime preparation | 0.815 | 0.267 | — | — | — |
+| Cold isolated | 6.524 | 1.019 | 2.527 | 0.205 | 2.322 |
+| Warm unchanged | 0.214 | 0.198 | 0.000 | 0.000 | 0.000 |
+| Scoring Python change | 3.270 | 0.605 | 1.120 | 0.199 | 0.922 |
+| Demand JSON change | 3.119 | 0.598 | 1.099 | 0.206 | 0.888 |
+| Single-case JSON change | 2.518 | 0.492 | 0.919 | 0.203 | 0.715 |
+| Shared helper change | 6.474 | 1.012 | 2.541 | 0.202 | 2.339 |
 
 | Scenario | Collection | Fresh / cached passing cases |
 | --- | --- | ---: |
@@ -107,7 +107,7 @@ rerun only one physical case. The shared helper change reruns all seven.
 
 Runtime preparation is separate from cold execution and benefited from preexisting
 Docker layers. It does not estimate a first image download on a new host. The observed
-cold-minus-ordinary elapsed delta is 3.956 seconds, measuring complete different
+cold-minus-ordinary elapsed delta is 5.558 seconds, measuring complete different
 execution paths rather than pure startup overhead. Small cases expose container and
 collection costs; these measurements do not predict gains for a different suite.
 
