@@ -39,8 +39,13 @@ CASE_FILES = {
     "tests/test_pricing.py::test_price_schedule": "tests/test_pricing.py",
     "tests/test_broad.py::test_project_file": "tests/test_broad.py",
 }
+def safe_case_id(node):
+    """Schema 1 opaque case identity for the default suite."""
+    return hashlib.sha256(json.dumps(["default", node], separators=(",", ":")).encode()).hexdigest()
+
+
 EXPECTED_UNITS = {
-    hashlib.sha256(node.encode()).hexdigest(): file for node, file in CASE_FILES.items()
+    safe_case_id(node): file for node, file in CASE_FILES.items()
 }
 
 
@@ -60,7 +65,7 @@ def expected_executed(phase):
                 and (phase != "case_resource" or node.endswith("::test_customer_scores"))
             )
         ]
-    return {hashlib.sha256(node.encode()).hexdigest() for node in nodes}
+    return {safe_case_id(node) for node in nodes}
 
 
 def measure(command: list[str], project: Path, output: Path, phase: str) -> dict:
@@ -115,6 +120,8 @@ def validate_result(result: dict, phase: str) -> None:
         "failed": 0,
         "infrastructure_error": 0,
         "not-selected": 0,
+        "unsupported": 0,
+        "selected": EXPECTED_CASES,
     }
     if counts != expected:
         raise RuntimeError(f"{phase}: expected {expected}, received {counts}")
