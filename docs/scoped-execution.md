@@ -132,6 +132,44 @@ collection inputs and runtime all key inventory reuse. Case keys cover the same 
 contract and their own actual scopes. Additions/removals refresh the affected suite's
 inventory; unrelated suite resource changes do not invalidate narrow case results.
 
+### Invocation-only structural file narrowing
+
+Python callers can pass `controller.run(root, structural_files={"core":
+["tests/core/test_small.py"]})` to narrow configured structural membership for this
+invocation before marker AST parsing or isolated collection imports. This is separate
+from `arguments=["tests/core/test_small.py"]`: ordinary selectors retain collection of
+the entire configured structural inventory before selecting cases.
+
+Keys must name selected configured suites. An unspecified selected suite retains its
+configured structural membership. An explicit empty list makes that suite's effective
+inventory empty; it does not trigger pytest's default discovery. An empty mapping has
+no effect. List order is normalized lexically and duplicate paths are refused, rather
+than treated as aliases. Values are lists of canonical project-relative existing regular
+Python test files: no absolute paths, `./`, `..`, repeated separators, backslashes,
+symlinks or symlink ancestors. A file must satisfy that suite's configured test roots,
+include/exclude patterns and Python test-file patterns. Foreign or excluded modules,
+unknown or unselected suite keys, and nonfiles refuse before backend startup.
+
+This is a narrowing operation only. It never changes cwd, rootdir, source declarations,
+resource limits or runtime capabilities. Input declarations remain beside tests.
+`plan.make_plan(root, suites=None, structural_files=None)` supports the same static
+validation and effective file preview without importing tests or contacting Docker.
+It cannot establish the real parametrized inventory or determine runtime capabilities.
+
+Suite identity includes the normalized explicit override (including an empty list),
+conservatively distinct from an omitted override even if effective files happen to match.
+The effective current file list also keys inventory. Expanding a subset or including a
+new file refreshes the affected suite/context; files outside a supplied exact list stay
+outside that invocation's inventory. Case/group keys retain their existing scope and
+context rules. Other suites retain their own unchanged identities.
+
+`collection.suites.files` exposes each effective file list before collection starts.
+`inventory_complete` means complete within these effective structural boundaries; it
+never claims coverage of files omitted by the override. Omitted files produce neither
+cases nor unselected rows. Callers remain responsible for any broader coverage
+requirement. Newly added files are discovered automatically only in suites without an
+explicit exact-file override, or when the caller adds them to that override.
+
 Pinned third-party dependencies continue to be prepared from exact wheel pins with a
 complete dependency closure and `pip check`. Autoload is disabled. Suite plugins are
 explicit import names. Distributed schedulers (including xdist), scheduler options and
