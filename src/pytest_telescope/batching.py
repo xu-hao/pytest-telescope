@@ -54,6 +54,7 @@ def group_row(job):
         skipped=0,
         not_run=len(job["case_ids"]),
         unresolved=0,
+        failures=[],
     )
 
 
@@ -98,12 +99,15 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
             failed=result["failed"],
             skipped=result["skipped"],
             not_run=sum(row["outcome"] == "not-run" for row in cases),
+            failures=result["failures"],
         )
     rows = []
     for (index, item), case in zip(job["members"], cases):
         status = case["outcome"]
         outcome = (
-            "infrastructure_error"
+            "failed"
+            if mode == "case" and result is not None and result["exit_code"] != 0
+            else "infrastructure_error"
             if status in (None, "not-run")
             else "reused"
             if reused
@@ -137,7 +141,7 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
                     else [
                         failure
                         for failure in result["failures"]
-                        if failure["case_id"] == item["case_id"]
+                        if mode == "case" or failure["case_id"] == item["case_id"]
                     ],
                 ),
             )

@@ -107,6 +107,7 @@ collection hooks. Hash sorting does not define execution order.
 | `timing_complete` | False when retries or unavailable measurements prevent a complete worker-timing account. |
 | `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Member totals: known unrun members are distinct from attempted members with no valid result. |
 | `stop_reason` | `null` for complete groups; otherwise `pytest-stop`, `collection`, `infrastructure`, or `cancelled`. |
+| `failures` | Bounded phase/location/type/opaque-ID evidence, including execution-side collection failures that do not belong to a requested member. |
 
 Each case row adds `group_id`, `result_status`, and `complete`. Result status is `passed`,
 `failed`, `skipped`, `not-run`, or `null` for unselected/unresolved infrastructure cases.
@@ -128,6 +129,19 @@ and the run status is `failed`, not an infrastructure outage. Shared setup failu
 belong to each attempted affected member; shared teardown failure belongs to the member
 whose teardown pytest reports. No member of a failed/incomplete group becomes reusable.
 Skips are counted without retaining reason text or arbitrary captured output.
+
+In the default case profile, a valid nonzero pytest result retains case `outcome:
+"failed"`, including an execution-side collection failure before the test body starts.
+Such a member has `result_status: "not-run"`, zero passed/failed/skipped test reports and
+`complete: false`; this fails the verdict without inventing a call or teardown. The
+singleton case row preserves its collection failure evidence. Batch members without a
+call after collection failure retain `infrastructure_error`/`not-run` accounting, with
+the run verdict `failed` and group `stop_reason: "collection"`. Group `failures` retains
+collection evidence in both profiles even when its opaque collection ID is not a member.
+No such group or member is cache eligible. A nonzero pytest session verdict also fails
+the group and run even when every observed member passed, for example when a plugin
+changes session exit status. Member counts retain those actual passes; neither profile
+may turn the session failure into reusable success.
 
 An attempted worker with no valid result reports `unresolved` members, `not_run: 0`,
 and null member `result_status`: those members may already have executed. Never-submitted

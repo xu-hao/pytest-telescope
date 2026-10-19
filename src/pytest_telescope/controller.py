@@ -506,7 +506,11 @@ def run(
         )
         if (
             collection["outcome"] != "infrastructure_error"
-            and any(group["stop_reason"] in {"pytest-stop", "collection"} for group in groups)
+            and any(
+                group["outcome"] == "failed"
+                or group["stop_reason"] in {"pytest-stop", "collection"}
+                for group in groups
+            )
             and not any(group["stop_reason"] in {"infrastructure", "cancelled"} for group in groups)
         ):
             report["status"] = "failed"

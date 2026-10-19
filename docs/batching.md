@@ -128,6 +128,12 @@ reports its group's attempt count; do not sum member attempts to count workers. 
 mode every case row, including unselected and unresolved members, has `worker_seconds`
 and `cpu_seconds` set to `null`: shared fixture and worker costs
 cannot honestly be attributed to individual cases. Case mode retains singleton timings.
+Group `failures` retains bounded phase/location/type/opaque-ID evidence, including
+collection errors whose IDs do not identify a requested member. A nonzero pytest
+session verdict fails the group/run even if every member report passed; those observed
+passes do not become reusable evidence. See the result reference for the preserved
+case-profile collection-failure verdict and separate not-run member counts.
+
 Group timings are the authority for execution totals and `worker_cpu_seconds` counts each
 group once plus collection. Per-worker limits and aggregate concurrency remain in
 `resources` and apply equally to either profile.
