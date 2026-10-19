@@ -91,7 +91,7 @@ def test_suite_directories_reject_symlink_ancestors(tmp_path, field):
     (tmp_path / "real/sub").mkdir(parents=True)
     (tmp_path / "link").symlink_to("real", target_is_directory=True)
     (tmp_path / "test_public.py").write_text(
-        'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_public(): pass\n'
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_public(): pass\n"
     )
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest_telescope.suites.core]\nconfig="pyproject.toml"\n'
