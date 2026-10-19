@@ -685,6 +685,7 @@ def execute(
         "--pull=never",
         "--read-only",
         "--network=none",
+        "--ipc=none",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         f"--pids-limit={limits['processes']}",
@@ -707,6 +708,9 @@ def execute(
         f"type=bind,src={request_path},dst=/telescope-request.json,readonly",
     ]
     if metadata_directory is not None:
+        metadata_directory = Path(metadata_directory).resolve()
+        if metadata_directory.parent != directory or metadata_directory.name != "metadata":
+            raise InfrastructureError("metadata requires an owned worker directory")
         cmd += ["--mount", f"type=bind,src={metadata_directory},dst=/metadata,readonly"]
     for filename in ("hosts", "hostname", "resolv.conf"):
         cmd += ["--mount", f"type=bind,src={control / filename},dst=/etc/{filename},readonly"]

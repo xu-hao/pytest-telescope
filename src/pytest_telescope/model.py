@@ -250,11 +250,15 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
                     for parent in selected.parents
                     if parent != root and parent.is_relative_to(root)
                 ):
-                    raise UnsupportedCapability("project:links", "symlink directories are unsupported")
+                    raise UnsupportedCapability(
+                        "project:links", "symlink directories are unsupported"
+                    )
                 if selected.is_symlink() and Path(os.readlink(selected)).is_absolute():
                     raise DeclarationError("leaf symlinks must use relative targets")
                 if selected.is_symlink() and selected.is_dir():
-                    raise UnsupportedCapability("project:links", "symlink directories are unsupported")
+                    raise UnsupportedCapability(
+                        "project:links", "symlink directories are unsupported"
+                    )
                 if not (selected.is_file() or selected.is_dir() or selected.is_symlink()):
                     raise DeclarationError(
                         "inputs must be regular files, directories, or leaf symlinks"
@@ -567,7 +571,9 @@ def project_paths(root, *, excluded=(), budget=None):
                 or Path(os.readlink(path)).is_absolute()
                 or not path.resolve().is_relative_to(root)
             ):
-                raise UnsupportedCapability("project:links", "broad project scope contains an unsupported symlink")
+                raise UnsupportedCapability(
+                    "project:links", "broad project scope contains an unsupported symlink"
+                )
         elif not path.is_file() and not path.is_dir():
             raise DeclarationError("broad project scope contains a special file")
         paths.append(path.relative_to(root).as_posix())

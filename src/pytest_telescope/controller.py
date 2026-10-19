@@ -320,6 +320,7 @@ def _unit_result(item, outcome, reason="", result=None, attempts=0):
     row = {
         "name": item["case_id"],
         "case_id": item["case_id"],
+        "selected": outcome != "not-selected",
         "file": item["file"],
         "outcome": outcome,
         "reason": reason,
@@ -349,7 +350,14 @@ def _unit_result(item, outcome, reason="", result=None, attempts=0):
 def _summary(results, collection, started, setup_seconds):
     counts = {
         name: sum(row["outcome"] == name for row in results)
-        for name in ("executed", "reused", "failed", "infrastructure_error", "not-selected")
+        for name in (
+            "executed",
+            "reused",
+            "failed",
+            "unsupported",
+            "infrastructure_error",
+            "not-selected",
+        )
     }
     cases = {
         name: sum(row[name] for row in results)
@@ -442,16 +450,34 @@ def run(
         worker_seconds=0,
         cpu_seconds=0,
         failures=[],
-        suites=[],
+        suites=[
+            dict(
+                name=suite.name,
+                files=suite.inventory,
+                outcome="not-started",
+                collected=None,
+                inventory_digest=None,
+                worker_seconds=0,
+                cpu_seconds=0,
+            )
+            for suite, _ in configured
+        ],
     )
     results = []
 
     def summary(setup):
         report = _summary(results, collection, started, setup)
         report["schema"] = 1
-        report["inventory_digest"] = fingerprint(
-            [[row["suite"], row["case_id"], row["file"]] for row in results]
+        report["kind"] = "run"
+        report["inventory_complete"] = all(
+            row["outcome"] in {"reused", "executed"} for row in collection["suites"]
         )
+        report["inventory_digest"] = (
+            fingerprint(sorted([row["suite"], row["case_id"], row["file"]] for row in results))
+            if report["inventory_complete"]
+            else None
+        )
+        report["counts"]["selected"] = sum(row["selected"] for row in results)
         report["resources"] = {
             "worker": resources.worker,
             "budget": resources.budget,
@@ -481,82 +507,314 @@ def run(
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     cancellation = threading.Event()
     blocked = None
-    with lock(state / ".lock", timeout * 2 + 30):
-        store = CacheStore(state)
-        inventory_state = state / "inventory"
-        inventory_state.mkdir(exist_ok=True, mode=0o700)
-        inventory_store = CacheStore(
-            inventory_state, count=max(8, len(configured)), size=64 * 1024 * 1024
-        )
-        with PendingRecords(store, inventory_store) as pending:
-            with runtime.invocation(manifest.root) as pool_directory:
-                pool = pool_directory / "project"
-                pool_unit = Unit(
-                    "pool",
-                    sorted(all_tests),
-                    sorted(set().union(*(set(unit.inputs) for _, unit in configured))),
-                    sorted(set().union(*(set(unit.absent) for _, unit in configured))),
-                    True,
-                )
-                records = snapshot(manifest, pool_unit, pool)
-                record_map = {record["path"]: record for record in records}
-                jobs = []
-                all_selected_aliases = set()
-                requested_selectors = set()
-                for (
-                    suite,
-                    collection_unit,
-                    effective,
-                    options,
-                    selectors,
-                    selection_disabled,
-                ) in invocations:
-                    requested_selectors.update(
-                        hashlib.sha256(selector.encode()).hexdigest() for selector in selectors
+    setup_seconds = time.monotonic() - started
+    try:
+        with lock(state / ".lock", timeout * 2 + 30):
+            store = CacheStore(state)
+            inventory_state = state / "inventory"
+            inventory_state.mkdir(exist_ok=True, mode=0o700)
+            inventory_store = CacheStore(
+                inventory_state, count=max(8, len(configured)), size=64 * 1024 * 1024
+            )
+            with PendingRecords(store, inventory_store) as pending:
+                with runtime.invocation(manifest.root) as pool_directory:
+                    pool = pool_directory / "project"
+                    pool_unit = Unit(
+                        "pool",
+                        sorted(all_tests),
+                        sorted(set().union(*(set(unit.inputs) for _, unit in configured))),
+                        sorted(set().union(*(set(unit.absent) for _, unit in configured))),
+                        True,
                     )
-                    registry = [row for row in manifest.registry if row["file"] in suite.inventory]
-                    suite_common = {**common, "suite": suite.identity(), "all_args": effective}
-                    inventory_key = fingerprint(
-                        {
-                            **suite_common,
-                            "kind": "collection",
-                            "inputs": [record_map[name] for name in collection_unit.inputs],
-                            "absent": collection_unit.absent,
-                            "metadata": metadata_records(
-                                manifest.distributions, collection_unit.distributions
-                            ),
-                            "files": suite.inventory,
-                            "registry": registry,
+                    records = snapshot(manifest, pool_unit, pool)
+                    record_map = {record["path"]: record for record in records}
+                    jobs = []
+                    all_selected_aliases = set()
+                    requested_selectors = set()
+                    for (
+                        suite,
+                        collection_unit,
+                        effective,
+                        options,
+                        selectors,
+                        selection_disabled,
+                    ) in invocations:
+                        active_collection = next(
+                            row for row in collection["suites"] if row["name"] == suite.name
+                        )
+                        active_collection["outcome"] = "infrastructure_error"
+                        requested_selectors.update(
+                            hashlib.sha256(selector.encode()).hexdigest() for selector in selectors
+                        )
+                        registry = [
+                            row for row in manifest.registry if row["file"] in suite.inventory
+                        ]
+                        suite_common = {**common, "suite": suite.identity(), "all_args": effective}
+                        inventory_key = fingerprint(
+                            {
+                                **suite_common,
+                                "kind": "collection",
+                                "inputs": [record_map[name] for name in collection_unit.inputs],
+                                "absent": collection_unit.absent,
+                                "metadata": metadata_records(
+                                    manifest.distributions, collection_unit.distributions
+                                ),
+                                "files": suite.inventory,
+                                "registry": registry,
+                            }
+                        )
+                        inventory_path = inventory_state / (inventory_key + ".json")
+                        enabled_inventory = collection_unit.cache and not no_cache
+                        collected = (
+                            read_record(inventory_path, inventory_key, kind="collection")
+                            if enabled_inventory and not force
+                            else None
+                        )
+                        if collected is not None and not inventory_matches_manifest(
+                            collected, manifest
+                        ):
+                            collected = None
+                        reused = collected is not None
+                        if collected is None:
+                            for attempt in range(2):
+                                try:
+                                    with runtime.invocation(manifest.root) as directory:
+                                        frozen = directory / "project"
+                                        materialize(pool, collection_unit, frozen, record_map)
+                                        # Empty roots still exist for an empty structural inventory.
+                                        (frozen / suite.root).mkdir(parents=True, exist_ok=True)
+                                        (frozen / suite.root).chmod(0o755)
+                                        metadata = directory / "metadata"
+                                        materialize_metadata(
+                                            manifest.distributions,
+                                            collection_unit.distributions,
+                                            metadata,
+                                        )
+                                        collected = runtime.execute(
+                                            identity["image"],
+                                            frozen,
+                                            [
+                                                "-c",
+                                                "/project/" + suite.config,
+                                                "--rootdir=/project/" + suite.root,
+                                                "-o",
+                                                "addopts=",
+                                                "-p",
+                                                "no:cacheprovider",
+                                                *[
+                                                    part
+                                                    for plugin in suite.plugins
+                                                    for part in ("-p", plugin)
+                                                ],
+                                                *options,
+                                                *["/project/" + name for name in suite.inventory],
+                                            ],
+                                            environment,
+                                            timeout,
+                                            root=manifest.root,
+                                            invocation_directory=directory,
+                                            suite_root=suite.root,
+                                            suite=suite.name,
+                                            metadata_directory=metadata,
+                                            limits=resources.worker,
+                                            selection_disabled=selection_disabled,
+                                            allow_unknown_selectors=True,
+                                            request={
+                                                "mode": "collection",
+                                                "registry": registry,
+                                                "selectors": [
+                                                    hashlib.sha256(selector.encode()).hexdigest()
+                                                    for selector in selectors
+                                                ],
+                                            },
+                                        )
+                                    break
+                                except InfrastructureError as exc:
+                                    if attempt == 1 or isinstance(exc, runtime.CleanupError):
+                                        collection["reason"] = str(exc)
+                                        return summary(time.monotonic() - started)
+                            if collected["exit_code"] == 4:
+                                raise DeclarationError(
+                                    "unsupported or changed declarations during isolated collection"
+                                )
+                            if collected["exit_code"] not in (0, 5):
+                                active_collection["outcome"] = "failed"
+                                collection.update(
+                                    outcome="failed",
+                                    failures=collected["failures"],
+                                    worker_seconds=collected["worker_seconds"],
+                                    cpu_seconds=collected["cpu_seconds"],
+                                )
+                                return summary(time.monotonic() - started)
+                            if not inventory_matches_manifest(collected, manifest):
+                                raise InfrastructureError(
+                                    "collected inventory disagrees with frozen declarations"
+                                )
+                            if enabled_inventory and collected["exit_code"] == 0:
+                                pending.stage(
+                                    inventory_path, inventory_key, collected, kind="collection"
+                                )
+                        suite_collection = dict(
+                            name=suite.name,
+                            outcome="reused" if reused else "executed",
+                            collected=len(collected["items"]),
+                            worker_seconds=0 if reused else collected["worker_seconds"],
+                            cpu_seconds=0 if reused else collected["cpu_seconds"],
+                        )
+                        suite_collection["inventory_digest"] = fingerprint(
+                            sorted(
+                                [suite.name, item["case_id"], item["file"]]
+                                for item in collected["items"]
+                            )
+                        )
+                        active_collection.update(suite_collection)
+                        if len(results) + len(collected["items"]) > 100_000:
+                            raise DeclarationError("combined suite inventory exceeds 100000 cases")
+                        for key in ("collected", "worker_seconds", "cpu_seconds"):
+                            collection[key] += suite_collection[key]
+                        files = {}
+                        for item in collected["items"]:
+                            if item["file"] not in suite.inventory:
+                                raise DeclarationError(
+                                    "collected item is outside its structural suite"
+                                )
+                            all_selected_aliases.update(item["aliases"])
+                            files.setdefault(item["file"], []).append(
+                                {"case_id": item["case_id"], "origins": item["origins"]}
+                            )
+                        digests = {
+                            name: fingerprint(sorted(rows, key=lambda row: row["case_id"]))
+                            for name, rows in files.items()
                         }
+                        registry_files = {}
+                        for row in registry:
+                            registry_files.setdefault(row["file"], []).append(row)
+                        scopes = {}
+                        for item in collected["items"]:
+                            index = len(results)
+
+                            def row(outcome, reason="", result=None, attempts=0):
+                                return {
+                                    **_unit_result(item, outcome, reason, result, attempts),
+                                    "suite": suite.name,
+                                    "name": item["case_id"],
+                                    "case_id": item["case_id"],
+                                }
+
+                            if not item["selected"]:
+                                results.append(
+                                    row(
+                                        "not-selected",
+                                        "not selected by pytest arguments" if explain else "",
+                                    )
+                                )
+                                continue
+                            signature = (item["file"], tuple(item["origins"]))
+                            if signature not in scopes:
+                                unit = case_unit(manifest, item, suite)
+                                scope_key = fingerprint(
+                                    {
+                                        "inputs": [record_map[name] for name in unit.inputs],
+                                        "absent": unit.absent,
+                                        "metadata": metadata_records(
+                                            manifest.distributions, unit.distributions
+                                        ),
+                                        "cache": unit.cache,
+                                    }
+                                )
+                                scopes[signature] = unit, scope_key
+                            unit, scope_key = scopes[signature]
+                            key = fingerprint(
+                                {
+                                    **suite_common,
+                                    "kind": "execution",
+                                    "case": item["case_id"],
+                                    "scope": scope_key,
+                                    "inventory": digests[item["file"]],
+                                }
+                            )
+                            path = state / (key + ".json")
+                            enabled = unit.cache and not no_cache
+                            previous = (
+                                read_record(
+                                    path,
+                                    key,
+                                    case_id=item["case_id"],
+                                )
+                                if enabled and not force
+                                else None
+                            )
+                            if previous is not None:
+                                results.append(
+                                    row(
+                                        "reused",
+                                        "complete successful case record matches"
+                                        if explain
+                                        else "",
+                                        {**previous, "worker_seconds": 0, "cpu_seconds": 0},
+                                    )
+                                )
+                                continue
+                            results.append(row("infrastructure_error", "execution not started"))
+                            jobs.append(
+                                (
+                                    index,
+                                    item,
+                                    unit,
+                                    suite,
+                                    options,
+                                    registry_files.get(item["file"], []),
+                                    digests[item["file"]],
+                                    path,
+                                    key,
+                                    enabled,
+                                )
+                            )
+                    if requested_selectors - all_selected_aliases:
+                        raise DeclarationError("selector does not identify a collected case")
+                    collection["outcome"] = (
+                        "reused"
+                        if all(row["outcome"] == "reused" for row in collection["suites"])
+                        else "executed"
                     )
-                    inventory_path = inventory_state / (inventory_key + ".json")
-                    enabled_inventory = collection_unit.cache and not no_cache
-                    collected = (
-                        read_record(inventory_path, inventory_key, kind="collection")
-                        if enabled_inventory and not force
-                        else None
-                    )
-                    if collected is not None and not inventory_matches_manifest(
-                        collected, manifest
-                    ):
-                        collected = None
-                    reused = collected is not None
-                    if collected is None:
+                    setup_seconds = time.monotonic() - started - collection["worker_seconds"]
+
+                    def execute_job(job):
+                        index, item, unit, suite, options, registry, digest, path, key, enabled = (
+                            job
+                        )
+                        reason = (
+                            "forced"
+                            if force
+                            else "non-cacheable"
+                            if not enabled
+                            else "no valid successful case record"
+                        )
+
+                        def outcome(status, message="", result=None, attempts=0):
+                            return {
+                                **_unit_result(item, status, message, result, attempts),
+                                "suite": suite.name,
+                                "name": item["case_id"],
+                                "case_id": item["case_id"],
+                            }
+
                         for attempt in range(2):
                             try:
+                                if cancellation.is_set():
+                                    raise runtime.InvocationInterrupted(
+                                        "run cancelled before worker start"
+                                    )
                                 with runtime.invocation(manifest.root) as directory:
                                     frozen = directory / "project"
-                                    materialize(pool, collection_unit, frozen, record_map)
-                                    # Empty roots still exist for an empty structural inventory.
+                                    materialize(pool, unit, frozen, record_map)
                                     (frozen / suite.root).mkdir(parents=True, exist_ok=True)
                                     (frozen / suite.root).chmod(0o755)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
-                                        manifest.distributions,
-                                        collection_unit.distributions,
-                                        metadata,
+                                        manifest.distributions, unit.distributions, metadata
                                     )
-                                    collected = runtime.execute(
+                                    result = runtime.execute(
                                         identity["image"],
                                         frozen,
                                         [
@@ -573,7 +831,7 @@ def run(
                                                 for part in ("-p", plugin)
                                             ],
                                             *options,
-                                            *["/project/" + name for name in suite.inventory],
+                                            "/project/" + item["file"],
                                         ],
                                         environment,
                                         timeout,
@@ -583,306 +841,105 @@ def run(
                                         suite=suite.name,
                                         metadata_directory=metadata,
                                         limits=resources.worker,
-                                        selection_disabled=selection_disabled,
-                                        allow_unknown_selectors=True,
+                                        cancellation=cancellation,
                                         request={
-                                            "mode": "collection",
+                                            "mode": "execution",
                                             "registry": registry,
-                                            "selectors": [
-                                                hashlib.sha256(selector.encode()).hexdigest()
-                                                for selector in selectors
-                                            ],
+                                            "case_id": item["case_id"],
+                                            "expected_digest": digest,
                                         },
                                     )
-                                break
-                            except InfrastructureError as exc:
-                                if attempt == 1 or isinstance(exc, runtime.CleanupError):
-                                    collection["reason"] = str(exc)
-                                    return summary(time.monotonic() - started)
-                        if collected["exit_code"] == 4:
-                            raise DeclarationError(
-                                "unsupported or changed declarations during isolated collection"
-                            )
-                        if collected["exit_code"] not in (0, 5):
-                            collection.update(
-                                outcome="failed",
-                                failures=collected["failures"],
-                                worker_seconds=collected["worker_seconds"],
-                                cpu_seconds=collected["cpu_seconds"],
-                            )
-                            return summary(time.monotonic() - started)
-                        if not inventory_matches_manifest(collected, manifest):
-                            raise InfrastructureError(
-                                "collected inventory disagrees with frozen declarations"
-                            )
-                        if enabled_inventory and collected["exit_code"] == 0:
-                            pending.stage(
-                                inventory_path, inventory_key, collected, kind="collection"
-                            )
-                    suite_collection = dict(
-                        name=suite.name,
-                        outcome="reused" if reused else "executed",
-                        collected=len(collected["items"]),
-                        worker_seconds=0 if reused else collected["worker_seconds"],
-                        cpu_seconds=0 if reused else collected["cpu_seconds"],
-                    )
-                    collection["suites"].append(suite_collection)
-                    for key in ("collected", "worker_seconds", "cpu_seconds"):
-                        collection[key] += suite_collection[key]
-                    files = {}
-                    for item in collected["items"]:
-                        if item["file"] not in suite.inventory:
-                            raise DeclarationError("collected item is outside its structural suite")
-                        all_selected_aliases.update(item["aliases"])
-                        files.setdefault(item["file"], []).append(
-                            {"case_id": item["case_id"], "origins": item["origins"]}
-                        )
-                    digests = {
-                        name: fingerprint(sorted(rows, key=lambda row: row["case_id"]))
-                        for name, rows in files.items()
-                    }
-                    registry_files = {}
-                    for row in registry:
-                        registry_files.setdefault(row["file"], []).append(row)
-                    scopes = {}
-                    for item in collected["items"]:
-                        index = len(results)
-
-                        def row(outcome, reason="", result=None, attempts=0):
-                            return {
-                                **_unit_result(item, outcome, reason, result, attempts),
-                                "suite": suite.name,
-                                "name": item["case_id"],
-                                "case_id": item["case_id"],
-                            }
-
-                        if not item["selected"]:
-                            results.append(
-                                row(
-                                    "not-selected",
-                                    "not selected by pytest arguments" if explain else "",
-                                )
-                            )
-                            continue
-                        signature = (item["file"], tuple(item["origins"]))
-                        if signature not in scopes:
-                            unit = case_unit(manifest, item, suite)
-                            scope_key = fingerprint(
-                                {
-                                    "inputs": [record_map[name] for name in unit.inputs],
-                                    "absent": unit.absent,
-                                    "metadata": metadata_records(
-                                        manifest.distributions, unit.distributions
-                                    ),
-                                    "cache": unit.cache,
-                                }
-                            )
-                            scopes[signature] = unit, scope_key
-                        unit, scope_key = scopes[signature]
-                        key = fingerprint(
-                            {
-                                **suite_common,
-                                "kind": "execution",
-                                "case": item["case_id"],
-                                "scope": scope_key,
-                                "inventory": digests[item["file"]],
-                            }
-                        )
-                        path = state / (key + ".json")
-                        enabled = unit.cache and not no_cache
-                        previous = (
-                            read_record(
-                                path,
-                                key,
-                                case_id=item["case_id"],
-                            )
-                            if enabled and not force
-                            else None
-                        )
-                        if previous is not None:
-                            results.append(
-                                row(
-                                    "reused",
-                                    "complete successful case record matches" if explain else "",
-                                    {**previous, "worker_seconds": 0, "cpu_seconds": 0},
-                                )
-                            )
-                            continue
-                        results.append(row("infrastructure_error", "execution not started"))
-                        jobs.append(
-                            (
-                                index,
-                                item,
-                                unit,
-                                suite,
-                                options,
-                                registry_files.get(item["file"], []),
-                                digests[item["file"]],
-                                path,
-                                key,
-                                enabled,
-                            )
-                        )
-                if requested_selectors - all_selected_aliases:
-                    raise DeclarationError("selector does not identify a collected case")
-                collection["outcome"] = (
-                    "reused"
-                    if all(row["outcome"] == "reused" for row in collection["suites"])
-                    else "executed"
-                )
-                setup_seconds = time.monotonic() - started - collection["worker_seconds"]
-
-                def execute_job(job):
-                    index, item, unit, suite, options, registry, digest, path, key, enabled = job
-                    reason = (
-                        "forced"
-                        if force
-                        else "non-cacheable"
-                        if not enabled
-                        else "no valid successful case record"
-                    )
-
-                    def outcome(status, message="", result=None, attempts=0):
-                        return {
-                            **_unit_result(item, status, message, result, attempts),
-                            "suite": suite.name,
-                            "name": item["case_id"],
-                            "case_id": item["case_id"],
-                        }
-
-                    for attempt in range(2):
-                        try:
-                            if cancellation.is_set():
-                                raise runtime.InvocationInterrupted(
-                                    "run cancelled before worker start"
-                                )
-                            with runtime.invocation(manifest.root) as directory:
-                                frozen = directory / "project"
-                                materialize(pool, unit, frozen, record_map)
-                                (frozen / suite.root).mkdir(parents=True, exist_ok=True)
-                                (frozen / suite.root).chmod(0o755)
-                                metadata = directory / "metadata"
-                                materialize_metadata(
-                                    manifest.distributions, unit.distributions, metadata
-                                )
-                                result = runtime.execute(
-                                    identity["image"],
-                                    frozen,
-                                    [
-                                        "-c",
-                                        "/project/" + suite.config,
-                                        "--rootdir=/project/" + suite.root,
-                                        "-o",
-                                        "addopts=",
-                                        "-p",
-                                        "no:cacheprovider",
-                                        *[
-                                            part
-                                            for plugin in suite.plugins
-                                            for part in ("-p", plugin)
-                                        ],
-                                        *options,
-                                        "/project/" + item["file"],
-                                    ],
-                                    environment,
-                                    timeout,
-                                    root=manifest.root,
-                                    invocation_directory=directory,
-                                    suite_root=suite.root,
-                                    suite=suite.name,
-                                    metadata_directory=metadata,
-                                    limits=resources.worker,
-                                    cancellation=cancellation,
-                                    request={
-                                        "mode": "execution",
-                                        "registry": registry,
-                                        "case_id": item["case_id"],
-                                        "expected_digest": digest,
-                                    },
-                                )
-                            if result["exit_code"] == 4:
-                                raise DeclarationError(
-                                    "case collection or declarations differ from validated inventory"
-                                )
-                            return (
-                                outcome(
-                                    "executed" if result["exit_code"] == 0 else "failed",
-                                    reason if explain else "",
-                                    result,
-                                    attempt + 1,
-                                ),
-                                result,
-                                False,
-                            )
-                        except (InfrastructureError, OSError) as exc:
-                            terminal = isinstance(exc, runtime.CleanupError)
-                            if terminal:
-                                cancellation.set()
-                            if attempt == 1 or terminal:
+                                if result["exit_code"] == 4:
+                                    raise DeclarationError(
+                                        "case collection or declarations differ from validated inventory"
+                                    )
                                 return (
                                     outcome(
-                                        "infrastructure_error",
-                                        str(exc)
-                                        if isinstance(exc, InfrastructureError)
-                                        else "owned storage operation failed",
-                                        attempts=attempt + 1,
+                                        "executed" if result["exit_code"] == 0 else "failed",
+                                        reason if explain else "",
+                                        result,
+                                        attempt + 1,
                                     ),
-                                    None,
-                                    terminal,
+                                    result,
+                                    False,
                                 )
+                            except (InfrastructureError, OSError) as exc:
+                                terminal = isinstance(exc, runtime.CleanupError)
+                                if terminal:
+                                    cancellation.set()
+                                if attempt == 1 or terminal:
+                                    return (
+                                        outcome(
+                                            "infrastructure_error",
+                                            str(exc)
+                                            if isinstance(exc, InfrastructureError)
+                                            else "owned storage operation failed",
+                                            attempts=attempt + 1,
+                                        ),
+                                        None,
+                                        terminal,
+                                    )
 
-                active, cursor = {}, 0
-                executor = ThreadPoolExecutor(max_workers=resources.concurrency)
-                try:
-                    while cursor < len(jobs) or active:
-                        while (
-                            not cancellation.is_set()
-                            and cursor < len(jobs)
-                            and len(active) < resources.concurrency
-                        ):
-                            job = jobs[cursor]
-                            cursor += 1
-                            active[executor.submit(execute_job, job)] = job
-                        if not active:
-                            break
-                        completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
-                        for future in completed:
-                            job = active.pop(future)
-                            row, result, terminal = future.result()
-                            results[job[0]] = row
-                            if terminal:
-                                blocked = "run stopped after owned-resource cleanup failure or cancellation"
-                            if (
-                                result is not None
-                                and result["exit_code"] == 0
-                                and job[-1]
-                                and not cancellation.is_set()
+                    active, cursor = {}, 0
+                    executor = ThreadPoolExecutor(max_workers=resources.concurrency)
+                    try:
+                        while cursor < len(jobs) or active:
+                            while (
+                                not cancellation.is_set()
+                                and cursor < len(jobs)
+                                and len(active) < resources.concurrency
                             ):
-                                pending.stage(job[-3], job[-2], result)
-                except (runtime.InvocationInterrupted, KeyboardInterrupt):
-                    blocked = "run cancelled; active workers drained before result publication"
-                    cancellation.set()
-                except BaseException:
-                    cancellation.set()
-                    raise
-                finally:
-                    executor.shutdown(wait=True, cancel_futures=False)
-                    for future, job in active.items():
-                        if future.done() and not future.cancelled():
-                            row, _, terminal = future.result()
-                            results[job[0]] = row
-                            if terminal:
-                                blocked = "run stopped after owned-resource cleanup failure or cancellation"
-                    if cancellation.is_set():
-                        blocked = blocked or "run cancelled"
-                        for job in jobs[cursor:]:
-                            results[job[0]]["reason"] = blocked
-            if blocked is None:
-                pending.publish()
-            else:
-                # Even a completed successful worker is not a reusable result until outer cleanup.
-                collection["reason"] = blocked
-                collection["outcome"] = "infrastructure_error"
+                                job = jobs[cursor]
+                                cursor += 1
+                                active[executor.submit(execute_job, job)] = job
+                            if not active:
+                                break
+                            completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
+                            for future in completed:
+                                job = active.pop(future)
+                                row, result, terminal = future.result()
+                                results[job[0]] = row
+                                if terminal:
+                                    blocked = "run stopped after owned-resource cleanup failure or cancellation"
+                                if (
+                                    result is not None
+                                    and result["exit_code"] == 0
+                                    and job[-1]
+                                    and not cancellation.is_set()
+                                ):
+                                    pending.stage(job[-3], job[-2], result)
+                    except (runtime.InvocationInterrupted, KeyboardInterrupt):
+                        blocked = "run cancelled; active workers drained before result publication"
+                        cancellation.set()
+                    except BaseException:
+                        cancellation.set()
+                        raise
+                    finally:
+                        executor.shutdown(wait=True, cancel_futures=False)
+                        for future, job in active.items():
+                            if future.done() and not future.cancelled():
+                                row, _, terminal = future.result()
+                                results[job[0]] = row
+                                if terminal:
+                                    blocked = "run stopped after owned-resource cleanup failure or cancellation"
+                        if cancellation.is_set():
+                            blocked = blocked or "run cancelled"
+                            for job in jobs[cursor:]:
+                                results[job[0]]["reason"] = blocked
+                if blocked is None:
+                    pending.publish()
+                else:
+                    # Even a completed successful worker is not a reusable result until outer cleanup.
+                    collection["reason"] = blocked
+                    collection["outcome"] = "infrastructure_error"
+    except (InfrastructureError, OSError) as exc:
+        collection["outcome"] = "infrastructure_error"
+        collection["reason"] = (
+            str(exc) if isinstance(exc, InfrastructureError) else "owned storage operation failed"
+        )
+        for row in results:
+            if row["outcome"] == "infrastructure_error":
+                row["reason"] = collection["reason"]
     return summary(setup_seconds)
 
 
@@ -903,6 +960,25 @@ def split_arguments(arguments):
             selectors.append(value.removeprefix("./"))
             index += 1
     return options, selectors
+
+
+def error_result(error):
+    """Versioned refusal envelope when no complete inventory can be established."""
+    result = {
+        "schema": 1,
+        "kind": "refusal",
+        "inventory_complete": False,
+        "inventory_digest": None,
+        "status": "unsupported"
+        if isinstance(error, UnsupportedCapability)
+        else "declaration_error"
+        if isinstance(error, DeclarationError)
+        else "infrastructure_error",
+        "error": str(error),
+    }
+    if isinstance(error, UnsupportedCapability):
+        result["capability"] = error.capability
+    return result
 
 
 def main(argv=None):
@@ -966,10 +1042,10 @@ def main(argv=None):
         )
         return 4
     except DeclarationError as exc:
-        print(json.dumps({"status": "declaration_error", "error": str(exc)}))
+        print(json.dumps(error_result(exc)))
         return 4
     except InfrastructureError as exc:
-        print(json.dumps({"status": "infrastructure_error", "error": str(exc)}))
+        print(json.dumps(error_result(exc)))
         return 3
     except (OSError, RecursionError, MemoryError):
         print(
