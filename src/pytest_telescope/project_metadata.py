@@ -262,7 +262,7 @@ def metadata_records(distributions, names):
 
 
 def materialize_metadata(distributions, names, destination: Path) -> None:
-    """Create a new metadata-only tree with normalized read-only modes and epoch times."""
+    """Create a new metadata-only tree with read-only files and epoch times."""
     files = _selected_files(distributions, names)
     destination.mkdir(mode=0o700)
     directories = {destination}
@@ -275,5 +275,5 @@ def materialize_metadata(distributions, names, destination: Path) -> None:
         target.chmod(0o444)
         os.utime(target, ns=(0, 0))
     for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
-        directory.chmod(0o555)
+        directory.chmod(0o755)
         os.utime(directory, ns=(0, 0))

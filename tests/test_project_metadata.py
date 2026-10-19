@@ -112,7 +112,7 @@ def test_complete_projection_standard_discovery_and_selection(tmp_path, monkeypa
     ]
     for path in [destination, *destination.rglob("*")]:
         info = path.stat()
-        assert stat.S_IMODE(info.st_mode) == (0o555 if path.is_dir() else 0o444)
+        assert stat.S_IMODE(info.st_mode) == (0o755 if path.is_dir() else 0o444)
         assert info.st_mtime_ns == 0
 
 
