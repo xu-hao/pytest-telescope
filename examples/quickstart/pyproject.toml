@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.pytest_telescope]
+test_roots = ["tests"]
+
+[tool.pytest_telescope.defaults]
+inputs = ["app/__init__.py"]
+
+[tool.pytest_telescope.bundles.pricing]
+inputs = ["app/pricing.py", "data/currency.json"]

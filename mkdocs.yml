@@ -5,8 +5,8 @@ strict: true
 theme:
   name: readthedocs
 nav:
-  - Overview: index.md
-  - Specification: specification.md
+  - Quickstart: index.md
+  - Marker reference: specification.md
   - Execution contract: execution-contract.md
   - Benchmark: benchmark.md
   - Development: development.md
