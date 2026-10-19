@@ -1,5 +1,9 @@
 # Reproducible benchmark
 
+The original seven-case measurements below describe version 0.1.0a2. The
+[128-case scoped execution measurement](#scoped-execution-at-128-cases) qualifies
+version 0.1.0a3 with independent suites, local metadata and explicit worker budgets.
+
 ## Workload
 
 The `examples/analytics` project contains **seven actual cases**. Six original cases
@@ -129,3 +133,54 @@ The [structured measurements](https://github.com/xu-hao/pytest-telescope/blob/ma
 contain every trial, runtime identity, installed runner digest, case outcomes, collection
 work, and medians. Raw command logs and copied projects remain local and are not release
 artifacts. These per-case a2 results replace the earlier file/group measurements.
+
+## Scoped execution at 128 cases
+
+Version 0.1.0a3 was measured on 2026-10-19 using a newly generated synthetic project:
+128 parametrized cases in 16 modules, two independent pytest suites and two static local
+distributions. Each case loads its package through a real metadata entry point, performs
+deterministic computation and reads its own declared JSON resource. Metadata is projected
+without building or installing application source into the runtime. The ordinary baseline
+runs the two suites separately with temporary generated metadata.
+
+```sh
+python benchmarks/scaling.py --output /tmp/telescope-scaling --cases 128 --parallel 4
+```
+
+Each worker has one CPU, 512 MiB memory, 128 processes and 64 MiB private scratch.
+The one-worker aggregate envelope equals those dimensions. The four-worker envelope is
+four CPUs, 2 GiB memory, 512 processes and 256 MiB scratch. Concurrency comes from these
+explicit budgets, not the host CPU count. Every fresh case still starts its own pytest
+session and container. Cold phases force all cases to execute. Each selective phase
+uses previously unseen content in one case's JSON input; reverting to already proven
+content can correctly reuse an older successful cache record.
+
+This single complete trial used the installed 0.1.0a3 wheel, host Python 3.12.3 and
+pytest 9.1.1. Times are seconds. Ordinary execution of both suites took **1.129 s**
+(1.048 s host process CPU). Runtime preparation took **0.914 s** separately and benefited
+from existing Docker layers.
+
+| Worker budget | Phase | External elapsed | Host process CPU | Worker CPU | Fresh / reused cases |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | Cold | 99.985 | 14.234 | 32.446 | 128 / 0 |
+| 1 | Warm | 0.414 | 0.378 | 0.000 | 0 / 128 |
+| 1 | One resource changed | 2.167 | 0.616 | 0.727 | 1 / 127 |
+| 4 | Cold | 34.724 | 14.501 | 33.530 | 128 / 0 |
+| 4 | Warm | 0.414 | 0.378 | 0.000 | 0 / 128 |
+| 4 | One resource changed | 2.117 | 0.617 | 0.721 | 1 / 127 |
+
+All phases passed exact case identity, suite/file membership, complete-inventory, resource
+envelope and outcome checks. Selective phases reran exactly the changed resource's case.
+Warm phases reused collection and all cases with zero current worker CPU. Collection
+refreshed after resource changes without discarding unrelated case successes. The
+benchmark removes its own runtime image and retains command logs, generated source and
+per-phase timing receipts locally.
+
+Parallelism reduced cold elapsed time in this fixture, but both cold modes were much
+slower than ordinary suite execution. Fresh container/session startup and lifecycle work
+dominate these small cases. This was one trial on a shared development host with other
+qualification activity during part of the trial, not an exclusive-host or repeated
+statistical study. The columns exclude Docker daemon CPU and do not establish universal
+speedups, linear scaling, or performance for a different workload. The
+[structured scoped measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/scoped-linux-docker.json)
+retain exact budgets, counts, inventory digests and timings.

@@ -127,6 +127,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
                 "args": [],
                 "config_args": [],
                 "plugins": [],
+                "inventory": ["test_another.py", "test_subject.py"],
             }
         ],
         "inputs": [

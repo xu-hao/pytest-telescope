@@ -86,7 +86,7 @@ def generate(root, count):
                 + ",\n".join(parameters)
                 + "])\n"
                 + "def test_value(key):\n"
-                + f'    assert version("example-{package}") == "1.0.0"\n    compute = entry_points(group="example.plugins", name="{package}")[0].load()\n'
+                + f'    assert version("example-{package}") == "1.0.0"\n    compute = next(iter(entry_points(group="example.plugins", name="{package}"))).load()\n'
                 + f'    value = json.loads((Path(__file__).resolve().parents[2] / "resources/{package}" / (key + ".json")).read_text())["value"]\n'
                 + "    assert compute(value) >= 0\n",
             )
@@ -130,6 +130,7 @@ def main():
             f"--junitxml={junit}",
         ]
         row = measure(command, project / "tests" / suite, output, "ordinary-" + suite)
+        (output / f"ordinary-{suite}.measurement.json").write_text(json.dumps(row, indent=2) + "\n")
         records = list(ET.parse(junit).getroot().iter("testcase"))
         if len(records) != options.cases // 2 or any(
             child.tag in {"failure", "error", "skipped"} for record in records for child in record
@@ -157,7 +158,9 @@ def main():
             ]
             for phase in ("cold", "warm", "selective"):
                 if phase == "selective":
-                    resource.write_text('{"value": 1}\n')
+                    # Each budget gets previously unseen content, rather than reusing
+                    # a successful content version measured under the earlier budget.
+                    resource.write_text(json.dumps({"value": concurrency}) + "\n")
                 label = f"workers-{concurrency}-{phase}"
                 command = [
                     sys.executable,
@@ -171,6 +174,7 @@ def main():
                     "-q",
                 ]
                 row = measure(command, project, output, label)
+                (output / f"{label}.measurement.json").write_text(json.dumps(row, indent=2) + "\n")
                 result = result_from_log(output / row["log"])
                 fresh = options.cases if phase == "cold" else 1 if phase == "selective" else 0
                 expected_counts = dict(

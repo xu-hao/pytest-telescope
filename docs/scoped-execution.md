@@ -30,7 +30,7 @@ def test_entry_point():
     from importlib.metadata import entry_points, version
 
     assert version("example-addon") == "1.0.0"
-    assert entry_points(group="example.plugins", name="addon")[0].load() == "addon"
+    assert next(iter(entry_points(group="example.plugins", name="addon"))).load() == "addon"
 ```
 
 `distributions` is additive in markers, defaults, and bundles. Like `inputs` and
