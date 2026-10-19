@@ -111,6 +111,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {
         "mode": "plan-only",
+        "execution": {"mode": "case", "profile": "case-v1"},
         "case_inventory": "requires isolated pytest collection",
         "inventory": ["test_another.py", "test_subject.py"],
         "discovery_scope": "declared-union",
