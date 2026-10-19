@@ -318,8 +318,8 @@ def test_structural_narrowing_preserves_broad_input_visibility_and_identity(proj
     put(
         project,
         "tests/core/test_alpha.py",
-        'from pathlib import Path\n'
-        'def test_broad():\n'
+        "from pathlib import Path\n"
+        "def test_broad():\n"
         '    assert Path("private.txt").read_text() == "synthetic undeclared input"\n'
         '    assert Path("tests/core/test_beta.py").is_file()\n',
     )
