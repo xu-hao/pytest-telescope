@@ -106,7 +106,7 @@ require their destination in the effective scope; absolute links and directory
 symlinks are unsupported. Explicit hidden glob components are supported.
 
 The default suite keeps pytest configuration in this pyproject's `[tool.pytest.ini_options]`.
-The next-alpha [independent suite declarations](scoped-execution.md) also support explicit
+The 0.1.0a3 [independent suite declarations](scoped-execution.md) also support explicit
 pytest.ini, .pytest.ini, tox.ini and setup.cfg files. Discovery honors configured `python_files`
 and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
 truncates matching files. Only named `env` variables are forwarded and keyed, including
@@ -184,7 +184,7 @@ infrastructure failure without running an unrestricted substitute.
 
 ## Outcome accounting
 
-The next-alpha [result schema](result-schema.md) adds versioned complete/incomplete
+The 0.1.0a3 [result schema](result-schema.md) adds versioned complete/incomplete
 inventory accounting, opaque case identities and explicit unsupported-capability refusals.
 
 

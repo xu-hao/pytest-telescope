@@ -1,7 +1,7 @@
 # Per-case quickstart
 
 These are the base files for the [runnable tutorial](https://pytest-telescope.readthedocs.io/en/latest/).
-They require pytest-telescope 0.1.0a2 and a working local Linux Docker daemon.
+They use pytest-telescope 0.1.0a3 and a working local Linux Docker daemon.
 
 From this directory, with pytest-telescope installed:
 

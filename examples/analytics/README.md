@@ -4,7 +4,7 @@ Seven actual cases exercise deterministic Python computation and JSON inputs: tw
 for customer scoring, demand projection, and price schedules, plus one unmarked case
 that reads a project note. This is synthetic data, not production data.
 
-Install pytest-telescope 0.1.0a2, then run from this directory:
+Install pytest-telescope 0.1.0a3, then run from this directory:
 
 ```sh
 python -m pytest -q
