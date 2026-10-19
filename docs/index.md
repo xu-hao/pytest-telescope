@@ -332,6 +332,7 @@ available in version 0.1.0a2.
 Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
+Optional batches <batching>
 Scoped execution extension <scoped-execution>
 Run result reference <result-schema>
 Benchmark <benchmark>

@@ -160,13 +160,14 @@ before collection or any cache hit. Concurrency is the minimum of each aggregate
 divided by its per-worker limit, capped at 32 to reserve bounded lifecycle journal
 capacity. An envelope that cannot fit one worker refuses. Host CPU discovery does not
 set concurrency. Collection runs sequentially within one worker slot, then independent
-case misses use the computed bound. Each case starts a fresh container and pytest
-session with private scratch. Aggregate limits bound active worker containers; bounded
+case misses use the computed bound. By default each case starts a fresh container and pytest
+session with private scratch. The approved optional [batch profile](batching.md) instead
+shares one fresh session and scratch only among exactly equal scopes in one suite/module. Aggregate limits bound active worker containers; bounded
 host control, frozen pool storage and output retain their separate documented limits.
 
 Per-worker CPU, memory (without extra swap), process and scratch quotas are Docker
 limits and are cache identity. Aggregate scheduling budgets affect scheduling; because project configuration is an
-automatic input, changing a budget conservatively invalidates results too. This does not enable mutable-session reuse or shared-case groups.
+automatic input, changing a budget conservatively invalidates results too. The aggregate budget does not itself opt into batching; execution mode is explicit.
 The controller schedules at most the worker bound, without an unbounded future queue.
 All summary rows appear in deterministic suite/node order and each current case is
 accounted exactly once. Completion order never changes identity or counts.
