@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-config --strict-markers"
+
+[tool.pytest_telescope]
+test_roots = ["tests"]
+
+[tool.pytest_telescope.bundles.common]
+inputs = ["tests/conftest.py", "demoapp/__init__.py", "demoapp/common.py"]
+
+[tool.pytest_telescope.targets.scoring]
+tests = ["tests/test_scoring.py"]
+inputs = ["demoapp/scoring.py", "data/customers.json"]
+bundles = ["common"]
+
+[tool.pytest_telescope.targets.demand]
+tests = ["tests/test_demand.py"]
+inputs = ["demoapp/demand.py", "data/demand.json"]
+bundles = ["common"]
+
+[tool.pytest_telescope.targets.pricing]
+tests = ["tests/test_pricing.py"]
+inputs = ["demoapp/pricing.py", "data/prices.json"]
+bundles = ["common"]

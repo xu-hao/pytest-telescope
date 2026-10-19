@@ -1,0 +1,11 @@
+site_name: pytest-telescope
+site_description: Declared inputs. Isolated tests. Focused reruns.
+repo_url: https://github.com/xu-hao/pytest-telescope
+strict: true
+nav:
+  - Overview: index.md
+  - Specification: specification.md
+  - Execution contract: execution-contract.md
+  - Benchmark: benchmark.md
+  - Development: development.md
+  - Publishing: publishing.md
