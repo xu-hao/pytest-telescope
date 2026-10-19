@@ -501,3 +501,37 @@ def test_large(number): pass
     assert raised.value.capability == "execution:batch-size"
     assert collections
     assert not list((project / ".pytest-telescope/cache").glob("*.json"))
+
+
+def test_batch_protocol_and_shared_fixture_on_supported_pytest8(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        runtime,
+        "DEFAULT_REQUIREMENTS",
+        runtime.DEFAULT_REQUIREMENTS.replace("pytest==9.1.1", "pytest==8.3.5"),
+    )
+    put(tmp_path, "pyproject.toml", '[tool.pytest_telescope.execution]\nmode="batch"\n')
+    put(
+        tmp_path,
+        "test_compatibility.py",
+        """
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+@pytest.fixture(scope="session")
+def state():
+    values=[]
+    yield values
+    assert values == [0,1]
+@pytest.mark.parametrize("number", [0,1])
+def test_shared(number,state):
+    assert pytest.__version__ == "8.3.5"
+    assert len(state) == number
+    state.append(number)
+""",
+    )
+    image = runtime.build_runtime(tmp_path)["image"]
+    try:
+        cold = run(tmp_path)
+        assert cold["counts"]["executed"] == 2 and len(cold["groups"]) == 1
+        assert run(tmp_path)["counts"]["reused"] == 2
+    finally:
+        runtime.command(["docker", "image", "rm", image])

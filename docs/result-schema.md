@@ -103,7 +103,7 @@ collection hooks. Hash sorting does not define execution order.
 | `cache_eligible` | Complete successful evidence accepted after lifecycle cleanup with reuse enabled. False for `--no-cache` and `cache=False`. |
 | `attempts` | Group worker attempts; zero for reuse or before a worker starts. |
 | `attempt_seconds` | Controller wall time across group attempts, including retries. |
-| `worker_seconds`, `cpu_seconds` | Available worker measurements across attempts, counted once per group and zero on reuse. |
+| `worker_seconds`, `cpu_seconds` | Final valid attempt worker measurements, counted once per group; zero on reuse or when unavailable. |
 | `timing_complete` | False when retries or unavailable measurements prevent a complete worker-timing account. |
 | `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Member totals: known unrun members are distinct from attempted members with no valid result. |
 | `stop_reason` | `null` for complete groups; otherwise `pytest-stop`, `collection`, `infrastructure`, or `cancelled`. |

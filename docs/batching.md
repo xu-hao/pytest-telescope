@@ -1,8 +1,7 @@
 # Optional identical-scope batches
 
-This is the approved execution contract for the optional 0.1.0a3 batching profile.
-The previously qualified per-case checkpoint remains retained; batching requires its own
-installed-package qualification before publication. The [scoped execution contract](scoped-execution.md)
+This is the execution contract for the optional 0.1.0a3 batching profile.
+The [scoped execution contract](scoped-execution.md)
 continues to own source, metadata, suite and resource boundaries.
 
 ## Choose fixture lifetime explicitly
@@ -84,8 +83,10 @@ pass remains an observed pass even when its group cannot be cached. Skips are co
 but skip reason text and arbitrary captured output are not supported diagnostics.
 
 Infrastructure retries remain bounded at two attempts per group. Only the final valid
-attempt supplies member results; attempts and cumulative group worker timing are reported
-separately from member counts. Invalid worker output, collection drift, cancellation,
+attempt supplies member results and worker measurements. Controller wall time spans all
+attempts; `timing_complete` is false after retries or unavailable results, because worker
+CPU/time from an opaque failed attempt is unknown. These measurements are separate from
+member counts. Invalid worker output, collection drift, cancellation,
 failed descendant/container cleanup and outer lifecycle failure cannot mint successes.
 Cancellation stops new submissions and drains all owned active groups. Unstarted
 members remain explicitly accounted. No fallback widens runtime capabilities or source.
@@ -117,7 +118,7 @@ if planning was interrupted before completion. A group row contains:
 | `cache_eligible` | Complete successful evidence accepted after lifecycle and enabled reuse policy; false for `--no-cache` or `cache=False`. |
 | `attempts` | Worker attempts for this group; zero on reuse or before worker start. |
 | `attempt_seconds` | Controller wall time across group attempts and retries. |
-| `worker_seconds`, `cpu_seconds` | Available worker measurements across attempts, counted once, zero for reuse. |
+| `worker_seconds`, `cpu_seconds` | Final valid attempt worker measurements, counted once; zero on reuse or when unavailable. |
 | `timing_complete` | False when retries or unavailable worker measurements prevent complete timing accounting. |
 | `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Final-attempt member totals; distinguish known unrun members from attempted members without a valid result. |
 
@@ -157,7 +158,7 @@ limited by the same 100,000-case invocation bound and validated serialized recor
 
 ## Decisive proof and qualification
 
-Before production implementation, a synthetic installed-runtime Docker proof must show
+The synthetic installed-runtime Docker proof in `scripts/probe_batching.py` checks
 ordinary shared session/module/class setup and teardown, distinct function `tmp_path`,
 shared scratch, denied undeclared reads, equal-scope eligibility, unequal-scope separation,
 and honest partial execution for `-x`/`--maxfail` and shared teardown failure. It proves
