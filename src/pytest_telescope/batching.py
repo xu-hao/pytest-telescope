@@ -28,7 +28,10 @@ def group_jobs(jobs, mode, state):
         job["case_ids"] = ids
         job["key"] = fingerprint({**job["identity"], "case_ids": ids})
         job["path"] = state / (job["key"] + ".json")
-    return list(grouped.values())
+    return sorted(
+        grouped.values(),
+        key=lambda job: (job["suite"].name, job["item"]["file"], job["item"]["order"]),
+    )
 
 
 def group_row(job):
