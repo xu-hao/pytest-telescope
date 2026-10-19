@@ -6,8 +6,8 @@ from .model import DeclarationError, InfrastructureError, load, render_json
 PlanError = DeclarationError
 
 
-def make_plan(root):
-    manifest = load(root)
+def make_plan(root, *, suites=None, structural_files=None):
+    manifest = load(root, suite_names=suites, structural_files=structural_files)
     result = {
         "mode": "plan-only",
         "execution": {

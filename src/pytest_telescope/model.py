@@ -288,7 +288,7 @@ def _with_first(first, rest):
     yield from rest
 
 
-def load(root, *, cache_dir=None, suite_names=None):
+def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
@@ -336,6 +336,38 @@ def load(root, *, cache_dir=None, suite_names=None):
     from .project_metadata import load_distributions
 
     configured_suites = parse_suites(root, spec, suite_names)
+    overrides = mapping({} if structural_files is None else structural_files, "structural_files")
+    if set(overrides) - {suite.name for suite in configured_suites}:
+        raise DeclarationError("structural_files keys must name selected configured suites")
+    for suite in configured_suites:
+        if suite.name not in overrides:
+            continue
+        names = sequence(overrides[suite.name], "structural_files")
+        if len(names) != len(set(names)):
+            raise DeclarationError("structural_files cannot contain duplicate paths")
+        for name in names:
+            if (
+                relative(name) != name
+                or not name.endswith(".py")
+                or len(name.encode()) > 4096
+                or any(ord(char) < 32 for char in name)
+                or excluded_namespace(root, name, excluded)
+            ):
+                raise DeclarationError(
+                    "structural_files requires canonical project-relative Python test files"
+                )
+            try:
+                with parent_fd(root, name) as (directory, leaf):
+                    metadata = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise DeclarationError(
+                            "structural_files requires regular files without symlinks"
+                        )
+            except OSError as exc:
+                raise DeclarationError(
+                    "structural_files requires existing regular files without symlink ancestors"
+                ) from exc
+        suite.structural_files = sorted(names)
     execution = spec.get("execution", {})
     envelope(execution)
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
@@ -412,10 +444,16 @@ def load(root, *, cache_dir=None, suite_names=None):
                 if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
                     raise DeclarationError("test source must be a regular project file")
                 members.add(filename)
-                inventory.add(filename)
-                if len(inventory) > 100_000:
+                if len(members) > 100_000:
                     raise DeclarationError("test inventory exceeds 100000 files")
+        if suite.structural_files is not None:
+            if set(suite.structural_files) - members:
+                raise DeclarationError("structural_files cannot widen configured suite membership")
+            members = set(suite.structural_files)
         suite.inventory = sorted(members)
+        inventory.update(members)
+        if len(inventory) > 100_000:
+            raise DeclarationError("test inventory exceeds 100000 files")
     addopts = [*configured_suites[0].config_args, *configured_suites[0].args]
     registry, declarations, hashes = [], {}, {"pyproject.toml": hashlib.sha256(raw).hexdigest()}
     for suite in configured_suites:

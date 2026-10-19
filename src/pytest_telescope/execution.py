@@ -81,9 +81,10 @@ class Suite:
     patterns: list
     raw: bytes
     inventory: list
+    structural_files: list | None = None
 
     def identity(self):
-        return {
+        result = {
             key: getattr(self, key)
             for key in (
                 "name",
@@ -98,6 +99,9 @@ class Suite:
                 "plugins",
             )
         }
+        if self.structural_files is not None:
+            result["structural_files"] = self.structural_files
+        return result
 
 
 def config_options(root, name):

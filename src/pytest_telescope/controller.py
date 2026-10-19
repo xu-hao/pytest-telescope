@@ -422,6 +422,7 @@ def run(
     budget=None,
     suites=None,
     execution_mode=None,
+    structural_files=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -441,7 +442,7 @@ def run(
     state = (
         Path(cache_dir).resolve() if cache_dir else Path(root).resolve() / ".pytest-telescope/cache"
     )
-    manifest = load(root, cache_dir=state, suite_names=suites)
+    manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
     resources = envelope(manifest.execution, budget)
     mode = choose_mode(manifest.execution, execution_mode)
     profile = mode + "-v1"
