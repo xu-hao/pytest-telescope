@@ -75,7 +75,7 @@ def main():
         return project_file(path) + (separator + suffix if separator else "")
 
     mode = request["mode"]
-    if mode not in ("collection", "execution"):
+    if mode not in ("collection", "execution", "batch"):
         raise ValueError("invalid request mode")
     cases, finished, selected_ids, failures = {}, set(), [], []
     origins, positions_cache, source_calls, required_origins = {}, {}, {}, {}
@@ -307,11 +307,11 @@ def main():
                 )
                 if identity(canonical(file_inventory)) != request["expected_digest"]:
                     invalid("containing-file inventory differs from discovery")
-                chosen = [
-                    item for item in items if case_identity(item.nodeid) == request["case_id"]
-                ]
-                if len(chosen) != 1:
-                    invalid("execution did not select exactly the discovered case")
+                requested = request["case_ids"] if mode == "batch" else [request["case_id"]]
+                wanted = set(requested)
+                chosen = [item for item in items if case_identity(item.nodeid) in wanted]
+                if [case_identity(item.nodeid) for item in chosen] != requested:
+                    invalid("execution membership or order differs from discovery")
             chosen_set = set(chosen)
             deselected = [item for item in items if item not in chosen_set]
             items[:] = chosen
@@ -326,7 +326,7 @@ def main():
             self.session = session
             self.unchanged(session)
             self.checkpoint = not collection_failed and self.selection is not None
-            if mode == "execution" and self.checkpoint:
+            if mode != "collection" and self.checkpoint:
                 selected_ids[:] = [case_identity(item.nodeid) for item in session.items]
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -401,14 +401,14 @@ def main():
         "failures": failures,
     }
     if mode == "collection":
-        selected = {item.nodeid for item in observer.selection or ()}
+        selected = {item.nodeid: order for order, item in enumerate(observer.selection or ())}
         items = [
-            {**row, "selected": nodeid in selected}
+            {**row, "selected": nodeid in selected, "order": selected.get(nodeid)}
             for nodeid, (_, row) in sorted(observer.captured.items())
         ]
         result = {
             **common,
-            "protocol": 3,
+            "protocol": 4,
             "kind": "collection",
             "items": items,
             "complete": observer.checkpoint
@@ -432,6 +432,19 @@ def main():
             and set(selected_ids) == finished
             and len(cases) == len(selected_ids),
         }
+    if mode == "batch":
+        requested = request["case_ids"]
+        result.update(
+            protocol=2,
+            group_id=request["group_id"],
+            case_ids=requested,
+            collected=len(requested),
+            case_results=[
+                dict(case_id=case, outcome=cases.get(case, "not-run"), complete=case in finished)
+                for case in requested
+            ],
+        )
+        result["complete"] = result["complete"] and selected_ids == requested
     print("TELESCOPE_RESULT " + canonical(result), flush=True)
     return exit_code
 

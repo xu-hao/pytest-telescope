@@ -29,7 +29,8 @@ class Envelope:
 
 
 def envelope(config, override=None):
-    config = mapping(config, "execution", {"worker", "budget"})
+    config = mapping(config, "execution", {"worker", "budget", "mode"})
+    execution_mode(config)
 
     def dimensions(value, label):
         value = mapping(value, label, set(DEFAULT_WORKER))
@@ -56,6 +57,13 @@ def envelope(config, override=None):
     if count < 1:
         raise DeclarationError("aggregate budget cannot fit one worker in every dimension")
     return Envelope(worker, budget, count)
+
+
+def execution_mode(config, override=None):
+    mode = config.get("mode", "case") if override is None else override
+    if type(mode) is not str or mode not in {"case", "batch"}:
+        raise DeclarationError("execution mode must be case or batch")
+    return mode
 
 
 @dataclass

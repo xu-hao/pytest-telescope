@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .model import DeclarationError, InfrastructureError, UnsupportedCapability
-from .result import validate_collection, validate_result
+from .result import validate_batch, validate_collection, validate_result
 
 try:
     import fcntl
@@ -640,11 +640,13 @@ def execute(
         path.write_text(text)
         path.chmod(0o444)
         os.utime(path, ns=(0, 0))
-    if type(request) is not dict or request.get("mode") not in ("collection", "execution"):
+    if type(request) is not dict or request.get("mode") not in ("collection", "execution", "batch"):
         raise InfrastructureError("worker requires an explicit request protocol")
     required = (
         {"mode", "registry", "selectors"}
         if request["mode"] == "collection"
+        else {"mode", "registry", "group_id", "case_ids", "expected_digest"}
+        if request["mode"] == "batch"
         else {"mode", "registry", "case_id", "expected_digest"}
     )
     if set(request) != required or type(request["registry"]) is not list:
@@ -726,7 +728,7 @@ def execute(
             cmd,
             timeout,
             merged=True,
-            limit=MAX_COLLECTION if request["mode"] == "collection" else MAX_OUTPUT,
+            limit=MAX_COLLECTION if request["mode"] in {"collection", "batch"} else MAX_OUTPUT,
             cancellation=cancellation,
         )
         unsupported = [
@@ -756,6 +758,13 @@ def execute(
         valid = (
             validate_collection(result, nonce=data["token"])
             if request["mode"] == "collection"
+            else validate_batch(
+                result,
+                nonce=data["token"],
+                group_id=request["group_id"],
+                case_ids=request["case_ids"],
+            )
+            if request["mode"] == "batch"
             else validate_result(
                 result,
                 nonce=data["token"],
