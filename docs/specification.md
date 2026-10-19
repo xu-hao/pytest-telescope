@@ -123,6 +123,34 @@ a filtered invocation cannot reuse an unfiltered run's result. `--force` refresh
 inventory and executes successes again; `--no-cache` also prevents recording them.
 `plan` is only a nonexecuting static scope preview, not actual case enumeration.
 
+Python callers can narrow a suite's files before marker parsing or collection imports:
+
+```python
+from pathlib import Path
+from pytest_telescope.controller import run
+from pytest_telescope.plan import make_plan
+
+files = {"core": ["tests/core/test_prices.py"]}
+preview = make_plan(Path("."), suites=["core"], structural_files=files)
+result = run(Path("."), suites=["core"], structural_files=files)
+```
+
+Unlike a node selector in `arguments`, this exact list excludes other test modules from
+the invocation's inventory. `collection.suites` reports the effective files, and
+`inventory_complete` covers only that boundary. Omitted files have no unselected rows.
+This API does not change a case's input scope: unmarked cases still see and key the
+broad project snapshot. It also preserves suite cwd, root, resources and capabilities.
+
+Unspecified suites keep their configured membership; `{}` changes nothing and `[]`
+makes one suite empty. Lists contain at most 4,096 canonical existing regular Python
+test files within configured roots and patterns; duplicates, symlinks and foreign or
+excluded paths are refused. List order is normalized. An explicit list has its own
+cache identity even if it matches automatic discovery; changing it refreshes that
+suite's context while unchanged suites retain theirs. New files enter an exact-list
+invocation only when added to the list. See the
+[structural narrowing contract](scoped-execution.md#invocation-only-structural-file-narrowing)
+for validation and coverage rules. This override is available through the Python API.
+
 Each case gets a new pytest session. Fixtures with broader pytest scopes are recreated
 for each case in default `case` mode. Optional [batch mode](batching.md) shares ordinary
 pytest fixture lifetime only inside equal-scope suite/module groups. See the

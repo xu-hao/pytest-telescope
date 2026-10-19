@@ -144,7 +144,7 @@ Keys must name selected configured suites. An unspecified selected suite retains
 configured structural membership. An explicit empty list makes that suite's effective
 inventory empty; it does not trigger pytest's default discovery. An empty mapping has
 no effect. List order is normalized lexically and duplicate paths are refused, rather
-than treated as aliases. Values are lists of canonical project-relative existing regular
+than treated as aliases. Each list is limited to 4,096 files. Values are lists of canonical project-relative existing regular
 Python test files: no absolute paths, `./`, `..`, repeated separators, backslashes,
 symlinks or symlink ancestors. A file must satisfy that suite's configured test roots,
 include/exclude patterns and Python test-file patterns. Foreign or excluded modules,
