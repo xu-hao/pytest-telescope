@@ -1,6 +1,9 @@
 import json
 
+import pytest
 from demoapp.demand import project
+
+pytestmark = pytest.mark.telescope(bundles=["demand"])
 
 
 def test_empty():

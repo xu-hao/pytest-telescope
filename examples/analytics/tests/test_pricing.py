@@ -1,6 +1,9 @@
 import json
 
+import pytest
 from demoapp.pricing import exposure
+
+pytestmark = pytest.mark.telescope(bundles=["pricing"])
 
 
 def test_empty():

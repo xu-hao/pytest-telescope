@@ -75,7 +75,8 @@ telescope mode is disabled; `-p no:telescope` disables plugin loading entirely.
 
 **Version note:** 0.1.0a2 uses the marker interface. Immutable 0.1.0a1 used file/group
 targets; central `targets` declarations must migrate to markers, defaults, and bundles.
-Historical file/group benchmark timings do not establish per-case performance.
+The [benchmark](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md)
+records measured per-case cold/warm and selective reruns, including broad-case costs.
 
 See the [marker/project reference](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md), [execution contract](https://github.com/xu-hao/pytest-telescope/blob/main/docs/execution-contract.md),
 [development guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/development.md), and [publishing guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md).

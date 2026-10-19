@@ -1,11 +1,10 @@
 # Synthetic analytics example
 
-Three targets each contain two tests. Customer scoring, demand projection, and
-price schedules perform deterministic Python computation on JSON inputs. Every
-target depends on `demoapp/common.py`; resource and application modules are
-otherwise separate. This is synthetic qualification data, not production data.
+Seven actual cases exercise deterministic Python computation and JSON inputs: two each
+for customer scoring, demand projection, and price schedules, plus one unmarked case
+that reads a project note. This is synthetic data, not production data.
 
-Install pytest-telescope from the repository, then run from this directory:
+Install pytest-telescope 0.1.0a2, then run from this directory:
 
 ```sh
 python -m pytest -q
@@ -14,12 +13,25 @@ python -m pytest_telescope run --explain -- -q
 python -m pytest_telescope run --explain -- -q
 ```
 
-The unchanged second isolated run should reuse all three successful targets.
-Changing `demoapp/scoring.py` affects scoring only. Changing `data/demand.json`
-affects demand only. Changing `demoapp/common.py` affects all three. The
-`benchmarks/run.py` harness in the repository automates these scenarios on a copy
-and records actual counts and externally measured elapsed/controller CPU time.
+The unchanged second isolated run reuses all seven cases and its collection inventory.
+Each actual case starts a fresh session, so even the session-scoped data directory
+fixture is recreated per case.
 
-The manifest declares conftest, the package initializer, the shared helper, each
-test module, and each target's Python/JSON inputs. The target is one fresh pytest
-session: its two cases share the fixture, and no fixture state crosses targets.
+Module-level literal markers select reusable scoring, demand, and pricing bundles.
+Those bundles include the common helper, package initializer, conftest, and domain
+Python/JSON inputs. Only the customer-scores case adds `data/scoring-check.json` with a
+function marker. The unmarked project-note case sees and hashes the broad project
+snapshot; it therefore reruns for every benchmark mutation.
+
+| Change | Executed cases | Reused cases |
+| --- | ---: | ---: |
+| `demoapp/scoring.py` | 3: both scoring cases and broad case | 4 |
+| `data/demand.json` | 3: both demand cases and broad case | 4 |
+| `data/scoring-check.json` | 2: customer-scores case and broad case | 5 |
+| `demoapp/common.py` | 7 | 0 |
+
+The repository's `benchmarks/run.py` automates these mutations on fresh copies and
+checks every individual case identity and outcome. It measures external elapsed/host
+process CPU, and separately records collection and execution worker CPU. Runtime
+preparation is measured separately. The [benchmark documentation](https://pytest-telescope.readthedocs.io/en/latest/benchmark/)
+explains the results and their limits.
