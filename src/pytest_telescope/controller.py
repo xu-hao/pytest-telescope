@@ -32,7 +32,7 @@ from .model import (
     snapshot,
 )
 
-SCHEMA = 3
+SCHEMA = 4
 
 
 def suite_directories(snapshot, suite):
@@ -68,8 +68,8 @@ def lock(path, timeout):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def read_record(path, key, *, kind="execution", case_id=None):
-    limit = 64 * 1024 * 1024 if kind == "collection" else 1_048_576
+def read_record(path, key, *, kind="execution", case_id=None, group_id=None, case_ids=None):
+    limit = 64 * 1024 * 1024 if kind in {"collection", "batch"} else 1_048_576
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
@@ -87,11 +87,13 @@ def read_record(path, key, *, kind="execution", case_id=None):
             or record["checksum"] != fingerprint(result)
         ):
             return None
-        from .result import validate_collection, validate_result
+        from .result import validate_batch, validate_collection, validate_result
 
         valid = (
             validate_collection(result, successful_only=True)
             if kind == "collection"
+            else validate_batch(result, successful_only=True, group_id=group_id, case_ids=case_ids)
+            if kind == "batch"
             else validate_result(result, successful_only=True, case_id=case_id)
         )
         if not valid:
@@ -102,7 +104,7 @@ def read_record(path, key, *, kind="execution", case_id=None):
 
 
 def write_record(path, key, result, *, kind="execution"):
-    limit = 64 * 1024 * 1024 if kind == "collection" else 1_048_576
+    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 2 else 1_048_576
     record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
     content = json.dumps(record, sort_keys=True).encode()
     if len(content) > limit:
@@ -345,6 +347,9 @@ def _unit_result(item, outcome, reason="", result=None, attempts=0):
         "worker_seconds": 0,
         "cpu_seconds": 0,
         "failures": [],
+        "group_id": None,
+        "result_status": None,
+        "complete": False,
     }
     if result is not None:
         for name in (
@@ -401,7 +406,7 @@ def _summary(results, collection, started, setup_seconds):
         "elapsed_seconds": time.monotonic() - started,
         "setup_seconds": setup_seconds,
         "worker_cpu_seconds": collection["cpu_seconds"]
-        + sum(row["cpu_seconds"] for row in results),
+        + sum(row["cpu_seconds"] or 0 for row in results),
     }
 
 
@@ -416,12 +421,15 @@ def run(
     arguments=(),
     budget=None,
     suites=None,
+    execution_mode=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+    from .batching import group_jobs, group_row, project_result
     from .execution import effective_arguments as suite_arguments
     from .execution import envelope
+    from .execution import execution_mode as choose_mode
     from .model import Unit
     from .project_metadata import materialize_metadata, metadata_records
 
@@ -435,6 +443,8 @@ def run(
     )
     manifest = load(root, cache_dir=state, suite_names=suites)
     resources = envelope(manifest.execution, budget)
+    mode = choose_mode(manifest.execution, execution_mode)
+    profile = mode + "-v1"
     chosen_suites = set(suites) if suites is not None else {suite.name for suite in manifest.suites}
     if not chosen_suites or chosen_suites - {suite.name for suite in manifest.suites}:
         raise DeclarationError("suite selection must name configured suites")
@@ -476,12 +486,28 @@ def run(
             for suite, _ in configured
         ],
     )
-    results = []
+    results, groups = [], []
+    published = False
 
     def summary(setup):
         report = _summary(results, collection, started, setup)
-        report["schema"] = 1
+        report["schema"] = 2
         report["kind"] = "run"
+        report["execution"] = dict(mode=mode, profile=profile)
+        report["groups"] = groups
+        report["worker_cpu_seconds"] = collection["cpu_seconds"] + sum(
+            group["cpu_seconds"] for group in groups
+        )
+        if (
+            collection["outcome"] != "infrastructure_error"
+            and any(group["stop_reason"] in {"pytest-stop", "collection"} for group in groups)
+            and not any(group["stop_reason"] in {"infrastructure", "cancelled"} for group in groups)
+        ):
+            report["status"] = "failed"
+        if published:
+            for group in groups:
+                if group["group_id"] in eligible_groups:
+                    group["cache_eligible"] = True
         report["inventory_complete"] = all(
             row["outcome"] in {"reused", "executed"} for row in collection["suites"]
         )
@@ -516,10 +542,12 @@ def run(
         "snapshot_owner": [os.getuid(), os.getgid()],
         "policy": runtime.POLICY,
         "worker_limits": resources.worker,
+        "profile": profile,
     }
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     cancellation = threading.Event()
     blocked = None
+    eligible_groups = set()
     setup_seconds = time.monotonic() - started
     try:
         with lock(state / ".lock", timeout * 2 + 30):
@@ -600,7 +628,7 @@ def run(
                         reused = collected is not None
                         if collected is None and not suite.inventory:
                             collected = dict(
-                                protocol=3,
+                                protocol=4,
                                 kind="collection",
                                 nonce="0" * 32,
                                 items=[],
@@ -766,50 +794,24 @@ def run(
                                 )
                                 scopes[signature] = unit, scope_key
                             unit, scope_key = scopes[signature]
-                            key = fingerprint(
-                                {
-                                    **suite_common,
-                                    "kind": "execution",
-                                    "case": item["case_id"],
-                                    "scope": scope_key,
-                                    "inventory": digests[item["file"]],
-                                }
-                            )
-                            path = state / (key + ".json")
-                            enabled = unit.cache and not no_cache
-                            previous = (
-                                read_record(
-                                    path,
-                                    key,
-                                    case_id=item["case_id"],
-                                )
-                                if enabled and not force
-                                else None
-                            )
-                            if previous is not None:
-                                results.append(
-                                    row(
-                                        "reused",
-                                        "complete successful case record matches"
-                                        if explain
-                                        else "",
-                                        {**previous, "worker_seconds": 0, "cpu_seconds": 0},
-                                    )
-                                )
-                                continue
                             results.append(row("infrastructure_error", "execution not started"))
                             jobs.append(
-                                (
-                                    index,
-                                    item,
-                                    unit,
-                                    suite,
-                                    options,
-                                    registry_files.get(item["file"], []),
-                                    digests[item["file"]],
-                                    path,
-                                    key,
-                                    enabled,
+                                dict(
+                                    index=index,
+                                    item=item,
+                                    unit=unit,
+                                    suite=suite,
+                                    options=options,
+                                    registry=registry_files.get(item["file"], []),
+                                    digest=digests[item["file"]],
+                                    scope=scope_key,
+                                    enabled=unit.cache and not no_cache,
+                                    identity={
+                                        **suite_common,
+                                        "kind": "execution",
+                                        "scope": scope_key,
+                                        "inventory": digests[item["file"]],
+                                    },
                                 )
                             )
                     if requested_selectors - all_selected_aliases:
@@ -821,26 +823,42 @@ def run(
                     )
                     setup_seconds = time.monotonic() - started - collection["worker_seconds"]
 
-                    def execute_job(job):
-                        index, item, unit, suite, options, registry, digest, path, key, enabled = (
-                            job
+                    candidates = group_jobs(jobs, mode, state)
+                    jobs = []
+                    for candidate in candidates:
+                        candidate["group_index"] = len(groups)
+                        groups.append(group_row(candidate))
+                        previous = (
+                            read_record(
+                                candidate["path"],
+                                candidate["key"],
+                                kind="batch" if mode == "batch" else "execution",
+                                case_id=candidate["case_ids"][0],
+                                group_id=candidate["key"],
+                                case_ids=candidate["case_ids"],
+                            )
+                            if candidate["enabled"] and not force
+                            else None
                         )
+                        projected, group = project_result(
+                            candidate, previous, mode, reused=previous is not None
+                        )
+                        groups[candidate["group_index"]] = group
+                        for index, row in projected:
+                            results[index] = row
+                        if previous is None:
+                            jobs.append(candidate)
+
+                    def execute_job(job):
+                        item, unit, suite = job["item"], job["unit"], job["suite"]
                         reason = (
                             "forced"
                             if force
                             else "non-cacheable"
-                            if not enabled
-                            else "no valid successful case record"
+                            if not job["enabled"]
+                            else "no valid successful group record"
                         )
-
-                        def outcome(status, message="", result=None, attempts=0):
-                            return {
-                                **_unit_result(item, status, message, result, attempts),
-                                "suite": suite.name,
-                                "name": item["case_id"],
-                                "case_id": item["case_id"],
-                            }
-
+                        attempt_started = time.monotonic()
                         for attempt in range(2):
                             try:
                                 if cancellation.is_set():
@@ -858,6 +876,17 @@ def run(
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
                                     )
+                                    request = dict(
+                                        mode="batch" if mode == "batch" else "execution",
+                                        registry=job["registry"],
+                                        expected_digest=job["digest"],
+                                    )
+                                    if mode == "batch":
+                                        request.update(
+                                            group_id=job["key"], case_ids=job["case_ids"]
+                                        )
+                                    else:
+                                        request["case_id"] = item["case_id"]
                                     result = runtime.execute(
                                         identity["image"],
                                         frozen,
@@ -874,7 +903,7 @@ def run(
                                                 for plugin in suite.plugins
                                                 for part in ("-p", plugin)
                                             ],
-                                            *options,
+                                            *job["options"],
                                             "/project/" + item["file"],
                                         ],
                                         environment,
@@ -887,43 +916,45 @@ def run(
                                         metadata_directory=metadata,
                                         limits=resources.worker,
                                         cancellation=cancellation,
-                                        request={
-                                            "mode": "execution",
-                                            "registry": registry,
-                                            "case_id": item["case_id"],
-                                            "expected_digest": digest,
-                                        },
+                                        request=request,
                                     )
                                 if result["exit_code"] == 4:
                                     raise DeclarationError(
                                         "case collection or declarations differ from validated inventory"
                                     )
-                                return (
-                                    outcome(
-                                        "executed" if result["exit_code"] == 0 else "failed",
-                                        reason if explain else "",
-                                        result,
-                                        attempt + 1,
-                                    ),
+                                projected, group = project_result(
+                                    job,
                                     result,
-                                    False,
+                                    mode,
+                                    attempts=attempt + 1,
+                                    reason=reason if explain else "",
+                                    attempt_seconds=time.monotonic() - attempt_started,
                                 )
+                                return projected, group, result, False
                             except (InfrastructureError, OSError) as exc:
                                 terminal = isinstance(exc, runtime.CleanupError)
                                 if terminal:
                                     cancellation.set()
                                 if attempt == 1 or terminal:
-                                    return (
-                                        outcome(
-                                            "infrastructure_error",
-                                            str(exc)
-                                            if isinstance(exc, InfrastructureError)
-                                            else "owned storage operation failed",
-                                            attempts=attempt + 1,
-                                        ),
+                                    projected, group = project_result(
+                                        job,
                                         None,
-                                        terminal,
+                                        mode,
+                                        attempts=attempt + 1,
+                                        reason=str(exc)
+                                        if isinstance(exc, InfrastructureError)
+                                        else "owned storage operation failed",
+                                        attempt_seconds=time.monotonic() - attempt_started,
                                     )
+                                    group["timing_complete"] = False
+                                    if isinstance(exc, runtime.InvocationInterrupted):
+                                        group["stop_reason"] = "cancelled"
+                                    return projected, group, None, terminal
+
+                    def accept(job, projected, group):
+                        groups[job["group_index"]] = group
+                        for index, row in projected:
+                            results[index] = row
 
                     active, cursor = {}, 0
                     executor = ThreadPoolExecutor(max_workers=resources.concurrency)
@@ -942,17 +973,18 @@ def run(
                             completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
                             for future in completed:
                                 job = active.pop(future)
-                                row, result, terminal = future.result()
-                                results[job[0]] = row
+                                projected, group, result, terminal = future.result()
+                                accept(job, projected, group)
                                 if terminal:
                                     blocked = "run stopped after owned-resource cleanup failure or cancellation"
                                 if (
                                     result is not None
                                     and result["exit_code"] == 0
-                                    and job[-1]
+                                    and job["enabled"]
                                     and not cancellation.is_set()
                                 ):
-                                    pending.stage(job[-3], job[-2], result)
+                                    pending.stage(job["path"], job["key"], result)
+                                    eligible_groups.add(job["key"])
                     except (runtime.InvocationInterrupted, KeyboardInterrupt):
                         blocked = "run cancelled; active workers drained before result publication"
                         cancellation.set()
@@ -963,16 +995,19 @@ def run(
                         executor.shutdown(wait=True, cancel_futures=False)
                         for future, job in active.items():
                             if future.done() and not future.cancelled():
-                                row, _, terminal = future.result()
-                                results[job[0]] = row
+                                projected, group, _, terminal = future.result()
+                                accept(job, projected, group)
                                 if terminal:
                                     blocked = "run stopped after owned-resource cleanup failure or cancellation"
                         if cancellation.is_set():
                             blocked = blocked or "run cancelled"
                             for job in jobs[cursor:]:
-                                results[job[0]]["reason"] = blocked
+                                groups[job["group_index"]]["stop_reason"] = "cancelled"
+                                for index, _ in job["members"]:
+                                    results[index]["reason"] = blocked
                 if blocked is None:
                     pending.publish()
+                    published = True
                 else:
                     # Even a completed successful worker is not a reusable result until outer cleanup.
                     collection["reason"] = blocked
@@ -1010,7 +1045,7 @@ def split_arguments(arguments):
 def error_result(error):
     """Versioned refusal envelope when no complete inventory can be established."""
     result = {
-        "schema": 1,
+        "schema": 2,
         "kind": "refusal",
         "inventory_complete": False,
         "inventory_digest": None,
@@ -1042,6 +1077,7 @@ def main(argv=None):
     execution.add_argument("--explain", action="store_true")
     execution.add_argument("--cache-dir", type=Path)
     execution.add_argument("--timeout", type=float, default=60)
+    execution.add_argument("--execution-mode", choices=("case", "batch"))
     execution.add_argument("--suite", action="append", dest="suites")
     for dimension in ("cpus", "memory-bytes", "processes", "scratch-bytes"):
         execution.add_argument("--budget-" + dimension, type=int)
@@ -1071,6 +1107,7 @@ def main(argv=None):
                 arguments=arguments,
                 budget=budget,
                 suites=options.suites,
+                execution_mode=options.execution_mode,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
