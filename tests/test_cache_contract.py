@@ -198,9 +198,10 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path,
         "origins": [],
         "aliases": sorted(["a" * 64, hashlib.sha256(b"test_unit.py").hexdigest()]),
         "selected": True,
+        "order": 0,
     }
     collected = {
-        "protocol": 3,
+        "protocol": 4,
         "kind": "collection",
         "nonce": "b" * 32,
         "exit_code": 0,

@@ -32,7 +32,7 @@ def project(tmp_path):
 def passed(root, **kwargs):
     report = controller.run(root, explain=True, **kwargs)
     assert report["status"] == "passed", report
-    assert report["schema"] == 1 and report["kind"] == "run"
+    assert report["schema"] == 2 and report["kind"] == "run"
     assert report["inventory_complete"] is True
     assert len(report["inventory_digest"]) == 64
     assert report["counts"]["selected"] == sum(row["selected"] for row in report["units"])

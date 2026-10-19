@@ -17,9 +17,14 @@ Repeat `--suite` to select several configured suites. An omitted suite selection
 configured suites. A CLI budget override supplies every dimension; partial, noninteger,
 nonpositive or insufficient envelopes fail before collection or cache acceptance.
 
+`--execution-mode case` or `--execution-mode batch` overrides the configured mode without
+rewriting project configuration. The default is `case`; [batch mode](batching.md) shares
+fixtures only within one suite/module and an exactly equal expanded scope. `plan` reports
+`execution.mode` and `execution.profile`, but cannot predict real group membership.
+
 The equivalent Python entry point is `pytest_telescope.controller.run(root, *, force=False,
 no_cache=False, explain=False, cache_dir=None, timeout=60, arguments=(), budget=None,
-suites=None)`. `root` identifies the outer project directory. `budget` is a dictionary of
+suites=None, execution_mode=None)`. `root` identifies the outer project directory. `budget` is a dictionary of
 `cpus`, `memory_bytes`, `processes`, and `scratch_bytes`; `suites` is a list of configured
 names. Arguments and node-selector paths remain relative to the outer project, including
 when a suite uses another working directory.
@@ -33,7 +38,7 @@ Consumers should dispatch on the explicit status and capability, without parsing
 
 ## Complete and incomplete run inventories
 
-A run result has `schema: 1` and `kind: "run"`. These fields distinguish it from a refusal.
+A run result has `schema: 2` and `kind: "run"`. These fields distinguish it from a refusal.
 
 | Field | Meaning |
 | --- | --- |
@@ -41,6 +46,8 @@ A run result has `schema: 1` and `kind: "run"`. These fields distinguish it from
 | `inventory_complete` | Whether every selected suite produced a validated real inventory. |
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
+| `execution` | Effective `mode` (`case` or `batch`) and versioned `profile` (`case-v1` or `batch-v1`). |
+| `groups` | Ordered execution/cache groups with atomic member outcomes and worker accounting. |
 | `resources` | Per-worker dimensions, aggregate budget and computed concurrency. |
 | `collection` | Collection outcome, counts, timings, bounded failure evidence and suite inventories. |
 | `units` | One row for each known real case, in deterministic suite/node order. |
@@ -78,18 +85,66 @@ project structure and should not themselves contain private values.
 `inventory_complete`, selection and outcomes. A reused pass is previous evidence accepted
 under the current identity, not a newly executed case.
 
+## Atomic groups and member outcomes
+
+Schema 2 applies to both modes. Every selected known case belongs to exactly one group;
+unselected cases have `group_id: null`. Groups appear in deterministic suite/module/
+first-selected-member order. `case_ids` retains actual selected pytest order after
+collection hooks. Hash sorting does not define execution order.
+
+| Group field | Meaning |
+| --- | --- |
+| `group_id` | Opaque lowercase SHA-256 identity binding profile, ordered members and complete execution context. |
+| `suite`, `file`, `case_ids` | Public suite/module and ordered selected opaque member identities. |
+| `outcome` | `executed`, `reused`, `failed`, `incomplete`, or `infrastructure_error`. |
+| `complete` | Every requested member has a validated final teardown outcome. |
+| `cache_eligible` | Complete successful evidence accepted after lifecycle cleanup with reuse enabled. False for `--no-cache` and `cache=False`. |
+| `attempts` | Group worker attempts; zero for reuse or before a worker starts. |
+| `attempt_seconds` | Controller wall time across group attempts, including retries. |
+| `worker_seconds`, `cpu_seconds` | Available worker measurements across attempts, counted once per group and zero on reuse. |
+| `timing_complete` | False when retries or unavailable measurements prevent a complete worker-timing account. |
+| `passed`, `failed`, `skipped`, `not_run` | Member totals from the final valid attempt. |
+| `stop_reason` | `null` for complete groups; otherwise `pytest-stop`, `collection`, `infrastructure`, or `cancelled`. |
+
+Each case row adds `group_id`, `result_status`, and `complete`. Result status is `passed`,
+`failed`, `skipped`, `not-run`, or `null` for unselected/unresolved infrastructure cases.
+Case `attempts` repeats its group count: summing case attempts does not count workers.
+Batch-mode case `worker_seconds` and `cpu_seconds` are `null`, because shared fixture
+costs cannot be attributed honestly to individual members. Case mode retains singleton
+measurements. `worker_cpu_seconds` counts each group once plus collection.
+
+A reused group reuses every member together, preserving passed/skipped statuses. Any
+missing, corrupt, partial or unsuccessful group evidence reruns its entire selected
+membership. Case and batch profiles cannot reuse each other's records, even for a
+singleton. Group cache eligibility differs from observed test success.
+
+With `-x` or `--maxfail`, observed passes and skips remain case `outcome: "executed"`;
+observed failures are `failed`; unrun requested members are `infrastructure_error` with
+`result_status: "not-run"`. The group is `incomplete` with `stop_reason: "pytest-stop"`,
+and the run status is `failed`, not an infrastructure outage. Shared setup failures
+belong to each attempted affected member; shared teardown failure belongs to the member
+whose teardown pytest reports. No member of a failed/incomplete group becomes reusable.
+Skips are counted without retaining reason text or arbitrary captured output.
+
+Each batch is limited to 4,096 selected members. An oversized group refuses the complete
+plan with capability `execution:batch-size` before any fresh group starts; it is not
+silently split. Batch structured results and cache records are limited to 64 MiB, compared
+with 1 MiB for an individual case result. The 100,000-case invocation bound and aggregate
+cache/output bounds continue to apply. See the [batching contract](batching.md) for exact
+fixture, scope, lifecycle and identity rules.
+
 ## Refusal envelope
 
 If no complete inventory can be established for a typed refusal, the CLI emits:
 
 ```json
-{"schema": 1, "kind": "refusal", "status": "unsupported", "capability": "scratch:exec", "inventory_complete": false, "inventory_digest": null, "error": "runtime profile does not qualify requested capability"}
+{"schema": 2, "kind": "refusal", "status": "unsupported", "capability": "scratch:exec", "inventory_complete": false, "inventory_digest": null, "error": "runtime profile does not qualify requested capability"}
 ```
 
 Refusal status is `unsupported`, `declaration_error`, or `infrastructure_error`.
-`capability` exists only for unsupported results. Version 1 capability codes include
+`capability` exists only for unsupported results. Capability codes include
 `metadata:pep621-static-v1`, `project-metadata:runtime-conflict`,
-`pytest:distributed-scheduling`, and `pytest:configuration`; an explicitly requested
+`pytest:distributed-scheduling`, `pytest:configuration`, and `execution:batch-size`; an explicitly requested
 unqualified profile reports its own capability string. Refusals never mint successful
 case records or silently widen the execution profile.
 

@@ -2,7 +2,7 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-Put input declarations beside your tests. Every actual pytest case gets a fresh Linux
+Put input declarations beside your tests. By default every actual pytest case gets a fresh Linux
 Docker worker and its own cached result, including each parametrized variant. Change a
 case's declared input to rerun that case; unchanged cases can reuse their successes.
 
@@ -308,11 +308,17 @@ Use `run --force` to refresh successes or `run --no-cache` to bypass result read
 recording. These flags also refresh collection. Literal declarations at module, class,
 function, and parameter levels add together; any inherited `cache=False` wins.
 
-Every actual case starts a new pytest session. Session/module/class fixtures are
+In the default `case` mode, every actual case starts a new pytest session. Session/module/class fixtures are
 recreated for each case, and mutable state does not carry between cases. Collection may
 see the union of potential inputs, but each execution starts with its own scope before
 imports. Shared import and parametrization resources must be declared for every narrow
 consumer, often through defaults or a bundle.
+
+Optional [batch mode](batching.md) shares session/module/class fixtures among selected
+cases with exactly equal input scopes in one suite/module. Use `run --execution-mode batch`
+only when that fixture lifetime suits the tests. A batch has one fresh worker and one
+atomic cached result; differing input scopes are never combined. The tutorial above uses
+the default per-case mode and keeps its fresh/reused counts.
 
 Filesystem isolation does not prove arbitrary Python deterministic. Clocks, randomness,
 and changing external/native state require explicit care. Read the [marker and project

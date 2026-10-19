@@ -34,7 +34,7 @@ def test_cli_refusals_have_versioned_incomplete_inventory(
     monkeypatch.setattr(controller, "run", refused)
     assert controller.main(["run"]) == exit_code
     output = json.loads(capsys.readouterr().out)
-    assert output["schema"] == 1
+    assert output["schema"] == 2
     assert output["kind"] == "refusal"
     assert output["status"] == status
     assert output["inventory_complete"] is False
@@ -80,7 +80,7 @@ def test_automatic_inputs_cannot_include_host_environments(tmp_path, environment
 def test_cli_argument_refusals_use_the_same_schema(capsys, arguments):
     assert controller.main(arguments) == 4
     output = json.loads(capsys.readouterr().out)
-    assert output["schema"] == 1 and output["kind"] == "refusal"
+    assert output["schema"] == 2 and output["kind"] == "refusal"
     assert output["status"] == "declaration_error"
     assert output["inventory_complete"] is False
     assert output["inventory_digest"] is None

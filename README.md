@@ -2,7 +2,7 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-Put input declarations beside pytest cases. Each actual case, including each parametrized
+Put input declarations beside pytest cases. By default each actual case, including each parametrized
 variant, runs in a fresh Linux Docker worker and has its own reusable successful result.
 Two cases in the same file can declare different resources and rerun independently.
 
@@ -58,8 +58,11 @@ behind an old result.
 
 ## Know the boundary
 
-Every case gets a fresh pytest session, so module/class/session fixtures are recreated
-per case. Tests relying on cross-case mutable state need rewriting. Shared import and
+The default `case` mode creates a fresh pytest session for every case, recreating
+module/class/session fixtures. Optional [batch mode](https://pytest-telescope.readthedocs.io/en/latest/batching/)
+shares ordinary pytest fixture lifetimes only among selected cases with exactly equal
+scopes in one suite/module. Choose that lifetime explicitly with `run --execution-mode batch`;
+reuse is atomic for the complete group and input permissions stay unchanged. Shared import and
 parametrization resources must be declared for every narrow consumer, typically in
 project defaults or bundles. Application files and host virtual environments are not
 installed into the prepared runtime.

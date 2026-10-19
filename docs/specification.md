@@ -124,7 +124,8 @@ inventory and executes successes again; `--no-cache` also prevents recording the
 `plan` is only a nonexecuting static scope preview, not actual case enumeration.
 
 Each case gets a new pytest session. Fixtures with broader pytest scopes are recreated
-for each case; tests depending on cross-case mutable state need rewriting. See the
+for each case in default `case` mode. Optional [batch mode](batching.md) shares ordinary
+pytest fixture lifetime only inside equal-scope suite/module groups. See the
 [execution contract](execution-contract.md) for supported options, runtime requirements,
 bounded failures, exact cache identity, and outcome accounting.
 
@@ -147,3 +148,19 @@ Configured `addopts` are resolved before scheduler validation. For a suite confi
 containing `addopts = -n auto`, an explicit `-o addopts=` removes that option; the run
 then uses telescope's declared resource envelope. Without that override, nested scheduler
 options return an explicit unsupported capability. This does not enable xdist workers.
+
+
+## Choose execution and fixture lifetime
+
+`[tool.pytest_telescope.execution] mode = "case"` is the default. Set `mode = "batch"`
+to share one fresh pytest session among selected cases with exactly equal effective
+scope, metadata and cache policy in one suite/module. Module/class/session fixtures and
+scratch share only inside that group; function `tmp_path` remains per test.
+
+`run --execution-mode case|batch` and `controller.run(root, execution_mode="case"|"batch")`
+override the configuration without editing it. `plan` reports the configured mode/profile,
+not dynamically collected group membership. Each group occupies one resource slot and
+has one worker's limits. Group records are atomic: failures, partial runs or corrupted
+records cause the whole selected group to rerun. See [batching](batching.md) for ordering,
+4,096-member limits and lifecycle rules, and [result schema 2](result-schema.md) for
+member/group outcomes, partial pytest stops and honest shared-worker timing.

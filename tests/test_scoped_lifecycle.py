@@ -28,6 +28,7 @@ def synthetic_backend(root, monkeypatch, behavior, *, count=4, fail_outer=False)
                 file=filename,
                 origins=[],
                 selected=True,
+                order=number,
                 aliases=sorted([case, hashlib.sha256(filename.encode()).hexdigest()]),
             )
         )
@@ -54,7 +55,7 @@ def synthetic_backend(root, monkeypatch, behavior, *, count=4, fail_outer=False)
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
             return dict(
-                protocol=3,
+                protocol=4,
                 kind="collection",
                 nonce="a" * 32,
                 exit_code=0,

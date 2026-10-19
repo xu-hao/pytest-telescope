@@ -590,7 +590,7 @@ def test_real_equivalent_checkouts_reuse_across_owned_runtime_images(tmp_path, d
 
 def collection_record():
     return {
-        "protocol": 3,
+        "protocol": 4,
         "kind": "collection",
         "nonce": "a" * 32,
         "exit_code": 0,
@@ -603,6 +603,7 @@ def collection_record():
                 "origins": [],
                 "aliases": sorted(["c" * 64, hashlib.sha256(b"test_subject.py").hexdigest()]),
                 "selected": True,
+                "order": 0,
             }
         ],
         "worker_seconds": 0.1,
@@ -741,3 +742,24 @@ def test_collection_node_identity_must_belong_to_reported_file():
     item = result["items"][0]
     item["file"] = "other_subject.py"
     assert not validate_collection(result)
+
+
+@pytest.mark.parametrize("order", [True, -1, 0.5, "0", None])
+def test_collection_selected_order_must_be_an_explicit_position(order):
+    from pytest_telescope.result import validate_collection
+
+    result = collection_record()
+    result["items"][0]["order"] = order
+    assert not validate_collection(result)
+
+
+def test_unselected_collection_item_has_no_execution_position():
+    from pytest_telescope.result import validate_collection
+
+    result = collection_record()
+    item = result["items"][0]
+    item["selected"] = False
+    assert not validate_collection(result)
+    item["order"] = None
+    result["exit_code"] = 5
+    assert validate_collection(result)

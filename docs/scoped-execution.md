@@ -207,9 +207,9 @@ arbitrary test bodies or retry under relaxed restrictions.
 
 ## Result and privacy contract
 
-The [run result reference](result-schema.md) defines schema 1, complete/incomplete
+The [run result reference](result-schema.md) defines schema 2, complete/incomplete
 inventories, selected-case accounting and typed refusals for CLI and Python callers.
-Collection protocol 3 emits opaque case identities and hashed selector aliases. Raw
+Collection protocol 4 emits opaque case identities, hashed selector aliases and each selected case's actual execution-order position (null for unselected cases). Raw
 collected node IDs remain transient inside the worker; execution requests, inventory
 records and public results use the opaque identity. Explicit caller-supplied `-k` and
 `-m` expressions still reach the worker unchanged, as the result reference explains.
