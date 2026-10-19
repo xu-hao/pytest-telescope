@@ -311,3 +311,42 @@ def test_configured_python_file_patterns_still_constrain_overrides(tmp_path, mon
         make_plan(
             tmp_path, suites=["core"], structural_files={"core": ["tests/core/test_alpha.py"]}
         )
+
+
+@pytest.mark.parametrize("mode", ["case", "batch"])
+def test_structural_narrowing_preserves_broad_input_visibility_and_identity(project, mode):
+    put(
+        project,
+        "tests/core/test_alpha.py",
+        'from pathlib import Path\n'
+        'def test_broad():\n'
+        '    assert Path("private.txt").read_text() == "synthetic undeclared input"\n'
+        '    assert Path("tests/core/test_beta.py").is_file()\n',
+    )
+    options = {
+        "suites": ["core"],
+        "structural_files": {"core": ["tests/core/test_alpha.py"]},
+        "execution_mode": mode,
+    }
+    first = run(project, **options)
+    assert first["counts"]["executed"] == 1
+    assert suite_files(first) == {"core": ["tests/core/test_alpha.py"]}
+    assert run(project, **options)["counts"]["reused"] == 1
+    put(project, "tests/core/test_beta.py", "# Changed broad input outside inventory.\n")
+    changed = run(project, **options)
+    assert changed["counts"]["executed"] == 1
+    assert changed["counts"]["not-selected"] == 0
+    assert suite_files(changed) == suite_files(first)
+
+
+def test_file_list_bound_refuses_before_backend(tmp_path, monkeypatch):
+    configure(tmp_path)
+    files = [f"tests/core/test_bound_{number:04d}.py" for number in range(4097)]
+    for name in files:
+        put(tmp_path, name, "def test_example(): pass\n")
+    block_backend(monkeypatch)
+    accepted = make_plan(tmp_path, suites=["core"], structural_files={"core": files[:-1]})
+    assert accepted["inventory"] == files[:-1]
+    for invoke in (make_plan, controller.run):
+        with pytest.raises(DeclarationError):
+            invoke(tmp_path, suites=["core"], structural_files={"core": files})
