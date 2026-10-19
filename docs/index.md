@@ -14,7 +14,7 @@ have explicit rules.
 
 ## Install
 
-This tutorial uses **0.1.0a2**. Version 0.1.0a1 used file/group declarations and does not
+This tutorial uses **0.1.0a3**. Version 0.1.0a1 used file/group declarations and does not
 support this marker interface. You need Linux, Python 3.11+, and permission to build and
 run Linux containers using a local Docker daemon's Unix socket. Runtime preparation
 needs network access; test workers have no network.
@@ -24,7 +24,7 @@ mkdir telescope-demo
 cd telescope-demo
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a2
+python -m pip install pytest-telescope==0.1.0a3
 mkdir -p app data tests
 ```
 
@@ -320,10 +320,10 @@ reference](specification.md) for exact syntax, defaults, bundles, absence, and e
 the [execution contract](execution-contract.md) covers isolation, collection, cache
 identity, limits, and failure recovery.
 
-The next-alpha [scoped execution guide](scoped-execution.md) adds local distribution
+The 0.1.0a3 [scoped execution guide](scoped-execution.md) adds local distribution
 metadata, independent suites and bounded parallel workers. Its [result reference](result-schema.md)
 describes versioned inventories and explicit capability refusals. These additions are not
-available in the published 0.1.0a2 tutorial above.
+available in version 0.1.0a2.
 
 ```{toctree}
 :hidden:

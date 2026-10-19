@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 
-def run(*args: str) -> None:
-    subprocess.run([sys.executable, *args], check=True, timeout=300)
+def run(*args: str, timeout: int = 300) -> None:
+    subprocess.run([sys.executable, *args], check=True, timeout=timeout)
 
 
 def main() -> None:
@@ -28,7 +28,7 @@ def main() -> None:
     if len(wheels) != 1:
         raise RuntimeError("expected exactly one built wheel")
     run("-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheels[0]))
-    run("-m", "pytest", "-q", "--basetemp", str(output / "tests"))
+    run("-m", "pytest", "-q", "--basetemp", str(output / "tests"), timeout=900)
     run("-m", "unittest", "discover", "-s", "benchmarks", "-p", "test_*.py")
 
 

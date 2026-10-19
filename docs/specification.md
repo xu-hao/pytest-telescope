@@ -3,7 +3,7 @@
 The [quickstart](index.md) provides every file for a runnable project. The
 [execution contract](execution-contract.md) is authoritative for the supported boundary.
 The base marker interface is available in 0.1.0a2; old central `targets` declarations
-are rejected with a migration message. Next-alpha additions are specified in the
+are rejected with a migration message. Version 0.1.0a3 additions are specified in the
 [scoped execution guide](scoped-execution.md) and [result reference](result-schema.md).
 
 ## Markers beside cases

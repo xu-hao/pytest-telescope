@@ -15,6 +15,8 @@ installs the built wheel without dependencies, and runs behavioral tests. It req
 virtual environment and uses its interpreter. The artifact directory must not already
 exist; use a new directory for another run. Build dependencies may need network access.
 No package is uploaded by this command.
+Each stage has a five-minute deadline, except the complete real-Docker behavioral suite,
+which has a fifteen-minute deadline. A timeout fails the gate.
 
 Linux and a usable Docker daemon are required for real enforcement qualification. The
 runtime build uses the pinned public Python base described in the

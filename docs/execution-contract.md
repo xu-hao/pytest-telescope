@@ -2,11 +2,10 @@
 
 ## Status
 
-Version 0.1.0a2 implements this per-case marker contract with Linux Docker
-enforcement and lifecycle recovery. Version 0.1.0a1 remains immutable and uses
-the earlier file/group target interface. The [next-alpha scoped extension](scoped-execution.md)
-and [result schema](result-schema.md) describe additions under qualification; those additions
-are not shipped in 0.1.0a2.
+Version 0.1.0a3 implements this per-case marker contract with Linux Docker
+enforcement and lifecycle recovery, plus the [scoped execution extension](scoped-execution.md)
+and versioned [result schema](result-schema.md). Version 0.1.0a2 introduced per-case markers;
+0.1.0a1 used the earlier file/group target interface. Those releases remain immutable.
 
 ## User interface and scope
 

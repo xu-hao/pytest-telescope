@@ -1,7 +1,7 @@
 # Run results and explicit refusals
 
-This reference describes the next-alpha schema. The published 0.1.0a2 tutorial remains
-available in the [quickstart](index.md). The [scoped execution contract](scoped-execution.md)
+This reference describes the 0.1.0a3 schema. Start with the practical
+[quickstart](index.md). The [scoped execution contract](scoped-execution.md)
 defines metadata, suite and resource boundaries.
 
 ## Invocation interfaces
@@ -67,8 +67,11 @@ Raw parametrized node IDs stay inside the worker. A `case_id` is the lowercase S
 hex digest of UTF-8 canonical JSON `[suite_name, project_relative_pytest_node_id]`, with
 no spaces between JSON separators and standard JSON string escaping. The same file in
 two suites produces different identities. Selector aliases in collection records are
-hashed too. Requests, cached inventories and summaries contain no raw parameter IDs;
-callers can still pass ordinary node selectors. File paths and suite names are public
+hashed too. Collected node IDs and aliases are not persisted in cached inventories,
+summaries, or execution requests; callers can still pass ordinary node selectors.
+Explicit caller-supplied `-k` and `-m` expressions necessarily reach the isolated worker
+in request arguments. Those expressions are not redacted and may themselves contain
+a parameter label; consumers must avoid echoing them into public receipts. File paths and suite names are public
 project structure and should not themselves contain private values.
 
 `inventory_digest` describes membership, not test success. Consumers must also inspect

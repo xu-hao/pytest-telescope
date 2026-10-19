@@ -114,6 +114,21 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
         "case_inventory": "requires isolated pytest collection",
         "inventory": ["test_another.py", "test_subject.py"],
         "discovery_scope": "declared-union",
+        "distributions": [],
+        "suites": [
+            {
+                "name": "default",
+                "root": ".",
+                "cwd": ".",
+                "config": "pyproject.toml",
+                "test_roots": ["."],
+                "include": ["**"],
+                "exclude": [],
+                "args": [],
+                "config_args": [],
+                "plugins": [],
+            }
+        ],
         "inputs": [
             "conftest.py",
             "data.json",

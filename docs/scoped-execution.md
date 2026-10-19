@@ -1,6 +1,6 @@
 # Scoped metadata, independent suites, and parallel workers
 
-This document specifies the next-alpha extension to the
+This document specifies the 0.1.0a3 extension to the
 [execution contract](execution-contract.md). Implementation and qualification must
 satisfy these boundaries before publication. Existing releases are immutable.
 
@@ -28,6 +28,7 @@ inputs = ["packages/core/core.py"]
 @pytest.mark.telescope(distributions=["addon"], inputs=["packages/addon/addon.py"])
 def test_entry_point():
     from importlib.metadata import entry_points, version
+
     assert version("example-addon") == "1.0.0"
     assert entry_points(group="example.plugins", name="addon")[0].load() == "addon"
 ```
