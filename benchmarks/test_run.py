@@ -24,27 +24,40 @@ def result():
     units = []
     for node in nodes:
         executed = node.startswith(("tests/test_scoring.py", "tests/test_broad.py"))
-        units.append({
-            "name": hashlib.sha256(node.encode()).hexdigest(),
-            "file": node.split("::")[0],
-            "outcome": "executed" if executed else "reused",
-            "collected": 1, "passed": 1, "failed": 0, "skipped": 0,
-            "worker_seconds": 0.2 if executed else 0,
-            "cpu_seconds": 0.1 if executed else 0,
-        })
+        units.append(
+            {
+                "name": hashlib.sha256(node.encode()).hexdigest(),
+                "file": node.split("::")[0],
+                "outcome": "executed" if executed else "reused",
+                "collected": 1,
+                "passed": 1,
+                "failed": 0,
+                "skipped": 0,
+                "worker_seconds": 0.2 if executed else 0,
+                "cpu_seconds": 0.1 if executed else 0,
+            }
+        )
     return {
         "counts": {
-            "executed": 3, "reused": 4, "failed": 0,
-            "infrastructure_error": 0, "not-selected": 0,
+            "executed": 3,
+            "reused": 4,
+            "failed": 0,
+            "infrastructure_error": 0,
+            "not-selected": 0,
         },
         "cases": {"collected": 7, "passed": 7, "failed": 0, "skipped": 0},
         "case_outcomes": {
-            "fresh_passed": 3, "cached_passed": 4,
-            "fresh_skipped": 0, "cached_skipped": 0,
+            "fresh_passed": 3,
+            "cached_passed": 4,
+            "fresh_skipped": 0,
+            "cached_skipped": 0,
         },
         "collection": {
-            "outcome": "executed", "collected": 7, "failures": [],
-            "worker_seconds": 0.2, "cpu_seconds": 0.1,
+            "outcome": "executed",
+            "collected": 7,
+            "failures": [],
+            "worker_seconds": 0.2,
+            "cpu_seconds": 0.1,
         },
         "worker_cpu_seconds": 0.4,
         "units": units,

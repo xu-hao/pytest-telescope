@@ -39,7 +39,9 @@ CASE_FILES = {
     "tests/test_pricing.py::test_price_schedule": "tests/test_pricing.py",
     "tests/test_broad.py::test_project_file": "tests/test_broad.py",
 }
-EXPECTED_UNITS = {hashlib.sha256(node.encode()).hexdigest(): file for node, file in CASE_FILES.items()}
+EXPECTED_UNITS = {
+    hashlib.sha256(node.encode()).hexdigest(): file for node, file in CASE_FILES.items()
+}
 
 
 def expected_executed(phase):
@@ -50,11 +52,12 @@ def expected_executed(phase):
     else:
         changed_file = "tests/test_demand.py" if phase == "resource" else "tests/test_scoring.py"
         nodes = [
-            node for node, file in CASE_FILES.items()
-            if file == "tests/test_broad.py" or (
-                file == changed_file and (
-                    phase != "case_resource" or node.endswith("::test_customer_scores")
-                )
+            node
+            for node, file in CASE_FILES.items()
+            if file == "tests/test_broad.py"
+            or (
+                file == changed_file
+                and (phase != "case_resource" or node.endswith("::test_customer_scores"))
             )
         ]
     return {hashlib.sha256(node.encode()).hexdigest() for node in nodes}
@@ -139,8 +142,7 @@ def validate_result(result: dict, phase: str) -> None:
         raise RuntimeError(f"{phase}: each unit must account for exactly one passing case")
     actual = {unit["name"] for unit in units if unit["outcome"] == "executed"}
     if actual != expected_executed(phase) or any(
-        unit["outcome"] != ("executed" if unit["name"] in actual else "reused")
-        for unit in units
+        unit["outcome"] != ("executed" if unit["name"] in actual else "reused") for unit in units
     ):
         raise RuntimeError(f"{phase}: wrong case invalidated")
     collection = result["collection"]
@@ -199,7 +201,10 @@ def run_trial(python: str, source: Path, trial: Path) -> list[dict]:
     )
     junit = trial / "ordinary.xml"
     ordinary = measure(
-        [python, "-m", "pytest", "-p", "telescope", "-q", f"--junitxml={junit}"], project, trial, "ordinary"
+        [python, "-m", "pytest", "-p", "telescope", "-q", f"--junitxml={junit}"],
+        project,
+        trial,
+        "ordinary",
     )
     cases = list(ET.parse(junit).getroot().iter("testcase"))
     if len(cases) != EXPECTED_CASES or any(
@@ -227,7 +232,14 @@ def run_trial(python: str, source: Path, trial: Path) -> list[dict]:
         row.update(
             {
                 key: result[key]
-                for key in ("counts", "cases", "case_outcomes", "collection", "units", "setup_seconds")
+                for key in (
+                    "counts",
+                    "cases",
+                    "case_outcomes",
+                    "collection",
+                    "units",
+                    "setup_seconds",
+                )
             }
         )
         row["executed_cases"] = sum(
@@ -240,9 +252,11 @@ def run_trial(python: str, source: Path, trial: Path) -> list[dict]:
         row["collection_cpu_seconds"] = result["collection"]["cpu_seconds"]
         row["case_cpu_seconds"] = sum(unit["cpu_seconds"] for unit in result["units"])
         row["collection_worker_seconds"] = result["collection"]["worker_seconds"]
-        row["non_session_elapsed_seconds"] = row["elapsed_seconds"] - sum(
-            unit["worker_seconds"] for unit in result["units"]
-        ) - result["collection"]["worker_seconds"]
+        row["non_session_elapsed_seconds"] = (
+            row["elapsed_seconds"]
+            - sum(unit["worker_seconds"] for unit in result["units"])
+            - result["collection"]["worker_seconds"]
+        )
         row["controller_reported_elapsed_seconds"] = result["elapsed_seconds"]
         rows.append(row)
     return rows
@@ -312,7 +326,16 @@ def main() -> None:
         ]
         metrics = {"elapsed_seconds", "controller_cpu_seconds"}
         if phase in EXPECTED_COUNTS:
-            metrics.update({"worker_cpu_seconds", "collection_cpu_seconds", "case_cpu_seconds", "collection_worker_seconds", "setup_seconds", "non_session_elapsed_seconds"})
+            metrics.update(
+                {
+                    "worker_cpu_seconds",
+                    "collection_cpu_seconds",
+                    "case_cpu_seconds",
+                    "collection_worker_seconds",
+                    "setup_seconds",
+                    "non_session_elapsed_seconds",
+                }
+            )
         report["medians"][phase] = {
             metric: statistics.median(row[metric] for row in rows) for metric in sorted(metrics)
         }
