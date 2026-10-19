@@ -50,6 +50,7 @@ def group_row(job):
         failed=0,
         skipped=0,
         not_run=len(job["case_ids"]),
+        unresolved=0,
     )
 
 
@@ -58,7 +59,12 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
     group = group_row(job)
     group.update(attempts=attempts, attempt_seconds=attempt_seconds, timing_complete=attempts <= 1)
     if result is None:
-        cases = [dict(case_id=case, outcome=None, complete=False) for case in job["case_ids"]]
+        if attempts:
+            group.update(not_run=0, unresolved=len(job["case_ids"]))
+        cases = [
+            dict(case_id=case, outcome=None if attempts else "not-run", complete=False)
+            for case in job["case_ids"]
+        ]
     elif mode == "batch":
         cases = result["case_results"]
     else:
