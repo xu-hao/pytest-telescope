@@ -27,7 +27,7 @@ def write(root, name, text):
     path.write_text(text)
 
 
-def generate(root, count):
+def generate(root, count, scope_layout="per-case"):
     """Two independent suites, eight actual parameter cases per test module."""
     configuration = []
     cases = []
@@ -57,11 +57,13 @@ def generate(root, count):
             f"tests/{package}/pytest.ini",
             f"[pytest]\npythonpath = ../../packages/{package}\n",
         )
+        resource_key = "str(int(key) // 8).zfill(4)" if scope_layout == "shared-module" else "key"
         for module in range(count // 16):
             parameters = []
             for offset in range(8):
                 number = module * 8 + offset
-                resource = f"resources/{package}/{number:04}.json"
+                resource_number = module if scope_layout == "shared-module" else number
+                resource = f"resources/{package}/{resource_number:04}.json"
                 write(root, resource, json.dumps({"value": number}) + "\n")
                 parameters.append(
                     f'pytest.param("{number:04}", marks=pytest.mark.telescope(inputs=["{resource}"]), id="case{number:04}")'
@@ -87,7 +89,7 @@ def generate(root, count):
                 + "])\n"
                 + "def test_value(key):\n"
                 + f'    assert version("example-{package}") == "1.0.0"\n    compute = next(iter(entry_points(group="example.plugins", name="{package}"))).load()\n'
-                + f'    value = json.loads((Path(__file__).resolve().parents[2] / "resources/{package}" / (key + ".json")).read_text())["value"]\n'
+                + f'    value = json.loads((Path(__file__).resolve().parents[2] / "resources/{package}" / ({resource_key} + ".json")).read_text())["value"]\n'
                 + "    assert compute(value) >= 0\n",
             )
     write(root, "pyproject.toml", "\n".join(configuration))
@@ -99,6 +101,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cases", type=int, default=128)
     parser.add_argument("--parallel", type=int, default=4)
+    parser.add_argument("--execution-mode", choices=("case", "batch"), default="case")
+    parser.add_argument("--scope-layout", choices=("per-case", "shared-module"), default="per-case")
     options = parser.parse_args()
     if options.cases < 16 or options.cases > 1024 or options.cases % 16:
         parser.error("cases must be a multiple of 16 between 16 and 1024")
@@ -108,7 +112,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     project = output / "project"
     project.mkdir()
-    cases = generate(project, options.cases)
+    cases = generate(project, options.cases, options.scope_layout)
     expected = {case_id: (suite, filename) for suite, case_id, filename, _ in cases}
     metadata = output / "ordinary-metadata"
     manifest = load(project)
@@ -168,6 +172,8 @@ def main():
                     "-m",
                     "pytest_telescope",
                     "run",
+                    "--execution-mode",
+                    options.execution_mode,
                     *flags,
                     *(["--force"] if phase == "cold" else []),
                     "--",
@@ -176,7 +182,14 @@ def main():
                 row = measure(command, project, output, label)
                 (output / f"{label}.measurement.json").write_text(json.dumps(row, indent=2) + "\n")
                 result = result_from_log(output / row["log"])
-                fresh = options.cases if phase == "cold" else 1 if phase == "selective" else 0
+                consumers = [case_id for _, case_id, _, path in cases if path == cases[0][3]]
+                fresh = (
+                    options.cases
+                    if phase == "cold"
+                    else len(consumers)
+                    if phase == "selective"
+                    else 0
+                )
                 expected_counts = dict(
                     executed=fresh,
                     reused=options.cases - fresh,
@@ -187,7 +200,7 @@ def main():
                 )
                 expected_counts["not-selected"] = 0
                 if (
-                    result["schema"] != 1
+                    result["schema"] != 2
                     or not result["inventory_complete"]
                     or result["status"] != "passed"
                     or result["counts"] != expected_counts
@@ -197,10 +210,31 @@ def main():
                     unit["case_id"]: (unit["suite"], unit["file"]) for unit in result["units"]
                 } != expected:
                     raise RuntimeError(f"{label}: case membership changed")
-                if phase == "selective" and [
-                    unit["case_id"] for unit in result["units"] if unit["outcome"] == "executed"
-                ] != [cases[0][1]]:
+                if (
+                    phase == "selective"
+                    and [
+                        unit["case_id"] for unit in result["units"] if unit["outcome"] == "executed"
+                    ]
+                    != consumers
+                ):
                     raise RuntimeError(f"{label}: wrong resource consumer reran")
+                group_size = (
+                    8
+                    if options.execution_mode == "batch" and options.scope_layout == "shared-module"
+                    else 1
+                )
+                if (
+                    result["execution"]["mode"] != options.execution_mode
+                    or not result["grouping_complete"]
+                    or len(result["groups"]) != options.cases // group_size
+                    or any(
+                        len(group["case_ids"]) != group_size
+                        or not group["complete"]
+                        or not group["cache_eligible"]
+                        for group in result["groups"]
+                    )
+                ):
+                    raise RuntimeError(f"{label}: unexpected atomic group accounting")
                 if result["resources"]["concurrency"] != concurrency:
                     raise RuntimeError(f"{label}: admitted worker count mismatch")
                 row.update(
@@ -208,6 +242,9 @@ def main():
                     concurrency=concurrency,
                     budget=budget,
                     counts=result["counts"],
+                    groups=len(result["groups"]),
+                    fresh_groups=sum(group["outcome"] == "executed" for group in result["groups"]),
+                    reused_groups=sum(group["outcome"] == "reused" for group in result["groups"]),
                     inventory_digest=result["inventory_digest"],
                     collection=result["collection"]["outcome"],
                     worker_cpu_seconds=result["worker_cpu_seconds"],
@@ -225,6 +262,8 @@ def main():
         pytest=version("pytest"),
         pytest_telescope=version("pytest-telescope"),
         cases=options.cases,
+        execution_mode=options.execution_mode,
+        scope_layout=options.scope_layout,
         suites=2,
         modules=options.cases // 8,
         ordinary_elapsed_seconds=sum(row["elapsed_seconds"] for row in ordinary),
