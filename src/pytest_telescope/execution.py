@@ -191,7 +191,10 @@ def suites(root, spec, selected=None):
         for path in (directory, cwd):
             if (
                 not (root / path).is_dir()
-                or (root / path).is_symlink()
+                or any(
+                    (root / Path(*Path(path).parts[:depth])).is_symlink()
+                    for depth in range(1, len(Path(path).parts) + 1)
+                )
                 or not (root / path).resolve().is_relative_to(root)
             ):
                 raise DeclarationError("suite root/cwd must be existing project directories")

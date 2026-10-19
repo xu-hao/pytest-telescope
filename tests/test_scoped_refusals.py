@@ -84,3 +84,18 @@ def test_cli_argument_refusals_use_the_same_schema(capsys, arguments):
     assert output["status"] == "declaration_error"
     assert output["inventory_complete"] is False
     assert output["inventory_digest"] is None
+
+
+@pytest.mark.parametrize("field", ["root", "cwd"])
+def test_suite_directories_reject_symlink_ancestors(tmp_path, field):
+    (tmp_path / "real/sub").mkdir(parents=True)
+    (tmp_path / "link").symlink_to("real", target_is_directory=True)
+    (tmp_path / "test_public.py").write_text(
+        'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_public(): pass\n'
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest_telescope.suites.core]\nconfig="pyproject.toml"\n'
+        'test_roots=["test_public.py"]\n' + f'{field}="link/sub"\n'
+    )
+    with pytest.raises(DeclarationError):
+        load(tmp_path)
