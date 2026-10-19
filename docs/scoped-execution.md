@@ -195,8 +195,11 @@ supports `python`, `project:readonly`, `scratch:noexec`, and `network:none`; oth
 capabilities require a separately qualified profile. Explicit capability declarations
 that this profile cannot satisfy return a machine-readable
 `unsupported` result with a stable capability code and exit status 4. They cannot mint a
-success or a reusable cache entry. Consumers may route that result to an ordinary run
-under their own policy. Missing files or invalid syntax remain declaration errors;
+success or a reusable cache entry. Refusal does not silently widen the execution profile.
+Choose structural partitions and preflight routing to ordinary pytest before starting a
+run: a refusal or incomplete inventory alone does not prove that no earlier case executed.
+Do not automatically replay an invocation after a runtime refusal.
+Missing files or invalid syntax remain declaration errors;
 backend outages remain infrastructure errors. Runtime code that invokes an undeclared
 missing executable remains a test failure: telescope does not guess capabilities from
 arbitrary test bodies or retry under relaxed restrictions.
@@ -206,8 +209,10 @@ arbitrary test bodies or retry under relaxed restrictions.
 The [run result reference](result-schema.md) defines schema 1, complete/incomplete
 inventories, selected-case accounting and typed refusals for CLI and Python callers.
 Collection protocol 3 emits opaque case identities and hashed selector aliases. Raw
-parameter IDs remain transient inside the worker; requests, inventory records and public
-results use the opaque identity. Structural file names and configured suite names remain
+collected node IDs remain transient inside the worker; execution requests, inventory
+records and public results use the opaque identity. Explicit caller-supplied `-k` and
+`-m` expressions still reach the worker unchanged, as the result reference explains.
+Structural file names and configured suite names remain
 visible. Terminal cleanup failures preserve known accounting and prevent new cache
 publication.
 

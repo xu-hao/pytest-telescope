@@ -93,6 +93,11 @@ Refusal status is `unsupported`, `declaration_error`, or `infrastructure_error`.
 unqualified profile reports its own capability string. Refusals never mint successful
 case records or silently widen the execution profile.
 
+A refusal or `inventory_complete: false` alone does not prove that no earlier case
+executed. Callers that need an ordinary pytest path should choose structural partitions
+and preflight routing before starting the run. Do not blindly replay a run after a
+runtime refusal; incomplete accounting remains unresolved execution evidence.
+
 CLI exit statuses are 0 for success, 1 for test failure, 3 for infrastructure failure,
 4 for invalid declarations or unsupported capabilities, and 5 for no selected cases.
 Cancellation and bounded storage/parsing failures use the infrastructure refusal shape
