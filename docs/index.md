@@ -319,3 +319,15 @@ and changing external/native state require explicit care. Read the [marker and p
 reference](specification.md) for exact syntax, defaults, bundles, absence, and environment;
 the [execution contract](execution-contract.md) covers isolation, collection, cache
 identity, limits, and failure recovery.
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+
+Quickstart <self>
+Marker reference <specification>
+Execution contract <execution-contract>
+Benchmark <benchmark>
+Development <development>
+Publishing <publishing>
+```

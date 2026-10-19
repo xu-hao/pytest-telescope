@@ -29,7 +29,7 @@ pytest-telescope = "pytest_telescope.controller:main"
 telescope = "pytest_telescope.plugin"
 
 [project.optional-dependencies]
-dev = ["build>=1.2,<2", "ruff>=0.9,<1", "mkdocs==1.6.1", "twine>=6,<7"]
+dev = ["build>=1.2,<2", "ruff>=0.9,<1", "Sphinx==8.2.3", "furo==2025.12.19", "myst-parser==5.1.0", "twine>=6,<7"]
 
 [tool.hatch.build.targets.wheel]
 core-metadata-version = "2.4"
@@ -39,7 +39,7 @@ packages = ["src/pytest_telescope"]
 core-metadata-version = "2.4"
 include = [
   "/src", "/tests", "/scripts", "/docs", "/examples", "/benchmarks", "/README.md", "/CONTRIBUTING.md",
-  "/LICENSE", "/pyproject.toml", "/mkdocs.yml", "/.readthedocs.yaml",
+  "/LICENSE", "/pyproject.toml", "/.readthedocs.yaml",
 ]
 
 [tool.pytest.ini_options]

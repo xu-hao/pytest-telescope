@@ -34,8 +34,23 @@ For documentation alone:
 
 ```sh
 python -m pip install -r docs/requirements.txt
-python -m mkdocs build --strict
+python -m sphinx -n -W --keep-going -b dirhtml docs /tmp/telescope-docs
 ```
+
+The documentation uses [Sphinx](https://www.sphinx-doc.org/),
+[Furo](https://pradyunsg.me/furo/), and [MyST Markdown](https://myst-parser.readthedocs.io/).
+The pinned versions in `docs/requirements.txt` also appear in the development extra.
+Sphinx 8.2 supports the project's Python 3.11 development baseline. `-n -W` makes
+unresolved references and other warnings fail the build. The directory-HTML builder
+preserves page URLs such as `/benchmark/`. Serve the generated directory to inspect it:
+
+```sh
+python -m http.server --directory /tmp/telescope-docs 8000
+```
+
+Check the quickstart, sidebar links, search, source links, and mobile navigation in a
+real browser after layout changes. Stop the local server when finished. Edit navigation
+in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples first.
 
 The [benchmark](benchmark.md) uses a copied synthetic project and external clocks. It
 must preserve per-phase command results and distinguish host controller CPU from
