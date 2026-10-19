@@ -47,6 +47,7 @@ A run result has `schema: 2` and `kind: "run"`. These fields distinguish it from
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
 | `execution` | Effective `mode` (`case` or `batch`) and versioned `profile` (`case-v1` or `batch-v1`). |
+| `grouping_complete` | All suite inventories and group-size preflight are validated; selected cases then belong to exactly one planned group. |
 | `groups` | Ordered execution/cache groups with atomic member outcomes and worker accounting. |
 | `resources` | Per-worker dimensions, aggregate budget and computed concurrency. |
 | `collection` | Collection outcome, counts, timings, bounded failure evidence and suite inventories. |
@@ -87,8 +88,9 @@ under the current identity, not a newly executed case.
 
 ## Atomic groups and member outcomes
 
-Schema 2 applies to both modes. Every selected known case belongs to exactly one group;
-unselected cases have `group_id: null`. Groups appear in deterministic suite/module/
+Schema 2 applies to both modes. When `grouping_complete` is true, every selected known case belongs to exactly one group.
+Unselected cases have `group_id: null`; selected known cases can also have null group IDs
+when an earlier inventory or group-size refusal prevents completed planning. Groups appear in deterministic suite/module/
 first-selected-member order. `case_ids` retains actual selected pytest order after
 collection hooks. Hash sorting does not define execution order.
 
@@ -103,13 +105,14 @@ collection hooks. Hash sorting does not define execution order.
 | `attempt_seconds` | Controller wall time across group attempts, including retries. |
 | `worker_seconds`, `cpu_seconds` | Available worker measurements across attempts, counted once per group and zero on reuse. |
 | `timing_complete` | False when retries or unavailable measurements prevent a complete worker-timing account. |
-| `passed`, `failed`, `skipped`, `not_run` | Member totals from the final valid attempt. |
+| `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Member totals: known unrun members are distinct from attempted members with no valid result. |
 | `stop_reason` | `null` for complete groups; otherwise `pytest-stop`, `collection`, `infrastructure`, or `cancelled`. |
 
 Each case row adds `group_id`, `result_status`, and `complete`. Result status is `passed`,
 `failed`, `skipped`, `not-run`, or `null` for unselected/unresolved infrastructure cases.
 Case `attempts` repeats its group count: summing case attempts does not count workers.
-Batch-mode case `worker_seconds` and `cpu_seconds` are `null`, because shared fixture
+Every batch-mode case row, including unselected and unresolved members, has
+`worker_seconds` and `cpu_seconds` set to `null`, because shared fixture
 costs cannot be attributed honestly to individual members. Case mode retains singleton
 measurements. `worker_cpu_seconds` counts each group once plus collection.
 
@@ -126,10 +129,18 @@ belong to each attempted affected member; shared teardown failure belongs to the
 whose teardown pytest reports. No member of a failed/incomplete group becomes reusable.
 Skips are counted without retaining reason text or arbitrary captured output.
 
+An attempted worker with no valid result reports `unresolved` members, `not_run: 0`,
+and null member `result_status`: those members may already have executed. Never-submitted
+groups have known `not_run` members with `result_status: "not-run"`. Valid final worker
+results report `unresolved: 0`. Do not use unavailable results as evidence of no execution.
+
 Each batch is limited to 4,096 selected members. An oversized group refuses the complete
 plan with capability `execution:batch-size` before any fresh group starts; it is not
 silently split. Batch structured results and cache records are limited to 64 MiB, compared
-with 1 MiB for an individual case result. The 100,000-case invocation bound and aggregate
+with 1 MiB for an individual case result. The merged worker stream has the same
+64 MiB batch/collection and 1 MiB case limits, including structured protocol output and
+direct file-descriptor writes. Ordinary Python/pytest output is normally suppressed;
+there is no separate smaller arbitrary-output channel. The 100,000-case invocation bound and aggregate
 cache/output bounds continue to apply. See the [batching contract](batching.md) for exact
 fixture, scope, lifecycle and identity rules.
 

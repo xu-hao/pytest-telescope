@@ -161,8 +161,11 @@ collection; the image retention bound is not a bound on the daemon's shared buil
 storage.
 
 The initial worker policy gives each case or batch one CPU, 512 MiB memory with no added swap
-allowance, 128 processes, 256 open descriptors, 64 MiB of private `/tmp`, and at most 1
-MiB of captured worker output. Limits are part of the backend policy; exceeding them
+allowance, 128 processes, 256 open descriptors, 64 MiB of private `/tmp`. The combined merged worker-output stream is limited to
+1 MiB for case execution and 64 MiB for batch execution or collection, including
+structured protocol results and direct file-descriptor writes. Ordinary Python/pytest
+output is normally suppressed; batch mode has no separate smaller arbitrary-output
+channel. Structured batch results/cache records also have a 64 MiB limit. Limits are part of the backend policy; exceeding them
 produces failure, not a broader execution boundary.
 
 A container is an OS-enforced filesystem boundary sharing the host kernel. This contract

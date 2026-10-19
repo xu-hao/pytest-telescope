@@ -51,6 +51,15 @@ suite-aware case digests. Selection additions/removals, order changes and releva
 or runtime changes cannot reuse another group's evidence. Case and batch records are
 mutually ineligible, including singleton batches.
 
+A batch contains at most 4,096 selected members. An oversized group refuses the entire
+planned invocation with `UnsupportedCapability("execution:batch-size")` before any fresh
+group starts; it is not implicitly chunked. Structured batch results and cache records
+are limited to 64 MiB; individual case results retain their 1 MiB limit. The combined
+merged worker-output stream is bounded at 64 MiB for batch/collection and 1 MiB for
+case execution. This includes structured results and any direct file-descriptor writes;
+there is no independent smaller arbitrary-output channel. Ordinary Python/pytest output
+is normally suppressed, and arbitrary output is not returned as diagnostics.
+
 A batch uses one fresh sandbox, pytest invocation and scratch directory. Session, module
 and class fixtures share state and teardown according to ordinary pytest rules inside
 that selected group. Function fixtures and `tmp_path` retain normal per-test pytest
@@ -93,8 +102,10 @@ Existing inventory/case digest rules and count spellings remain unchanged. The
 [run result reference](result-schema.md) remains the authority for those fields.
 
 Run results add `execution` with `mode` and `profile`, and `groups`, in deterministic
-suite/module/first-selected-member order. Every selected known case belongs to exactly
-one group; unselected cases have `group_id: null`. A group row contains:
+suite/module/first-selected-member order. `grouping_complete` remains false until every suite inventory and group-size preflight
+has validated. Once it is true, every selected known case belongs to exactly one group.
+Unselected cases have `group_id: null`; selected known cases may also have null group IDs
+if planning was interrupted before completion. A group row contains:
 
 | Field | Meaning |
 | --- | --- |
@@ -105,13 +116,16 @@ one group; unselected cases have `group_id: null`. A group row contains:
 | `complete` | Every requested member produced a validated final teardown outcome. |
 | `cache_eligible` | Complete successful evidence accepted after lifecycle and enabled reuse policy; false for `--no-cache` or `cache=False`. |
 | `attempts` | Worker attempts for this group; zero on reuse or before worker start. |
-| `worker_seconds`, `cpu_seconds` | Group worker totals, counted once, zero for reuse. |
-| `passed`, `failed`, `skipped`, `not_run` | Final-attempt member totals. |
+| `attempt_seconds` | Controller wall time across group attempts and retries. |
+| `worker_seconds`, `cpu_seconds` | Available worker measurements across attempts, counted once, zero for reuse. |
+| `timing_complete` | False when retries or unavailable worker measurements prevent complete timing accounting. |
+| `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Final-attempt member totals; distinguish known unrun members from attempted members without a valid result. |
 
 Each case row adds `group_id`, `result_status` (`passed`, `failed`, `skipped`, `not-run`,
 or `null` for unselected/unresolved infrastructure), and `complete`. Case `attempts`
 reports its group's attempt count; do not sum member attempts to count workers. In batch
-mode case `worker_seconds` and `cpu_seconds` are `null`: shared fixture and worker costs
+mode every case row, including unselected and unresolved members, has `worker_seconds`
+and `cpu_seconds` set to `null`: shared fixture and worker costs
 cannot honestly be attributed to individual cases. Case mode retains singleton timings.
 Group timings are the authority for execution totals and `worker_cpu_seconds` counts each
 group once plus collection. Per-worker limits and aggregate concurrency remain in
@@ -121,13 +135,19 @@ Case `outcome` keeps the existing vocabulary. Observed passed/skipped members ar
 `executed` even in a failed/incomplete group; observed failures are `failed`; missing
 members are `infrastructure_error` with `result_status: "not-run"`. An intentional
 pytest stop is distinguished by group `outcome: "incomplete"` and `stop_reason:
-"pytest-stop"`; dependency outages use `stop_reason: "infrastructure"`, cancellation
+"pytest-stop"`; execution-side collection failure uses `"collection"`, dependency outages use `"infrastructure"`, cancellation
 uses `"cancelled"`, and complete groups use `null`. A pytest-stop run reports status
 `failed`, not a dependency outage, even though missing-member count vocabulary is retained. Reuse applies to all
 members together and preserves their passed/skipped statuses. Group `cache_eligible`
 distinguishes observed results from reusable evidence. Complete inventory does not imply
 complete execution. A refusal or incomplete inventory never proves no earlier member
 ran; choose ordinary execution through structural/preflight routing before a run.
+
+If a worker attempt supplies no valid result, its members may already have executed:
+`unresolved` counts those members, `not_run` is zero, and their `result_status` is null.
+A group never submitted after cancellation has known `not_run` members with status
+`not-run`. A valid final worker result has `unresolved: 0`. These categories reconcile
+the whole membership without claiming that missing evidence proves no execution.
 
 All persistent membership uses opaque case/group identities. Raw collected node IDs,
 parameter values, skip reasons and exception messages do not enter group records or

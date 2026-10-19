@@ -6,7 +6,7 @@ import json
 import pytest
 
 from pytest_telescope import controller, runtime
-from pytest_telescope.model import DeclarationError
+from pytest_telescope.model import DeclarationError, fingerprint
 from pytest_telescope.plan import make_plan
 
 
@@ -49,12 +49,17 @@ def run(root, *, status="passed", **options):
     assert report["status"] == status, report
     assert report["schema"] == 2 and report["kind"] == "run"
     assert report["inventory_complete"] is True
+    assert report["grouping_complete"] is True
     selected = {row["case_id"]: row for row in report["units"] if row["selected"]}
     grouped = [member for group in report["groups"] for member in group["case_ids"]]
     assert len(grouped) == len(set(grouped)) == len(selected)
     assert set(grouped) == set(selected)
     for group in report["groups"]:
         assert len(group["group_id"]) == 64
+        assert group["unresolved"] == 0
+        assert sum(
+            group[field] for field in ("passed", "failed", "skipped", "not_run", "unresolved")
+        ) == len(group["case_ids"])
         for member in group["case_ids"]:
             assert selected[member]["group_id"] == group["group_id"]
             assert selected[member]["attempts"] == group["attempts"]
@@ -62,8 +67,7 @@ def run(root, *, status="passed", **options):
     if report["execution"]["mode"] == "batch":
         assert report["execution"]["profile"] == "batch-v1"
         assert all(
-            row["worker_seconds"] is None and row["cpu_seconds"] is None
-            for row in selected.values()
+            row["worker_seconds"] is None and row["cpu_seconds"] is None for row in report["units"]
         )
     assert report["worker_cpu_seconds"] == pytest.approx(
         report["collection"]["cpu_seconds"]
@@ -212,10 +216,22 @@ config = "pyproject.toml"
 test_roots = ["tests"]
 """,
     )
+    put(
+        project,
+        "conftest.py",
+        'import pytest\n@pytest.fixture(scope="session")\ndef shared(): return []\ndef pytest_collection_modifyitems(items):\n    items.sort(key=lambda item: item.path.name, reverse=True)\n',
+    )
     for filename in ("tests/test_one.py", "tests/test_two.py"):
-        simple_module(project, filename, count=2)
+        put(
+            project,
+            filename,
+            "def test_first(shared):\n    assert shared == []\n    shared.append(1)\ndef test_second(shared):\n    assert shared == [1]\n",
+        )
     report = run(project)
     assert len(report["groups"]) == 4
+    assert [(group["suite"], group["file"]) for group in report["groups"]] == sorted(
+        (group["suite"], group["file"]) for group in report["groups"]
+    )
     assert {(group["suite"], group["file"]) for group in report["groups"]} == {
         (suite, filename)
         for suite in ("first", "second")
@@ -267,7 +283,7 @@ def test_selection_and_membership_are_atomic_group_identity(project):
     assert run(project)["counts"]["executed"] == 4
 
 
-@pytest.mark.parametrize("corruption", ["missing", "malformed", "truncated"])
+@pytest.mark.parametrize("corruption", ["missing", "malformed", "truncated", "missing-member"])
 def test_missing_or_corrupt_group_evidence_reruns_every_member(project, corruption):
     configure(project)
     simple_module(project)
@@ -278,6 +294,11 @@ def test_missing_or_corrupt_group_evidence_reruns_every_member(project, corrupti
         records[0].unlink()
     elif corruption == "malformed":
         records[0].write_text('{"incomplete":')
+    elif corruption == "missing-member":
+        record = json.loads(records[0].read_text())
+        record["result"]["case_results"].pop()
+        record["checksum"] = fingerprint(record["result"])
+        records[0].write_text(json.dumps(record))
     else:
         content = records[0].read_bytes()
         records[0].write_bytes(content[: len(content) // 2])
