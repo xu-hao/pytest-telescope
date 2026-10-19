@@ -15,7 +15,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from .model import DeclarationError, InfrastructureError
+from .model import DeclarationError, InfrastructureError, UnsupportedCapability
 from .result import validate_collection, validate_result
 
 try:
@@ -24,7 +24,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BASE = "python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1"
-POLICY = "docker-nonroot-ro-none-v2"
+POLICY = "docker-nonroot-ro-none-v3"
 DEFAULT_REQUIREMENTS = (
     "pytest==9.1.1\niniconfig==2.3.0\npackaging==25.0\npluggy==1.6.0\npygments==2.19.2\n"
 )
@@ -59,7 +59,7 @@ def _terminate(process):
             stream.close()
 
 
-def _capture(args, timeout, *, merged=False, on_start=None, limit=MAX_OUTPUT):
+def _capture(args, timeout, *, merged=False, on_start=None, limit=MAX_OUTPUT, cancellation=None):
     """Bound both streams while running; never retain unrestricted stderr."""
     process = None
     output = bytearray()
@@ -80,6 +80,8 @@ def _capture(args, timeout, *, merged=False, on_start=None, limit=MAX_OUTPUT):
             if not merged:
                 selector.register(process.stderr, selectors.EVENT_READ, False)
             while selector.get_map():
+                if cancellation is not None and cancellation.is_set():
+                    raise InvocationInterrupted("worker cancelled; owned cleanup required")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise InfrastructureError("container command deadline exceeded")
@@ -571,7 +573,9 @@ def identity(root):
         ) from exc
 
 
-def _owned_capture(directory, data, args, timeout, *, merged=False, limit=MAX_OUTPUT):
+def _owned_capture(
+    directory, data, args, timeout, *, merged=False, limit=MAX_OUTPUT, cancellation=None
+):
     data["cleaned"] = False
     _durable(directory / "journal.json", data)
 
@@ -579,10 +583,32 @@ def _owned_capture(directory, data, args, timeout, *, merged=False, limit=MAX_OU
         data["client_pid"], data["client_start"] = process.pid, _start_identity(process.pid)
         _durable(directory / "journal.json", data)
 
-    return _capture(args, timeout, merged=merged, on_start=started, limit=limit)
+    return _capture(
+        args, timeout, merged=merged, on_start=started, limit=limit, cancellation=cancellation
+    )
 
 
-def execute(image, snapshot, args, environment, timeout, *, root, request, invocation_directory):
+def execute(
+    image,
+    snapshot,
+    args,
+    environment,
+    timeout,
+    *,
+    root,
+    request,
+    invocation_directory,
+    suite_root=".",
+    suite="default",
+    metadata_directory=None,
+    limits=None,
+    cancellation=None,
+    selection_disabled=False,
+    allow_unknown_selectors=False,
+):
+    from .execution import DEFAULT_WORKER
+
+    limits = DEFAULT_WORKER if limits is None else limits
     snapshot = Path(snapshot).resolve()
     root = Path(root).resolve()
     directory = Path(invocation_directory).resolve()
@@ -618,7 +644,7 @@ def execute(image, snapshot, args, environment, timeout, *, root, request, invoc
     required = (
         {"mode", "registry", "selectors"}
         if request["mode"] == "collection"
-        else {"mode", "registry", "case_nodeid", "expected_digest"}
+        else {"mode", "registry", "case_id", "expected_digest"}
     )
     if set(request) != required or type(request["registry"]) is not list:
         raise InfrastructureError("worker request fields do not match its protocol")
@@ -626,7 +652,16 @@ def execute(image, snapshot, args, environment, timeout, *, root, request, invoc
     budget = 0
     with request_path.open("wb") as stream:
         for chunk in json.JSONEncoder(separators=(",", ":"), allow_nan=False).iterencode(
-            {**request, "args": args, "nonce": data["token"]}
+            {
+                **request,
+                "args": args,
+                "nonce": data["token"],
+                "suite_root": suite_root,
+                "suite": suite,
+                "metadata": metadata_directory is not None,
+                "selection_disabled": selection_disabled,
+                "allow_unknown_selectors": allow_unknown_selectors,
+            }
         ):
             encoded = chunk.encode()
             budget += len(encoded)
@@ -652,18 +687,18 @@ def execute(image, snapshot, args, environment, timeout, *, root, request, invoc
         "--network=none",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
-        "--pids-limit=128",
-        "--memory=512m",
-        "--memory-swap=512m",
-        "--cpus=1",
+        f"--pids-limit={limits['processes']}",
+        f"--memory={limits['memory_bytes']}",
+        f"--memory-swap={limits['memory_bytes']}",
+        f"--cpus={limits['cpus']}",
         "--ulimit",
         "nofile=256:256",
         "--user",
         "65534:65534",
         "--tmpfs",
-        "/tmp:rw,nosuid,nodev,noexec,size=64m",
+        f"/tmp:rw,nosuid,nodev,noexec,size={limits['scratch_bytes']}",
         "--workdir",
-        "/project",
+        "/project/" + suite_root,
         "--mount",
         f"type=bind,src={snapshot},dst=/project,readonly",
         "--env",
@@ -671,6 +706,8 @@ def execute(image, snapshot, args, environment, timeout, *, root, request, invoc
         "--mount",
         f"type=bind,src={request_path},dst=/telescope-request.json,readonly",
     ]
+    if metadata_directory is not None:
+        cmd += ["--mount", f"type=bind,src={metadata_directory},dst=/metadata,readonly"]
     for filename in ("hosts", "hostname", "resolv.conf"):
         cmd += ["--mount", f"type=bind,src={control / filename},dst=/etc/{filename},readonly"]
     for key, value in sorted(environment.items()):
@@ -685,7 +722,22 @@ def execute(image, snapshot, args, environment, timeout, *, root, request, invoc
             timeout,
             merged=True,
             limit=MAX_COLLECTION if request["mode"] == "collection" else MAX_OUTPUT,
+            cancellation=cancellation,
         )
+        unsupported = [
+            line[len(b"TELESCOPE_UNSUPPORTED ") :]
+            for line in output.splitlines()
+            if line.startswith(b"TELESCOPE_UNSUPPORTED ")
+        ]
+        if (
+            code == 4
+            and len(unsupported) == 1
+            and json.loads(unsupported[0]) == {"capability": "project-metadata:runtime-conflict"}
+        ):
+            raise UnsupportedCapability(
+                "project-metadata:runtime-conflict",
+                "local metadata conflicts with an installed runtime distribution",
+            )
         reports = [
             line[len(b"TELESCOPE_RESULT ") :]
             for line in output.splitlines()
@@ -702,12 +754,14 @@ def execute(image, snapshot, args, environment, timeout, *, root, request, invoc
             else validate_result(
                 result,
                 nonce=data["token"],
-                case_id=hashlib.sha256(request["case_nodeid"].encode()).hexdigest(),
+                case_id=request["case_id"],
             )
         )
         if not valid or result["exit_code"] != code:
             raise InfrastructureError("worker result identity, completion or exit status mismatch")
         return result
+    except UnsupportedCapability:
+        raise
     except (OSError, ValueError, TypeError) as exc:
         raise InfrastructureError("worker startup or result validation failed") from exc
     finally:

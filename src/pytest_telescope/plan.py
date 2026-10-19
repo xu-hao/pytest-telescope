@@ -11,6 +11,8 @@ def make_plan(root):
         "mode": "plan-only",
         "case_inventory": "requires isolated pytest collection",
         "inventory": manifest.inventory,
+        "suites": [{**suite.identity(), "inventory": suite.inventory} for suite in manifest.suites],
+        "distributions": sorted(manifest.distributions),
         "discovery_scope": "broad-potential" if manifest.broad_inputs else "declared-union",
         "inputs": manifest.units[0].inputs,
         "declarations": [

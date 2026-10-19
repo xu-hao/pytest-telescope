@@ -1,5 +1,6 @@
 """Strict, distinct collection and single-case execution result protocols."""
 
+import hashlib
 import json
 import math
 import re
@@ -130,7 +131,7 @@ def validate_collection(result, nonce=None, successful_only=False):
     """Validate real item inventory without interpreting it as executed test success."""
     if type(result) is not dict or set(result) != COLLECTION_FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 2:
+    if type(result["protocol"]) is not int or result["protocol"] != 3:
         return False
     if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5)):
         return False
@@ -141,7 +142,7 @@ def validate_collection(result, nonce=None, successful_only=False):
     encoded_budget = len(json.dumps({**result, "items": []}, separators=(",", ":")).encode())
     for index, item in enumerate(items):
         if type(item) is not dict or set(item) != {
-            "nodeid",
+            "case_id",
             "file",
             "origins",
             "aliases",
@@ -149,15 +150,14 @@ def validate_collection(result, nonce=None, successful_only=False):
         }:
             return False
         if (
-            not _text(item["nodeid"])
+            (type(item["case_id"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", item["case_id"]))
             or not _path(item["file"])
-            or item["nodeid"].split("::", 1)[0] != item["file"]
             or type(item["selected"]) is not bool
         ):
             return False
-        if item["nodeid"] in identities:
+        if item["case_id"] in identities:
             return False
-        identities.add(item["nodeid"])
+        identities.add(item["case_id"])
         origins, aliases = item["origins"], item["aliases"]
         if type(origins) is not list or len(origins) > 100_000:
             return False
@@ -171,13 +171,16 @@ def validate_collection(result, nonce=None, successful_only=False):
         if (
             type(aliases) is not list
             or not 1 <= len(aliases) <= 128
-            or any(not _text(alias) for alias in aliases)
+            or any(
+                type(alias) is not str or not re.fullmatch(r"[0-9a-f]{64}", alias)
+                for alias in aliases
+            )
         ):
             return False
         if (
             aliases != sorted(set(aliases))
-            or item["nodeid"] not in aliases
-            or item["file"] not in aliases
+            or item["case_id"] not in aliases
+            or hashlib.sha256(item["file"].encode()).hexdigest() not in aliases
         ):
             return False
         encoded_budget += len(json.dumps(item, separators=(",", ":")).encode()) + bool(index)
