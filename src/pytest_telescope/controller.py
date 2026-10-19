@@ -426,7 +426,7 @@ def run(
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-    from .batching import group_jobs, group_row, project_result
+    from .batching import group_jobs, project_result
     from .execution import effective_arguments as suite_arguments
     from .execution import envelope
     from .execution import execution_mode as choose_mode
@@ -488,13 +488,18 @@ def run(
     )
     results, groups = [], []
     published = False
+    grouping_complete = False
 
     def summary(setup):
+        if mode == "batch":
+            for row in results:
+                row["worker_seconds"] = row["cpu_seconds"] = None
         report = _summary(results, collection, started, setup)
         report["schema"] = 2
         report["kind"] = "run"
         report["execution"] = dict(mode=mode, profile=profile)
         report["groups"] = groups
+        report["grouping_complete"] = grouping_complete
         report["worker_cpu_seconds"] = collection["cpu_seconds"] + sum(
             group["cpu_seconds"] for group in groups
         )
@@ -827,7 +832,12 @@ def run(
                     jobs = []
                     for candidate in candidates:
                         candidate["group_index"] = len(groups)
-                        groups.append(group_row(candidate))
+                        projected, group = project_result(candidate, None, mode)
+                        groups.append(group)
+                        for index, row in projected:
+                            results[index] = row
+                    grouping_complete = True
+                    for candidate in candidates:
                         previous = (
                             read_record(
                                 candidate["path"],
@@ -840,14 +850,15 @@ def run(
                             if candidate["enabled"] and not force
                             else None
                         )
-                        projected, group = project_result(
-                            candidate, previous, mode, reused=previous is not None
-                        )
-                        groups[candidate["group_index"]] = group
-                        for index, row in projected:
-                            results[index] = row
                         if previous is None:
                             jobs.append(candidate)
+                        else:
+                            projected, group = project_result(
+                                candidate, previous, mode, reused=True
+                            )
+                            groups[candidate["group_index"]] = group
+                            for index, row in projected:
+                                results[index] = row
 
                     def execute_job(job):
                         item, unit, suite = job["item"], job["unit"], job["suite"]
