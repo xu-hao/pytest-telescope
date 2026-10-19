@@ -217,7 +217,12 @@ def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Di
         if total > MAX_TOTAL_BYTES:
             raise DeclarationError("generated metadata exceeds the total size limit")
         build_inputs = sequence(entry.get("build_inputs", []), "distribution.build_inputs")
-        inputs = sorted({source, *expand_inputs(build_inputs, "distribution build inputs")})
+        inputs = sorted(
+            {
+                *expand_inputs([source], "distribution metadata"),
+                *expand_inputs(build_inputs, "distribution build inputs"),
+            }
+        )
         result[alias] = Distribution(name, inputs, {source: hashlib.sha256(raw).hexdigest()}, files)
     return result
 

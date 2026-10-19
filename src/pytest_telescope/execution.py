@@ -9,6 +9,7 @@ from pathlib import Path
 from .model import (
     DeclarationError,
     UnsupportedCapability,
+    excluded_namespace,
     mapping,
     regular_bytes,
     relative,
@@ -169,10 +170,15 @@ def suites(root, spec, selected=None):
                 "capabilities",
             },
         )
+        sequence(
+            [entry.get("root", "."), entry.get("config", "pyproject.toml")], "suite root/config"
+        )
         directory, configuration = (
             relative(entry.get("root", ".")),
             relative(entry.get("config", "pyproject.toml")),
         )
+        if excluded_namespace(root, directory) or excluded_namespace(root, configuration):
+            raise DeclarationError("suite root/config cannot expose excluded namespaces")
         if (
             not (root / directory).is_dir()
             or (root / directory).is_symlink()

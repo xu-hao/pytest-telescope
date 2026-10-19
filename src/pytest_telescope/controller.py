@@ -528,6 +528,16 @@ def run(
                     )
                     records = snapshot(manifest, pool_unit, pool)
                     record_map = {record["path"]: record for record in records}
+                    pool_is_broad = pool_unit.inputs == manifest.broad_inputs
+                    frozen_scope_hashes = {}
+                    metadata_hashes = {}
+
+                    def metadata_identity(names):
+                        key = tuple(names)
+                        if key not in metadata_hashes:
+                            metadata_hashes[key] = metadata_records(manifest.distributions, names)
+                        return metadata_hashes[key]
+
                     jobs = []
                     all_selected_aliases = set()
                     requested_selectors = set()
@@ -556,9 +566,7 @@ def run(
                                 "kind": "collection",
                                 "inputs": [record_map[name] for name in collection_unit.inputs],
                                 "absent": collection_unit.absent,
-                                "metadata": metadata_records(
-                                    manifest.distributions, collection_unit.distributions
-                                ),
+                                "metadata": metadata_identity(collection_unit.distributions),
                                 "files": suite.inventory,
                                 "registry": registry,
                             }
@@ -575,6 +583,19 @@ def run(
                         ):
                             collected = None
                         reused = collected is not None
+                        if collected is None and not suite.inventory:
+                            collected = dict(
+                                protocol=3,
+                                kind="collection",
+                                nonce="0" * 32,
+                                items=[],
+                                complete=True,
+                                exit_code=5,
+                                leaked_descendants=False,
+                                worker_seconds=0,
+                                cpu_seconds=0,
+                                failures=[],
+                            )
                         if collected is None:
                             for attempt in range(2):
                                 try:
@@ -712,13 +733,20 @@ def run(
                             signature = (item["file"], tuple(item["origins"]))
                             if signature not in scopes:
                                 unit = case_unit(manifest, item, suite)
+                                file_scope = (
+                                    "broad"
+                                    if unit.inputs is manifest.broad_inputs
+                                    else tuple(unit.inputs)
+                                )
+                                if file_scope not in frozen_scope_hashes:
+                                    frozen_scope_hashes[file_scope] = fingerprint(
+                                        [record_map[name] for name in unit.inputs]
+                                    )
                                 scope_key = fingerprint(
                                     {
-                                        "inputs": [record_map[name] for name in unit.inputs],
+                                        "inputs": frozen_scope_hashes[file_scope],
                                         "absent": unit.absent,
-                                        "metadata": metadata_records(
-                                            manifest.distributions, unit.distributions
-                                        ),
+                                        "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
                                     }
                                 )
@@ -806,10 +834,13 @@ def run(
                                         "run cancelled before worker start"
                                     )
                                 with runtime.invocation(manifest.root) as directory:
-                                    frozen = directory / "project"
-                                    materialize(pool, unit, frozen, record_map)
-                                    (frozen / suite.root).mkdir(parents=True, exist_ok=True)
-                                    (frozen / suite.root).chmod(0o755)
+                                    if unit.inputs is manifest.broad_inputs and pool_is_broad:
+                                        frozen = pool
+                                    else:
+                                        frozen = directory / "project"
+                                        materialize(pool, unit, frozen, record_map)
+                                        (frozen / suite.root).mkdir(parents=True, exist_ok=True)
+                                        (frozen / suite.root).chmod(0o755)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
@@ -982,7 +1013,11 @@ def error_result(error):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="pytest-telescope")
+    class Parser(argparse.ArgumentParser):
+        def error(self, message):
+            raise DeclarationError("invalid command-line arguments; consult --help")
+
+    parser = Parser(prog="pytest-telescope")
     subparsers = parser.add_subparsers(dest="command", required=True)
     preparation = subparsers.add_parser("runtime", help="build the clean Docker runtime")
     preparation.add_argument("--requirements", type=Path)
@@ -997,8 +1032,8 @@ def main(argv=None):
     for dimension in ("cpus", "memory-bytes", "processes", "scratch-bytes"):
         execution.add_argument("--budget-" + dimension, type=int)
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
-    options = parser.parse_args(argv)
     try:
+        options = parser.parse_args(argv)
         if options.command == "runtime":
             result = runtime.build_runtime(Path.cwd(), options.requirements)
         elif options.command == "plan":
@@ -1034,12 +1069,10 @@ def main(argv=None):
             else 0
         )
     except KeyboardInterrupt:
-        print(json.dumps({"status": "infrastructure_error", "error": "invocation interrupted"}))
+        print(json.dumps(error_result(InfrastructureError("invocation interrupted"))))
         return 3
     except UnsupportedCapability as exc:
-        print(
-            json.dumps({"status": "unsupported", "capability": exc.capability, "error": str(exc)})
-        )
+        print(json.dumps(error_result(exc)))
         return 4
     except DeclarationError as exc:
         print(json.dumps(error_result(exc)))
@@ -1050,10 +1083,9 @@ def main(argv=None):
     except (OSError, RecursionError, MemoryError):
         print(
             json.dumps(
-                {
-                    "status": "infrastructure_error",
-                    "error": "bounded project storage or parsing operation failed",
-                }
+                error_result(
+                    InfrastructureError("bounded project storage or parsing operation failed")
+                )
             )
         )
         return 3

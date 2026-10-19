@@ -159,6 +159,20 @@ def excluded_path(name, excluded=()):
     )
 
 
+def excluded_namespace(root, name, excluded=()):
+    """Apply the same environment boundary to explicit and discovered inputs."""
+    if excluded_path(name, excluded):
+        return True
+    parts = Path(name).parts
+    for depth in range(1, len(parts) + 1):
+        directory = Path(*parts[:depth])
+        config = directory / "pyvenv.cfg"
+        if os.path.lexists(root / config):
+            regular_bytes(root, config.as_posix(), 65536)
+            return True
+    return False
+
+
 def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), budget=None):
     pending = [start]
     if budget is None:
@@ -203,7 +217,7 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
         budget = [0]
     for name in sequence(names, label):
         name = relative(name)
-        if excluded_path(name, excluded):
+        if excluded_namespace(root, name, excluded):
             raise DeclarationError("metadata, cache and host environments are not project inputs")
         if name == ".":
             raise DeclarationError("declare project subdirectories or files, not the checkout root")
@@ -373,6 +387,8 @@ def load(root, *, cache_dir=None, suite_names=None):
     for suite in configured_suites:
         members = set()
         for name in suite.test_roots:
+            if excluded_namespace(root, name, excluded):
+                raise DeclarationError("test_roots cannot expose excluded namespaces")
             path = root / name
             if not path.exists() or not path.resolve().is_relative_to(root) or path.is_symlink():
                 raise DeclarationError("test_roots require existing project files or directories")
