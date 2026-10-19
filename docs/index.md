@@ -327,6 +327,7 @@ identity, limits, and failure recovery.
 Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
+Scoped execution extension <scoped-execution>
 Benchmark <benchmark>
 Development <development>
 Publishing <publishing>
