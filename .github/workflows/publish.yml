@@ -28,7 +28,7 @@ jobs:
           if not project.get("license") or not pathlib.Path("LICENSE").is_file():
               raise SystemExit("Choose and record the license before publishing")
           PYTHON
-      - name: Build and verify
+      - name: Build and verify distribution and Sphinx documentation
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install '.[dev]'

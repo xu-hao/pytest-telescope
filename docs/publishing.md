@@ -2,7 +2,8 @@
 
 ## Read the Docs
 
-The repository includes `.readthedocs.yaml` and a strict MkDocs configuration. The
+The repository includes `.readthedocs.yaml` and a strict Sphinx configuration using
+Furo and MyST Markdown. The
 public [Read the Docs project
 dashboard](https://app.readthedocs.org/projects/pytest-telescope/) is configured. Its
 existence does not establish a successful build or live docs. The service installs

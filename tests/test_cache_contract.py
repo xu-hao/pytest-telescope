@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from pytest_telescope.controller import read_record
+from pytest_telescope.controller import SCHEMA, read_record
 from pytest_telescope.model import DeclarationError, fingerprint, load
 
 
@@ -46,7 +46,9 @@ def test_semantically_corrupt_records_are_misses(tmp_path, changes):
     result = success() | changes
     path = tmp_path / "record.json"
     path.write_text(
-        json.dumps({"schema": 1, "key": "key", "result": result, "checksum": fingerprint(result)})
+        json.dumps(
+            {"schema": SCHEMA, "key": "key", "result": result, "checksum": fingerprint(result)}
+        )
     )
     assert read_record(path, "key") is None
 
@@ -55,7 +57,6 @@ def test_protocol_environment_cannot_be_declared(tmp_path):
     (tmp_path / "test_unit.py").write_text("def test_unit(): pass\n")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest_telescope]\nenv = ["TELESCOPE_REQUEST"]\n'
-        '[tool.pytest_telescope.targets.unit]\ntests = ["test_unit.py"]\n'
     )
     with pytest.raises(DeclarationError):
         load(tmp_path)
@@ -84,7 +85,9 @@ def test_complete_success_record_is_accepted(tmp_path):
     result = success()
     path = tmp_path / "record.json"
     path.write_text(
-        json.dumps({"schema": 1, "key": "key", "result": result, "checksum": fingerprint(result)})
+        json.dumps(
+            {"schema": SCHEMA, "key": "key", "result": result, "checksum": fingerprint(result)}
+        )
     )
     assert read_record(path, "key") == result
 
@@ -109,18 +112,21 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, monkeypatch):
 
     (tmp_path / "test_unit.py").write_text("def test_unit(): pass\n")
     (tmp_path / "test_second.py").write_text("def test_second(): pass\n")
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.pytest_telescope.targets.first]\ntests = ["test_unit.py"]\n'
-        '[tool.pytest_telescope.targets.second]\ntests = ["test_second.py"]\n'
-    )
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     calls = []
+
+    ordinal = 0
 
     @contextlib.contextmanager
     def invocation(root):
-        directory = root / "owned-invocation"
-        directory.mkdir()
+        nonlocal ordinal
+        ordinal += 1
+        current = ordinal
+        directory = root / ".pytest-telescope" / "scratch" / str(current)
+        directory.mkdir(parents=True)
         yield directory
-        raise controller.runtime.CleanupError("owned cleanup failed")
+        if current > 1:
+            raise controller.runtime.CleanupError("owned cleanup failed")
 
     monkeypatch.setattr(controller.runtime, "recover", lambda root: None)
     monkeypatch.setattr(
@@ -133,22 +139,19 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, monkeypatch):
         controller.runtime, "execute", lambda *args, **kw: calls.append(1) or success()
     )
     report = controller.run(tmp_path)
-    assert len(report["units"]) == 2
-    assert report["counts"]["infrastructure_error"] == 2
+    assert report["units"] == []
+    assert report["collection"]["outcome"] == "infrastructure_error"
     assert report["counts"]["executed"] == 0
     assert calls == [1]
     assert not list((tmp_path / ".pytest-telescope/cache").glob("*.json"))
 
 
-def test_unavailable_backend_accounts_all_units_after_bounded_retry(tmp_path, monkeypatch):
+def test_unavailable_backend_reports_unknown_inventory_after_bounded_retry(tmp_path, monkeypatch):
     from pytest_telescope import controller
 
     for name in ("first", "second"):
         (tmp_path / f"test_{name}.py").write_text(f"def test_{name}(): pass\n")
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.pytest_telescope.targets.first]\ntests = ["test_first.py"]\n'
-        '[tool.pytest_telescope.targets.second]\ntests = ["test_second.py"]\n'
-    )
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     attempts = []
 
     def unavailable(root):
@@ -160,6 +163,81 @@ def test_unavailable_backend_accounts_all_units_after_bounded_retry(tmp_path, mo
     report = controller.run(tmp_path)
     assert attempts == [1, 1]
     assert report["status"] == "infrastructure_error"
-    assert report["counts"]["infrastructure_error"] == 2
-    assert {unit["name"] for unit in report["units"]} == {"first", "second"}
-    assert all(unit["reason"] == "backend unavailable" for unit in report["units"])
+    assert report["units"] == []
+    assert report["collection"]["outcome"] == "infrastructure_error"
+    assert report["collection"]["reason"] == "backend unavailable"
+
+
+def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path, monkeypatch):
+    import contextlib
+
+    from pytest_telescope import controller
+
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+    (tmp_path / "test_unit.py").write_text("def test_unit(): pass\n")
+    ordinal = 0
+
+    @contextlib.contextmanager
+    def invocation(root):
+        nonlocal ordinal
+        ordinal += 1
+        current = ordinal
+        directory = root / ".pytest-telescope" / "scratch" / str(current)
+        directory.mkdir(parents=True)
+        yield directory
+        if current == 1:
+            raise controller.runtime.CleanupError("frozen pool cleanup failed")
+
+    item = {
+        "nodeid": "test_unit.py::test_unit",
+        "file": "test_unit.py",
+        "origins": [],
+        "aliases": ["test_unit.py", "test_unit.py::test_unit"],
+        "selected": True,
+    }
+    collected = {
+        "protocol": 2,
+        "kind": "collection",
+        "nonce": "b" * 32,
+        "exit_code": 0,
+        "complete": True,
+        "leaked_descendants": False,
+        "items": [item],
+        "worker_seconds": 0.1,
+        "cpu_seconds": 0.1,
+        "failures": [],
+    }
+    calls = []
+
+    def execute(*args, request, **kwargs):
+        calls.append(request["mode"])
+        return collected if request["mode"] == "collection" else success()
+
+    monkeypatch.setattr(controller.runtime, "recover", lambda root: None)
+    monkeypatch.setattr(
+        controller.runtime,
+        "identity",
+        lambda root: {"image": "fixture", "execution": {"fixture": True}},
+    )
+    monkeypatch.setattr(controller.runtime, "invocation", invocation)
+    monkeypatch.setattr(controller.runtime, "execute", execute)
+    with pytest.raises(controller.runtime.CleanupError, match="frozen pool"):
+        controller.run(tmp_path)
+    assert calls == ["collection", "execution"]
+    cache = tmp_path / ".pytest-telescope" / "cache"
+    assert not list(cache.glob("*.json"))
+    assert not list((cache / "inventory").glob("*.json"))
+
+
+def test_summary_output_budget_rejects_before_partial_json(monkeypatch, capsys):
+    from pytest_telescope import controller, model
+
+    monkeypatch.setattr(model, "MAX_OUTPUT_BYTES", 128)
+    monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": []})
+    assert controller.main(["run"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"units": []}
+    monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": ["a" * 100] * 3})
+    assert controller.main(["run"]) == 3
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "infrastructure_error"
+    assert "output limit" in output["error"]

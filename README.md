@@ -2,50 +2,46 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-pytest-telescope uses one manifest to define which project files a test target can read
-and which changes invalidate its previous successful result. Each target is a fresh
-pytest session inside a Linux Docker container. Successful unchanged targets can reuse
-their recorded results; reused cases are reported separately from executed cases.
+Put input declarations beside pytest cases. Each actual case, including each parametrized
+variant, runs in a fresh Linux Docker worker and has its own reusable successful result.
+Two cases in the same file can declare different resources and rerun independently.
 
-**Alpha (0.1.0a1):** implemented and qualified on Linux with real Docker workers. The
-[benchmark](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md)
-records measured cold, warm, and selective reruns, including their overhead. The
-supported boundary and reuse assumptions are explicit; arbitrary Python determinism is
-not guaranteed.
+```python
+import pytest
 
-## Quickstart
 
-Requirements: Linux, Python 3.11+, and a working local Docker daemon exposed through a
-Unix socket, with permission to build and run Linux containers. Runtime preparation
-needs network access; test workers have no network. Install from this checkout in a
-virtual environment:
+@pytest.mark.telescope(inputs=["data/red.json"], bundles=["pricing"])
+def test_red(): ...
+
+
+@pytest.mark.telescope(inputs=["data/blue.json"], bundles=["pricing"])
+def test_blue(): ...
+```
+
+**Unmarked cases see and hash the whole project-file snapshot.** Literal `inputs` or
+`bundles` marker fields narrow that scope. Declarations at module, class, function, and
+parameter levels add together with project defaults. `cache=False` alone stays broad.
+The containing test source and configuration are always included.
+
+## Try it
+
+Requirements: Linux, Python 3.11+, and permission to build/run Linux containers through
+a local Docker daemon's Unix socket. Runtime preparation needs network; workers have no
+network.
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install .
+python -m pip install pytest-telescope==0.1.0a2
 ```
 
-From your project's root, add a manifest to `pyproject.toml`:
+Follow the [complete runnable quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
+for copyable application code, tests, JSON, and TOML. It demonstrates cold/warm reuse,
+same-file independent inputs, parameter-specific declarations, shared bundles, broad
+invalidation, and an undeclared read failure. The base files are also in
+[examples/quickstart](https://github.com/xu-hao/pytest-telescope/blob/main/examples/quickstart).
 
-```toml
-[tool.pytest.ini_options]
-pythonpath = ["."]
-
-[tool.pytest_telescope]
-test_roots = ["tests"]
-
-[tool.pytest_telescope.bundles.common]
-inputs = ["tests/conftest.py", "app/__init__.py"]
-
-[tool.pytest_telescope.targets.parser]
-tests = ["tests/test_parser.py"]
-inputs = ["app/parser.py", "tests/data/input.json"]
-bundles = ["common"]
-```
-
-Declare every fixture, helper, application module, and resource your target needs. Then
-prepare a clean runtime and execute:
+From your configured project root:
 
 ```sh
 python -m pytest_telescope runtime
@@ -54,48 +50,34 @@ python -m pytest_telescope run --explain -- -q
 python -m pytest_telescope run --explain -- -q
 ```
 
-The second identical run can reuse complete successful targets. A missing input is an
-error, not permission to expose more of your checkout. See the
-[specification](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md)
-for declarations, grouping, invalidation, limits, and troubleshooting, and the
-[synthetic
-example](https://github.com/xu-hao/pytest-telescope/blob/main/examples/analytics/README.md)
-for an executable three-target project.
+`plan` previews static scopes. `run` collects actual cases inside an isolated worker;
+each execution then starts with only that case's scope. A warm inventory/result hit
+starts no worker containers. Summaries distinguish collection, fresh execution, cached
+results, failures, and unselected cases. New files or parametrized cases cannot hide
+behind an old result.
 
-```sh
-python -m pytest_telescope run --force -- -q
-python -m pytest_telescope run --no-cache -- -q
-python -m pytest_telescope run --timeout 120 -- -k parser
-```
+## Know the boundary
 
-`--force` executes even when a successful record exists. `--no-cache` disables reuse and
-recording. For permanently non-cacheable targets, set `cache = false`. Clocks,
-randomness, environment, native state, and external services can invalidate assumptions
-about reuse: filesystem isolation does not prove arbitrary Python programs
-deterministic.
+Every case gets a fresh pytest session, so module/class/session fixtures are recreated
+per case. Tests relying on cross-case mutable state need rewriting. Shared import and
+parametrization resources must be declared for every narrow consumer, typically in
+project defaults or bundles. Application files and host virtual environments are not
+installed into the prepared runtime.
 
-## Runtime and pytest integration
-
-The runtime contains a pinned Python base image and wheel-installed dependencies, not
-your host virtual environment or an editable copy of your application. For additional
-third-party packages, pass a requirements file containing the complete transitive
-dependency closure as exact `name==version` wheel dependencies:
-
-```sh
-python -m pytest_telescope runtime --requirements requirements.txt
-```
+Filesystem isolation does not establish universal determinism. Make clock, randomness,
+and native/external-state assumptions reproducible or mark affected cases `cache=False`.
+Use `run --force` to execute again or `run --no-cache` to bypass reuse and recording.
 
 The dedicated CLI starts no host pytest session. `pytest --telescope` also routes to
-isolated workers, but other installed plugins may execute during host pytest startup.
-`pytest --telescope-plan` remains available for static planning. Ordinary pytest stays
-ordinary when telescope mode is disabled; use `-p no:telescope` to disable plugin
-loading entirely.
+workers, but other plugins may execute during host pytest startup. `pytest
+--telescope-plan` is a static planning adapter. Ordinary pytest stays ordinary when
+telescope mode is disabled; `-p no:telescope` disables plugin loading entirely.
 
-See
-[development](https://github.com/xu-hao/pytest-telescope/blob/main/docs/development.md),
-[benchmark
-methodology](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md),
-and
-[publishing](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md).
-Licensed under the [MIT
-License](https://github.com/xu-hao/pytest-telescope/blob/main/LICENSE).
+**Version note:** 0.1.0a2 uses the marker interface. Immutable 0.1.0a1 used file/group
+targets; central `targets` declarations must migrate to markers, defaults, and bundles.
+The [benchmark](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md)
+records measured per-case cold/warm and selective reruns, including broad-case costs.
+
+See the [marker/project reference](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md), [execution contract](https://github.com/xu-hao/pytest-telescope/blob/main/docs/execution-contract.md),
+[development guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/development.md), and [publishing guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md).
+Licensed under the [MIT License](https://github.com/xu-hao/pytest-telescope/blob/main/LICENSE).

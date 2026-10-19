@@ -23,7 +23,7 @@ def main() -> None:
     run("-m", "build", "--outdir", str(output / "dist"))
     distributions = sorted((output / "dist").iterdir())
     run("-m", "twine", "check", "--strict", *(str(path) for path in distributions))
-    run("-m", "mkdocs", "build", "--strict", "--site-dir", str(output / "site"))
+    run("-m", "sphinx", "-n", "-W", "--keep-going", "-b", "dirhtml", "docs", str(output / "site"))
     wheels = list((output / "dist").glob("*.whl"))
     if len(wheels) != 1:
         raise RuntimeError("expected exactly one built wheel")

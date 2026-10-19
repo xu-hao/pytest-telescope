@@ -2,119 +2,130 @@
 
 ## Workload
 
-The repository's `examples/analytics` project is a synthetic pure-Python analytics
-workload. Three declared targets compute customer scores, demand projections, and price
-schedules from JSON resources. Each target has two test cases, including a bounded real
-computation. A shared helper is a declared input to every target. There are no
-artificial sleeps and no external services.
+The `examples/analytics` project contains **seven actual cases**. Six original cases
+exercise customer scoring, demand projections, and price schedules using deterministic
+Python computation and JSON resources. A seventh unmarked case reads a project note and
+uses the broad project snapshot. There are no artificial sleeps or external services.
 
-`benchmarks/run.py` copies the example into a fresh output directory and measures
-ordinary pytest, runtime preparation, cold isolated execution, unchanged warm execution,
-a narrow Python change, a JSON resource change, and a shared helper change. Changes
-preserve the tests' assertions while altering real input content. The original example
-is never modified. Every test-running phase uses the same six cases.
+Module literal markers select domain bundles, which include a shared helper and
+conftest. A function marker adds `data/scoring-check.json` to just one scoring case.
+Each case is an independent fresh pytest session and cache unit. A session fixture is
+therefore recreated seven times on a cold run, rather than shared across these cases.
+
+The harness measures ordinary pytest, runtime preparation, cold isolated execution,
+unchanged warm reuse, a scoring Python change, a demand JSON change, a single-case JSON
+change, and a shared helper change. The mutations preserve passing assertions while
+changing actual input content. Each phase runs the same seven cases. The source example
+is never modified.
 
 ## Reproduce
 
-Install this checkout into a virtual environment and ensure Docker is available. From
-the repository root, with that environment active:
+Install this checkout into a virtual environment and ensure a local Linux Docker daemon
+is available. From the repository root with that environment active:
 
 ```sh
 python benchmarks/run.py --output /tmp/telescope-benchmark --repetitions 3
 ```
 
-The output directory must not already exist. Each trial keeps its copied project,
-per-command logs, ordinary pytest JUnit report, and structured results. The final
-`results.json` contains each measurement and phase medians. Runtime setup happens once
-per trial; preexisting Docker image layers may speed up that phase. The harness rejects
-a run if target identities, executed/reused counts, or the six passing case counts
-differ from the expected sequence.
+The output directory must be new. Every trial retains its copied project, command logs,
+ordinary pytest JUnit report, and structured results. Runtime preparation occurs once
+per trial; cached Docker layers can accelerate it. The final `results.json` includes
+all measurements and phase medians. The harness leaves prepared runtime images available
+for inspection; remove only its recorded project-owned images when finished, following
+normal Docker administration practices. It never prunes shared daemon build caches.
 
-To validate the harness itself:
+The harness validates every case's opaque identity and relative source file, exactly one
+passed case per unit, the exact executed/reused identities after each mutation, complete
+collection inventory, and fresh/cached case totals. It rejects duplicate identities,
+wrong same-file consumers, incomplete collection, and inconsistent worker accounting.
 
 ```sh
 python -m unittest discover -s benchmarks -p 'test_*.py'
 ```
 
-These behavioral tests check outcome validation and real external process accounting.
-They do not substitute for the full Docker benchmark.
+These behavioral harness checks exercise outcome validation and real external process
+accounting. They do not substitute for the Docker benchmark.
 
-## Measurements and interpretation
+## Measurement method
 
-The harness measures elapsed time with an external monotonic clock and host child CPU
-with operating-system process accounting. Docker runs workers through its daemon,
-outside the CLI's descendant accounting: host controller CPU must never be mislabeled as
-total worker CPU. Runtime preparation is reported separately from test runs. Any worker
-accounting must identify its actual measurement source.
+Elapsed time uses an external monotonic `time.perf_counter` clock. Host process CPU is
+the delta of `resource.getrusage(RUSAGE_CHILDREN)` around each command. This includes the
+CLI and its reaped children, but excludes the Docker daemon's workers and builder.
 
-Cold execution includes snapshot, worker startup, collection, execution, teardown, and
-result recording. Warm execution still inventories files and validates reuse. The
-difference between ordinary and cold elapsed time is reported as an observed
-elapsed-time delta, not as a pure startup measurement, because runtimes may differ.
-Expected target outcomes are three executed for cold; three reused for unchanged; one
-executed and two reused after the narrow and resource changes; and three executed after
-the shared change. Actual case counts must agree with the workload.
+Worker CPU uses OS `getrusage` accounting inside each worker, including its reaped
+children. The report separates collection CPU from the sum of independently executed
+case-worker CPU. Their sum reconciles with the controller's reported total worker CPU;
+reused collection or case records contribute zero current worker time/CPU. None of
+these columns claims total Docker daemon resource consumption.
+
+Cold runs include frozen input construction, separate inventory collection, seven fresh
+case sessions, teardown, and recording. Warm runs still enumerate/freeze project inputs
+and check keys, but a fully warm inventory-and-result hit starts no containers. Changed
+input content refreshes collection while unrelated case results can remain reusable.
+
+The report also retains controller setup time through inventory resolution, excluding
+the collection worker-session duration, and external elapsed minus all collection/case
+worker-session durations. The latter includes CLI/bootstrap,
+container lifecycle, cache handling and cleanup. It is not a pure startup measurement;
+these timing categories overlap and must not be added together.
 
 ## Measured results
 
-Measured on 2026-10-19, with 3 complete trials. Every scenario passed its expected
-target identity and case-count checks. Times below are medians in seconds; no artificial
-delays are used.
+Measured on 2026-10-19 with **three complete trials** using an installed
+pytest-telescope 0.1.0a2 wheel. Every trial passed all identity, case-count, invalidation,
+and collection-accounting checks. Times below are medians in seconds. Each column is
+computed independently, so component medians need not sum exactly to the total median.
 
-| Scenario | External elapsed | Host process CPU | Worker CPU | Preflight + snapshot | Non-session elapsed |
+| Scenario | External elapsed | Host process CPU | Total worker CPU | Collection CPU | Case-worker CPU |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Ordinary pytest | 0.916 | 0.899 | — | — | — |
-| Runtime preparation | 0.414 | 0.248 | — | — | — |
-| Cold isolated | 2.517 | 0.467 | 1.507 | 0.107 | 1.371 |
-| Warm unchanged | 0.164 | 0.179 | 0.000 | 0.105 | 0.164 |
-| Narrow Python change | 0.965 | 0.270 | 0.516 | 0.105 | 0.573 |
-| JSON resource change | 0.915 | 0.275 | 0.486 | 0.105 | 0.553 |
-| Shared helper change | 2.517 | 0.468 | 1.508 | 0.107 | 1.364 |
+| Ordinary pytest | 0.965 | 0.943 | — | — | — |
+| Runtime preparation | 0.815 | 0.267 | — | — | — |
+| Cold isolated | 6.524 | 1.019 | 2.527 | 0.205 | 2.322 |
+| Warm unchanged | 0.214 | 0.198 | 0.000 | 0.000 | 0.000 |
+| Scoring Python change | 3.270 | 0.605 | 1.120 | 0.199 | 0.922 |
+| Demand JSON change | 3.119 | 0.598 | 1.099 | 0.206 | 0.888 |
+| Single-case JSON change | 2.518 | 0.492 | 0.919 | 0.203 | 0.715 |
+| Shared helper change | 6.474 | 1.012 | 2.541 | 0.202 | 2.339 |
 
-| Scenario | Executed / reused targets | Fresh / cached passing cases |
-| --- | ---: | ---: |
-| Ordinary pytest | Not applicable | 6 / 0 |
-| Cold isolated | 3 / 0 | 6 / 0 |
-| Warm unchanged | 0 / 3 | 0 / 6 |
-| Narrow Python change | 1 / 2 | 2 / 4 |
-| JSON resource change | 1 / 2 | 2 / 4 |
-| Shared helper change | 3 / 0 | 6 / 0 |
+| Scenario | Collection | Fresh / cached passing cases |
+| --- | --- | ---: |
+| Cold isolated | executed | 7 / 0 |
+| Warm unchanged | reused | 0 / 7 |
+| Scoring Python change | executed | 3 / 4 |
+| Demand JSON change | executed | 3 / 4 |
+| Single-case JSON change | executed | 2 / 5 |
+| Shared helper change | executed | 7 / 0 |
 
-All trials had zero failed, skipped, or infrastructure-error cases. The counts above
-were identical across trials. Runtime preparation is separate from the cold run and
-benefited from already cached Docker base/dependency layers; it does not estimate a
-first image download on a new host.
+All runs have seven collected/passed cases and no failed, skipped, unselected, or
+infrastructure-error cases. The counts are identical across all three trials. Ordinary
+pytest executes all seven in one host session and has no telescope result-reuse counts.
 
-`Preflight + snapshot` is the controller-reported time spent validating the
-manifest/runtime and constructing snapshots. `Non-session elapsed` is measured external
-elapsed time minus summed worker-session durations; it also includes CLI/bootstrap,
-container lifecycle, cache handling, and cleanup. These two columns overlap and must not
-be added together. Host process CPU excludes the Docker daemon and builder; worker CPU
-is reported separately using worker OS accounting. Neither column claims to measure
-total daemon resource consumption.
+The scoring Python and demand JSON changes each rerun their two domain cases **plus the
+broad case**, leaving four cached successes. The single-case resource change reruns its
+one scoring consumer **plus the broad case**, leaving five cached successes. It does not
+rerun only one physical case. The shared helper change reruns all seven.
 
-The measured cold elapsed delta relative to ordinary pytest was 1.602 seconds. That is
-an observed difference between two execution paths, not a pure startup measurement. Warm
-reuse was faster on this workload; cold execution and the shared-helper rerun cost more.
-Narrow changes approached the ordinary baseline. The small six-case workload exposes
-fixed costs, and these measurements do not predict the benefit for a different suite.
+Runtime preparation is separate from cold execution and benefited from preexisting
+Docker layers. It does not estimate a first image download on a new host. The observed
+cold-minus-ordinary elapsed delta is 5.558 seconds, measuring complete different
+execution paths rather than pure startup overhead. Small cases expose container and
+collection costs; these measurements do not predict gains for a different suite.
 
-### Measurement environment
+### Environment and evidence
 
 - Host: Linux 6.8.0-147-generic, x86_64, 24 logical CPUs.
-- Host interpreter: Python 3.12.3, pytest 8.3.5, pytest-telescope 0.1.0a1.
-- Worker limits: one CPU and 512 MiB memory per target; pinned Python 3.12 base
-  and runtime contents are specified in the [execution contract](execution-contract.md).
-- Ordinary pytest disables third-party plugin auto-loading, matching the
-  controlled worker plugin policy. This baseline uses host pytest 8.3.5; workers
-  use pytest 9.1.1. Host and worker Python builds can also differ. The comparison
-  measures these complete paths, not a controlled same-interpreter startup cost.
-- Each trial owns its project runtime; immutable image IDs are recorded per
-  trial in the structured data. Project ownership can give equivalent runtime
-  recipes distinct image IDs.
+- Host interpreter: Python 3.12.3, pytest 9.1.1, pytest-telescope 0.1.0a2.
+- Workers use the pinned Python 3.12 runtime and pytest 9.1.1 specified in the
+  [execution contract](execution-contract.md), with one CPU and 512 MiB per worker.
+- Ordinary pytest disables plugin auto-loading and explicitly loads telescope only to
+  register its markers; it does not enable isolated execution. Host and worker Python
+  builds can differ, so this is not a controlled same-interpreter startup comparison.
+- Each trial prepares a project-owned image. Equivalent runtime contents may have
+  different immutable image IDs because ownership differs. Recorded images from this
+  qualification were removed after measurement; shared Docker build caches were left
+  untouched.
 
-The [structured
-measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/linux-docker.json)
-include every trial, runtime identity, installed runner implementation hash, counts, and
-medians. Raw command logs and copied projects remain local to the benchmark output
-directory and are not release artifacts.
+The [structured measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/linux-docker.json)
+contain every trial, runtime identity, installed runner digest, case outcomes, collection
+work, and medians. Raw command logs and copied projects remain local and are not release
+artifacts. These per-case a2 results replace the earlier file/group measurements.

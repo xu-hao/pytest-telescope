@@ -2,15 +2,78 @@
 
 ## Status
 
-Alpha 0.1.0a1 implements this contract on Linux with a local Docker daemon.
-Qualification includes real sandbox integration tests and the [reproducible
-benchmark](benchmark.md). The limits and reuse assumptions below are part of the
-supported behavior.
+Version 0.1.0a2 implements this per-case marker contract with Linux Docker
+enforcement and lifecycle recovery. Version 0.1.0a1 remains immutable and uses
+the earlier file/group target interface.
 
-## Declarations before imports
+## User interface and scope
 
-Run from the directory containing `pyproject.toml`. The dedicated commands read the
-manifest without importing tests or conftest:
+Every actual pytest item is one independent execution and successful-result cache unit. This includes unmarked items and every parametrized variant. There is no central per-case registry. A new test file or generated case enters the current inventory automatically; it cannot disappear behind an old result.
+
+Use literal declarations beside tests:
+
+```python
+import pytest
+
+pytestmark = pytest.mark.telescope(bundles=["application"])
+
+
+@pytest.mark.telescope(inputs=["data/valid.json"])
+def test_valid(): ...
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("a", marks=pytest.mark.telescope(inputs=["data/a.json"]), id="a"),
+        pytest.param("b", marks=pytest.mark.telescope(inputs=["data/b.json"]), id="b"),
+    ],
+)
+def test_variant(value): ...
+```
+
+Module/class/function/parameter declarations are additive. A literal `inputs` or `bundles` field establishes explicit file scope, including an empty list. The effective scope is the union of those inherited declarations, project defaults, containing test source, and configuration source. The broad implicit scope is replaced, not added. A policy-only `cache=False` marker or absence assertion does not establish an empty allowlist. Any inherited `cache=False` disables successful-result reuse for that item.
+
+Without an explicit file-scope marker, a case sees the whole project-file snapshot, including hidden and Git-ignored project files. Every visible file participates in its key, so any visible project-file change reruns broad cases. This retains the sandbox and clean prepared runtime; it does not expose the host filesystem or host environment.
+
+The excluded namespaces are version-control metadata (`.git`, `.hg`, `.svn`), telescope state (`.pytest-telescope` and an explicitly selected in-project cache directory), pytest/bytecode caches (`.pytest_cache`, `__pycache__`), and host Python environments (`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Excluded content is never mounted or silently exposed without a key. Other directories such as build, dist and node_modules are project content and count against snapshot limits. Directory symlinks, special files and unsupported paths fail boundedly rather than being followed or omitted. Narrow declarations into excluded namespaces remain errors.
+
+Pyproject contains `[tool.pytest_telescope]` test roots/environment settings, a `[tool.pytest_telescope.defaults]` table for shared inputs/bundles/absence/cache policy, and reusable `[tool.pytest_telescope.bundles.NAME]` tables. Defaults add common support to explicit scopes; they do not silently narrow otherwise unmarked cases. Conftest, application modules, package initializers, helpers and collection resources must be visible in the effective scope. Broad scope includes them automatically; narrow scope declares them. Existing central `targets` is rejected with a migration message rather than silently treated as per-case configuration.
+
+No new shared-session grouping API is introduced: each case starts a fresh pytest session. Module/class/session fixtures are recreated per case. Tests requiring cross-case mutable state must be rewritten; this version does not promise ordinary pytest's shared-session behavior. The supported filesystem is read-only, and scratch is private to each case.
+
+## Static discovery and real pytest agreement
+
+The controller parses bounded test source syntax without importing or evaluating project Python. Supported spellings use `pytest.mark.telescope(...)` directly in function/class decorators, module/class `pytestmark`, or `pytest.param(..., marks=...)` inside literal parametrization declarations. Values are literal string lists and booleans; bundles provide reusable declarations. Arbitrary expressions, computed kwargs, declaration factory functions, aliases and generated telescope markers are unsupported. Ordinary parametrization values and pytest-generated item identities still come from real pytest collection, not an AST approximation.
+
+A pre-import worker guard validates each supported marker factory call against its exact frozen source position and literal arguments. Collected telescope marks must have registered origins and unchanged values, compared with an independent immutable canonical encoding of the static declaration. Mutable lists passed to pytest are never the validation baseline. Code-position tables are memoized per code object so repeated markers do not repeatedly expand the entire table. Hidden dynamic marker construction that cannot be diagnosed statically fails in the already-isolated collection worker; it never expands the snapshot. This is strict declaration validation, while Docker supplies enforcement. Behavioral qualification covers the supported pinned runtime's call-position behavior and pytest 8/9 marker inheritance in behavioral controls; private pytest internals are not assumed stable.
+
+Discovery collects all current test files inside a worker with the explicit union of every potential case scope. When an unmarked item is possible, discovery includes the broad project snapshot from the outset. Function/class/parameter-only declarations cannot prove complete dynamic coverage; a validated inherited module-level file scope can establish a narrow discovery union. Real collected provenance must confirm that guarantee, or collection fails without a broader retry. Discovery can therefore see more files than any one narrow case. This is a separate, documented collection boundary; a case body never runs with the discovery union. Real pytest enumerates dynamic and parametrized items and maps inherited literal origins to effective declarations. Hooks that add, remove or change items after the validated collection checkpoint are rejected. Duplicate/invalid node identities are errors.
+
+Per-case execution begins a new sandbox with only that case's effective scope, before conftest/test imports. It collects its containing file, verifies the actual item/declaration inventory against the discovery record, and executes exactly the selected item. A narrow execution missing a shared collection dependency fails with bounded collection evidence; it does not borrow another case's inputs. Common import/parametrization dependencies belong in shared declarations. The fresh worker's collection must agree even when a data-dependent item generator produces different nodes under a narrow scope.
+
+## Inventory, selection and reuse
+
+Inventory and execution have distinct strict result schemas. A successful collection reports collected nodes and declaration assignments, never executed passes. It becomes reusable only after clean worker exit, complete teardown of the collection process, validated bounded records and invocation cleanup.
+
+The inventory key covers the exact frozen discovery union, current test-file membership, static declaration registry, pytest configuration, relevant environment, full effective arguments/selectors, runtime/image content and daemon identity, runner implementation/version, and backend policy. Every invocation re-enumerates and freezes current project inputs before accepting an inventory hit. File addition/deletion, resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
+
+Result keys cover each case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and all existing runtime/environment/runner/backend identities. They do not include an unrelated case's resource bytes merely because discovery saw them. Thus changing one narrow resource refreshes discovery but preserves unrelated case result hits. Broad case keys include every visible project file. Failures, interrupted/invalid records and incomplete cleanup never become hits.
+
+Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static scope preview and explicitly does not claim real collected-case enumeration.
+
+## Bounds and performance
+
+Bounded defaults: 100,000 actual cases; 100,000 visible files; 200,000 visited entries; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual execution response. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
+
+Retain up to 100,000 successful case records within a 256 MiB total cache budget, plus at most eight inventory records within a 64 MiB inventory budget. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete frozen-pool invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
+
+Freeze each distinct file once per invocation. Derive case keys from immutable frozen-file records and memoized scope identities. Materialize only missed cases, using immutable files from the frozen pool without exposing its broader parent directory. Broad scopes can reuse a complete immutable snapshot; narrow snapshots contain only their own selected paths. Do not copy/hash the whole project once per case. Cold execution remains serial and starts one isolated pytest session per case; repeated collection of a large parametrized module is a real cost, not hidden by file-group benchmark claims. Warm inventory/result hits start no worker containers.
+
+## Project configuration
+
+Run from the directory containing `pyproject.toml`. The dedicated CLI does not import
+project Python on the host:
 
 ```sh
 python -m pytest_telescope runtime
@@ -26,79 +89,29 @@ pythonpath = ["."]
 test_roots = ["tests"]
 env = ["FEATURE_VARIANT"]
 
-[tool.pytest_telescope.bundles.common]
-inputs = ["tests/conftest.py", "app/__init__.py", "tests/helpers.py"]
+[tool.pytest_telescope.defaults]
+inputs = ["tests/conftest.py"]
+
+[tool.pytest_telescope.bundles.application]
+inputs = ["app/__init__.py", "app/parser.py"]
 absent = ["app/local_override.json"]
-
-[tool.pytest_telescope.targets.parser]
-tests = ["tests/test_parser.py"]
-inputs = ["app/parser.py", "tests/data/*.json"]
-bundles = ["common"]
-
-[tool.pytest_telescope.targets.clock]
-tests = ["tests/test_clock.py"]
-inputs = ["app/clock.py"]
-bundles = ["common"]
-cache = false
 ```
 
-`targets` is nonempty. Each target has a nonempty `tests` list and optional `inputs`,
-`bundles`, `absent`, and `cache` fields. `cache` defaults to true. Bundles have optional
-`inputs`, `bundles`, and `absent` lists and can refer to other bundles. Unknown fields,
-unresolved references, cycles, malformed types, and paths escaping the project are
-errors. Paths are relative to the project root.
+Paths are project-relative. Inputs accept explicit files, directories and globs.
+Missing declared inputs, unknown fields/bundles, cyclic bundle references, malformed
+values and paths escaping the project are errors. Expected-absent paths must be
+absent in the source project and participate in identity. Relative leaf symlinks
+require their destination in the effective scope; absolute links and directory
+symlinks are unsupported. Explicit hidden glob components are supported.
 
-Keep pytest configuration in `[tool.pytest.ini_options]` in this same manifest. Other
-pytest configuration files (`pytest.ini`, `.pytest.ini`, `tox.ini`, and `setup.cfg`) are
-rejected rather than silently introducing another configuration source. Test inventory
-honors its `python_files` patterns. Directory symlinks are unsupported. A leaf symlink
-must use relative target text and remain inside the declared project namespace. Absolute
-target text is rejected even when it points inside the source project, because copying
-it would not preserve the worker's project namespace.
+Keep pytest configuration in this pyproject's `[tool.pytest.ini_options]`; other
+pytest configuration files are rejected. Discovery honors configured `python_files`
+and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
+truncates matching files. Only named `env` variables are forwarded and keyed, including
+presence. Controlled Python/pytest variables and `TELESCOPE_*` protocol names are
+reserved. Diagnostics never print environment values.
 
-`tests` and `inputs` accept existing explicit paths, directories, and globs. Hidden
-directories can be selected explicitly in glob components, for example
-`data/.assets/*.json`; do not rely on a broad discovery glob to include them.
-Declarations expand to a bounded concrete snapshot. File content, frozen modes,
-symlinks, and glob membership are part of its identity. Source timestamps and read/write
-permission bits are normalized away; source execute bits remain visible and participate
-in invalidation. A declared missing input is an error. Use `absent` for a path whose
-required state is nonexistence; that assertion is checked and participates in reuse. An
-undeclared path being inaccessible is not an assertion that the path is absent in the
-source project.
-
-A source file is limited to 64 MiB and a target snapshot to 256 MiB. Discovery visits at
-most 20,000 entries, and inventory and expanded declarations are each limited to 4,096
-paths. Keep roots narrow enough to fit these bounds. A test file belongs to exactly one
-target. A leaf symlink's destination must also be declared as an input or an explicitly
-absent path.
-
-The declaration file itself is an input to every target. Include test source, conftest
-files, helpers, fixture resources, and application code. No import tracing automatically
-expands access. Shared bundles let one dependency invalidate all of its consumers
-without duplicating declarations.
-
-`test_roots` defaults to `["."]`. Before every execution or reuse decision, a static
-inventory checks the configured roots for test files. Every discovered test file must
-belong to the declared targets; a newly added undeclared test is an error, including on
-an otherwise warm cache. Configure roots to cover the whole test suite. Static file
-inventory does not discover arbitrary custom collection schemes that hide tests outside
-those roots.
-
-Only names in `env` are forwarded from the host as explicit user environment inputs, and
-their presence and values affect reuse. Controlled Python/pytest variables and all
-`TELESCOPE_*` protocol variables cannot be forwarded. Do not use environment forwarding
-as a secret-distribution mechanism. Evidence and diagnostics must not print variable
-values.
-
-## Execution and fixture grouping
-
-One manifest target is one execution and cache unit, run in a fresh pytest session. All
-selected tests in that target share normal pytest fixtures and ordering within that
-session. Session fixtures are recreated for each target; state and ordering do not cross
-target boundaries. Put tests that require one shared session into the same target.
-Larger targets preserve more sharing but rerun more work when any declared input
-changes.
+## Runtime and filesystem enforcement
 
 Isolation starts before collection and covers imports, fixture setup, test bodies, and
 teardown, including native code and descendant processes. Project inputs are copied into
@@ -145,7 +158,7 @@ prune it. The Docker administrator must configure its storage quotas and garbage
 collection; the image retention bound is not a bound on the daemon's shared build-cache
 storage.
 
-The initial worker policy gives each target one CPU, 512 MiB memory with no added swap
+The initial worker policy gives each case one CPU, 512 MiB memory with no added swap
 allowance, 128 processes, 256 open descriptors, 64 MiB of private `/tmp`, and at most 1
 MiB of captured worker output. Limits are part of the backend policy; exceeding them
 produces failure, not a broader execution boundary.
@@ -167,45 +180,17 @@ cross-machine reuse is not promised. Rebuild the runtime after changing its
 dependencies. If Docker cannot establish the required restrictions, report
 infrastructure failure without running an unrestricted substitute.
 
-## Reuse identity and outcomes
+## Outcome accounting
 
-A cache key includes the effective declarations and exact frozen files; file
-content/frozen modes/symlinks and expected absence; glob membership; test source,
-conftest, helpers and manifest; runtime identity and backend policy; explicit
-environment inputs; full pytest arguments and selectors, including `-m` and `-k`; runner
-version and implementation digest; and target identity. A rename, addition, deletion,
-symlink or mode change can invalidate a consumer even if another file's content stays
-the same. Changing only source timestamps or read/write bits does not change the
-normalized snapshot and therefore does not invalidate reuse. An unrelated file outside
-all declarations does not invalidate a target, unless it changes the static test
-inventory.
+The controller reports current collected cases, selection, independent execution units,
+and collection work separately. Each selected case has one outcome: executed success,
+reused success, test failure, or infrastructure failure. Other current cases are
+unselected. Fresh/cached passed and skipped counts remain distinct. A cached case is
+not described as a newly executed test. Exit statuses remain 0 for success, 1 for test
+failure, 3 for infrastructure failure, 4 for invalid declarations/arguments, and 5
+when no cases are selected.
 
-Only a complete success after teardown, clean worker exit, a validated bounded result,
-and complete invocation cleanup can be recorded. Success is persisted under the stable
-cache lock after cleanup finishes. A cleanup failure stops the remaining targets and
-cannot publish a success followed by a duplicate error for the same target. Missing,
-malformed, incompatible, interrupted, and failed records cannot be hits. Atomic records
-and a stable shared cache lock protect concurrent invocations; no invocation may accept
-a partially written result. The first backend serializes access through that lock,
-including worker execution, to coordinate reuse and bounded garbage collection. It
-retains at most 1,024 successful records and 64 MiB of owned records, removing oldest
-records when necessary. Owned orphan record temporaries are removed under the same lock;
-unrelated files are not cleanup candidates.
-
-The controller distinguishes executed success, reused success, test failure,
-infrastructure failure, and unselected targets, and reports actual test case counts.
-JSON `counts` contains target outcomes; `cases` contains collected, passed, failed, and
-skipped totals; `units` contains each target's outcome, reason, case counts, and timing.
-The `cases` totals account for both executed and reused cases;
-`case_outcomes.fresh_passed`, `cached_passed`, `fresh_skipped`, and `cached_skipped`
-report the distinction directly. Each unit also reports its outcome. Exit statuses are 0
-for success, 1 for test failure, 3 for infrastructure failure, 4 for invalid
-declarations or arguments, and 5 when no cases are selected anywhere. A target with no
-matching cases is `not-selected` and does not fail an otherwise passing selected run.
-Reused cases are previous results, never newly executed tests. The target is the reuse
-granularity, even when arguments select fewer cases from it.
-
-Use declared test-file paths with optional `::node` selectors, `-k EXPRESSION`, or `-m
+Use discovered test-file paths with optional `::node` selectors, `-k EXPRESSION`, or `-m
 EXPRESSION` to select cases. The accepted pytest options are:
 
 - With a value: `-k`, `-m`, `-o`, `--override-ini`, `-p`, `--maxfail`, `--tb`,
@@ -223,12 +208,12 @@ summary and bounded failure evidence, not arbitrary pytest output.
 
 - `run --force`: execute despite an eligible successful record.
 - `run --no-cache`: execute without reading or writing successful result records.
-- `run --explain`: explain the target's execution or reuse decision.
+- `run --explain`: explain the case's execution or reuse decision.
 - `run --cache-dir PATH`: select the result-record directory.
 - `run --timeout SECONDS`: bound worker wall time; default 60 seconds, allowed
   range 0.1 through 3,600 seconds.
-- Target `cache = false`: always execute this target and never record a reusable
-  success, regardless of other targets' cache settings.
+- Marker `cache=False`: always execute the case and never record a reusable
+  success, regardless of other cases' cache settings.
 
 Filesystem inputs do not prove universal determinism. Tests that depend on clocks,
 uncontrolled randomness, native global state, changing external services, or undeclared
@@ -246,13 +231,13 @@ directory, or bundle. For a `FileNotFoundError`, inspect the reported file/line 
 resource dependencies. Verify shared conftest and package `__init__.py` files as well as
 the obvious application module.
 
-An undeclared/new test-file error requires updating target coverage or correcting
-`test_roots`. It cannot be resolved by accepting an old cache record. A changed selector
-has a different identity and cannot reuse the unselected run's result.
+New test files and cases are included in the refreshed real inventory. A collection
+mismatch or unsupported declaration cannot be resolved by accepting an old record.
+A changed selector has a different identity and cannot reuse the unselected run's result.
 
 A failed test remains a failed execution and never becomes a reusable success. Backend
 identity preflight gets at most two attempts. If it remains unavailable, every validated
-target is reported as an infrastructure error rather than being omitted. A target gets
+case is reported as an infrastructure error rather than being omitted. A case gets
 at most two execution attempts for infrastructure failures. Cache lock acquisition is
 bounded by twice the configured worker timeout plus 30 seconds. Startup, deadline,
 output, storage, invalid-result, or cleanup failure that exhausts recovery ends with a
