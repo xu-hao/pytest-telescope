@@ -322,19 +322,19 @@ def source_project(root):
         config.read_text()
         + """
 [tool.pytest_telescope.distributions.core]
-metadata="metadata/core.toml"
+metadata="metadata/core/pyproject.toml"
 format="pep621-static-v1"
 [tool.pytest_telescope.distributions.hidden]
-metadata="metadata/hidden.toml"
+metadata="metadata/hidden/pyproject.toml"
 format="pep621-static-v1"
 """
     )
     put(
         root,
-        "metadata/core.toml",
+        "metadata/core/pyproject.toml",
         '[project]\nname="example-core"\nversion="1.0"\n[project.entry-points."example.plugins"]\ncore="example_core:value"\n',
     )
-    put(root, "metadata/hidden.toml", '[project]\nname="example-hidden"\nversion="1.0"\n')
+    put(root, "metadata/hidden/pyproject.toml", '[project]\nname="example-hidden"\nversion="1.0"\n')
     put(root, "src/example_core/__init__.py", 'value="initial"\n')
     put(root, "src/example_core/__main__.py", "from . import value\nprint(value)\n")
     put(root, "src/example_hidden.py", 'value="not declared"\n')
@@ -369,7 +369,7 @@ def test_isolated_children_receive_exact_source_metadata_views_and_reuse(
     put(root, "src/example_core/__init__.py", 'value="changed"\n')
     changed = passed(root, **options)
     assert changed["counts"]["executed"] == 3 and changed["counts"]["reused"] == 2
-    metadata = root / "metadata/core.toml"
+    metadata = root / "metadata/core/pyproject.toml"
     metadata.write_text(metadata.read_text().replace('version="1.0"', 'version="2.0"'))
     changed_metadata = passed(root, **options)
     assert changed_metadata["counts"]["executed"] == 3 and changed_metadata["counts"]["reused"] == 2
