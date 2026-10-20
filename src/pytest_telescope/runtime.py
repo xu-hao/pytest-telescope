@@ -908,7 +908,9 @@ def execute(
     if projection is not None:
         if projection.parent != control or projection.name != "source-view.pth":
             raise InfrastructureError("source projection requires its exact owned control file")
-        if _read(projection, python_source.MAX_BYTES) != python_source.projection(settings, metadata_present):
+        if _read(projection, python_source.MAX_BYTES) != python_source.projection(
+            settings, metadata_present
+        ):
             raise InfrastructureError("source projection bytes do not match the declared view")
         os.utime(projection, ns=(0, 0), follow_symlinks=False)
         cmd += ["--mount", f"type=bind,src={projection},dst={python_source.SLOT},readonly"]

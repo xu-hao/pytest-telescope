@@ -40,6 +40,11 @@ def normalize(root, config, profile=None, roots=None, *, complete=False):
     if profile == DEFAULT and roots:
         raise DeclarationError("default Python profile cannot declare source_roots")
     for name in roots:
+        if name.rstrip() != name or len(name.splitlines()) != 1:
+            raise UnsupportedCapability(
+                "python:source-layout",
+                "source path cannot round-trip through a data-only path file",
+            )
         if (
             name != relative(name)
             or any(ord(c) < 32 or ord(c) == 127 for c in name)
@@ -68,14 +73,19 @@ def normalize(root, config, profile=None, roots=None, *, complete=False):
 def validate_view(settings, files):
     if settings["profile"] == DEFAULT:
         return
-    prefixes = ["" if root == "." else root + "/" for root in settings["source_roots"]]
+    prefixes = [
+        ("" if root == "." else root + "/", root.lower().endswith(".egg"))
+        for root in settings["source_roots"]
+    ]
     for name in files:
-        for prefix in prefixes:
+        for prefix, egg_root in prefixes:
             if not name.startswith(prefix):
                 continue
             entry = name[len(prefix) :].split("/", 1)[0]
-            if entry.split(".")[0] in {"sitecustomize", "usercustomize"} or entry.endswith(
-                (".dist-info", ".egg-info", ".egg-link")
+            if (
+                entry.split(".")[0] in {"sitecustomize", "usercustomize"}
+                or entry.lower().endswith((".dist-info", ".egg-info", ".egg-link"))
+                or (egg_root and entry.lower() == "egg-info")
             ):
                 raise UnsupportedCapability(
                     "python:source-layout",
