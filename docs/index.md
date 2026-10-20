@@ -339,6 +339,7 @@ Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
 Optional batches <batching>
+Pinned local Git profile proposal <git-runtime>
 Scoped execution extension <scoped-execution>
 Run result reference <result-schema>
 Benchmark <benchmark>
