@@ -417,12 +417,19 @@ def ownership_preflight(run_id):
         )
         observations.append(row)
         print(json.dumps(dict(ownership_observation=row)), flush=True)
-    # Preserve the original predicate until actual manager state has been reviewed.
-    if any(
-        row["path_exists"] or row["path_is_symlink"] or row["manager"]["LoadState"] != "not-found"
-        for row in observations
-    ):
-        raise RuntimeError("proof resource name already owned")
+    empty_state = dict(
+        ActiveState="inactive", ControlGroup="", FragmentPath="", DropInPaths="", Transient="no"
+    )
+    for row in observations:
+        state = row["manager"]
+        allowed_load = {"not-found", "loaded"} if row["name"].endswith(".slice") else {"not-found"}
+        if (
+            row["path_exists"]
+            or row["path_is_symlink"]
+            or state["LoadState"] not in allowed_load
+            or any(state[field] != value for field, value in empty_state.items())
+        ):
+            raise RuntimeError("proof resource name already owned")
 
 
 def launch(args):
