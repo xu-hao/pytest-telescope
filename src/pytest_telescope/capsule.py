@@ -48,6 +48,50 @@ def _digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def regular_snapshot(path, limit, *, follow=False):
+    """One bounded descriptor read, detecting replacement/growth before accepting bytes."""
+    descriptor = None
+    try:
+        realpath = str(Path(path).resolve(strict=True)) if follow else str(path)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | (0 if follow else os.O_NOFOLLOW))
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            _unsupported("runtime input must be a bounded regular file")
+        data = bytearray()
+        while len(data) <= limit:
+            chunk = os.read(descriptor, min(1024 * 1024, limit + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+        current = os.stat(path, follow_symlinks=follow)
+
+        def identity(value):
+            return (
+                value.st_dev,
+                value.st_ino,
+                value.st_size,
+                value.st_mtime_ns,
+                value.st_ctime_ns,
+                value.st_mode,
+            )
+
+        if (
+            len(data) != before.st_size
+            or len(data) > limit
+            or identity(before) != identity(after)
+            or identity(after) != identity(current)
+            or (follow and identity(os.stat(realpath)) != identity(after))
+        ):
+            raise InfrastructureError("runtime source changed during bounded inspection")
+        return bytes(data), before, realpath
+    except OSError as exc:
+        raise InfrastructureError("runtime source changed or is unavailable") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 class Payload:
     """One owned staged runtime, with deterministic content and storage accounting."""
 
@@ -93,22 +137,7 @@ class Payload:
         self.directories.update(str(p) for p in PurePosixPath(relative).parents if str(p) != ".")
 
     def copy_file(self, source, target):
-        descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(descriptor, "rb") as stream:
-            before = os.fstat(stream.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_size > self.max_bytes:
-                _unsupported("runtime input must be a bounded regular file")
-            self._reserve([(target, before.st_size)])
-            data = stream.read(before.st_size + 1)
-            after = os.fstat(stream.fileno())
-        if len(data) != before.st_size or (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-            before.st_ctime_ns,
-        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-            raise InfrastructureError("runtime source changed during freezing")
+        data, before, _ = regular_snapshot(source, self.max_bytes - self.bytes_used)
         self.write(target, data, mode=stat.S_IMODE(before.st_mode), mtime_ns=before.st_mtime_ns)
 
     def symlink(self, name, target):
@@ -182,41 +211,70 @@ class Payload:
         return _digest(json.dumps(self.manifest(), sort_keys=True, separators=(",", ":")).encode())
 
     def verify(self):
-        observed = set()
-        for directory, directories, files in os.walk(self.root, followlinks=False):
-            for name in [*directories, *files]:
-                path = Path(directory) / name
-                relative = path.relative_to(self.root).as_posix()
-                value = path.lstat()
-                if stat.S_ISDIR(value.st_mode):
-                    if relative not in self.directories:
-                        raise InfrastructureError("runtime content changed")
-                    continue
-                observed.add(relative)
-                record = self.records.get(relative)
-                if record is None:
-                    raise InfrastructureError("runtime content changed")
-                if record["kind"] == "symlink":
-                    valid = stat.S_ISLNK(value.st_mode) and os.readlink(path) == record["target"]
-                else:
-                    valid = (
-                        stat.S_ISREG(value.st_mode)
-                        and value.st_size == record["size"]
-                        and stat.S_IMODE(value.st_mode) == record["mode"]
-                        and _digest(path.read_bytes()) == record["sha256"]
-                    )
-                if not valid or value.st_mtime_ns != record["mtime_ns"]:
-                    raise InfrastructureError("runtime content changed")
-        if observed != set(self.records):
-            raise InfrastructureError("runtime content changed")
+        observed, directories = set(), set()
+        pending = [self.root]
+        visited = total = 0
+        try:
+            while pending:
+                directory = pending.pop()
+                descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    with os.scandir(descriptor) as entries:
+                        for entry in entries:
+                            visited += 1
+                            if visited > self.max_entries:
+                                raise InfrastructureError(
+                                    "runtime content changed beyond entry bound"
+                                )
+                            path = directory / entry.name
+                            relative = path.relative_to(self.root).as_posix()
+                            value = os.stat(entry.name, dir_fd=descriptor, follow_symlinks=False)
+                            if stat.S_ISDIR(value.st_mode):
+                                if relative not in self.directories:
+                                    raise InfrastructureError("runtime content changed")
+                                directories.add(relative)
+                                pending.append(path)
+                                continue
+                            observed.add(relative)
+                            record = self.records.get(relative)
+                            if record is None:
+                                raise InfrastructureError("runtime content changed")
+                            if record["kind"] == "symlink":
+                                valid = (
+                                    stat.S_ISLNK(value.st_mode)
+                                    and os.readlink(path) == record["target"]
+                                )
+                                total += len(os.fsencode(record["target"]))
+                            else:
+                                data, value, _ = regular_snapshot(path, self.max_bytes - total)
+                                total += len(data)
+                                valid = (
+                                    value.st_size == record["size"]
+                                    and stat.S_IMODE(value.st_mode) == record["mode"]
+                                    and _digest(data) == record["sha256"]
+                                )
+                            if (
+                                not valid
+                                or value.st_mtime_ns != record["mtime_ns"]
+                                or total > self.max_bytes
+                            ):
+                                raise InfrastructureError("runtime content changed")
+                finally:
+                    os.close(descriptor)
+            if observed != set(self.records) or directories != self.directories:
+                raise InfrastructureError("runtime content changed")
+        except (OSError, UnsupportedCapability) as exc:
+            raise InfrastructureError("runtime content changed or exceeded its bound") from exc
 
 
 def elf_info(path):
-    """Read only ELF64 little-endian x86-64 dynamic metadata, bounded before parsing."""
-    path = Path(path)
-    if path.stat().st_size > MAX_NATIVE:
-        _unsupported("ELF input exceeds its supported bound")
-    data = path.read_bytes()
+    """Inspect exactly one bounded regular native snapshot, without executing it."""
+    data, _, _ = regular_snapshot(path, MAX_NATIVE, follow=True)
+    return _elf_bytes(data)
+
+
+def _elf_bytes(data):
+    """Read ELF64 little-endian x86-64 dynamic metadata from admitted bytes."""
     try:
         if data[:7] != b"\x7fELF\x02\x01\x01" or len(data) < 64:
             raise ValueError()
@@ -292,14 +350,15 @@ def elf_closure(paths):
             continue
         if len(result) >= MAX_NATIVE_FILES:
             _unsupported("ELF closure exceeds its file bound")
-        info = elf_info(path)
-        result[lexical] = dict(realpath=str(path.resolve()), sha256=_digest(path.read_bytes()))
+        data, _, realpath = regular_snapshot(path, MAX_NATIVE, follow=True)
+        info = _elf_bytes(data)
+        result[lexical] = dict(realpath=realpath, sha256=_digest(data))
         if info["interpreter"]:
             pending.append(Path(info["interpreter"]))
         searches = []
         for entry in info["rpath"]:
-            entry = entry.replace("${ORIGIN}", str(path.resolve().parent)).replace(
-                "$ORIGIN", str(path.resolve().parent)
+            entry = entry.replace("${ORIGIN}", str(Path(realpath).parent)).replace(
+                "$ORIGIN", str(Path(realpath).parent)
             )
             if "$" in entry or not entry.startswith("/"):
                 _unsupported("ELF search path requires a supported absolute origin")

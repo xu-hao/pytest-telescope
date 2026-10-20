@@ -354,7 +354,7 @@ def load(
 
     from .execution import envelope
     from .execution import suites as parse_suites
-    from .project_metadata import load_distributions
+    from .project_metadata import load_distributions, validate_definitions
 
     configured_suites = parse_suites(root, spec, suite_names, python_profile, source_roots)
     overrides = mapping({} if structural_files is None else structural_files, "structural_files")
@@ -392,6 +392,7 @@ def load(
     execution = spec.get("execution", {})
     envelope(execution, require_fit=False)
     distributions = {}
+    configured_metadata = validate_definitions(spec.get("distributions", {}))
 
     def declaration(item, label):
         item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions"})
@@ -534,9 +535,6 @@ def load(
         for row in registry:
             if row["file"] in scoped_names:
                 references(row["kwargs"])
-        configured_metadata = mapping(spec.get("distributions", {}), "distributions")
-        if len(configured_metadata) > 256:
-            raise DeclarationError("declare at most 256 local distributions")
         if metadata_names - configured_metadata.keys():
             raise DeclarationError("unknown local distribution")
         distributions = load_distributions(

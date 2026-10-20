@@ -272,7 +272,7 @@ def _inventory(items):
 
 def validate_ordinary(result, nonce=None):
     """Ordinary collection and execution share one session; CPU is explicitly unknown."""
-    fields = FIELDS | {"kind", "inventory_complete", "items", "case_results"}
+    fields = FIELDS | {"kind", "inventory_complete", "items", "case_results", "dispatch_started"}
     if type(result) is not dict or set(result) != fields:
         return False
     if (
@@ -283,7 +283,11 @@ def validate_ordinary(result, nonce=None):
         return False
     if not _common(result, nonce, (0, 1, 2, 3, 4, 5), ordinary=True):
         return False
-    if type(result["inventory_complete"]) is not bool or not _inventory(result["items"]):
+    if (
+        type(result["inventory_complete"]) is not bool
+        or type(result["dispatch_started"]) is not bool
+        or not _inventory(result["items"])
+    ):
         return False
     ids, rows = result["case_ids"], result["case_results"]
     if (
@@ -297,6 +301,10 @@ def validate_ordinary(result, nonce=None):
         return False
     if len(set(ids)) != len(ids) or not set(ids).issubset(
         {item["case_id"] for item in result["items"] if item["selected"]}
+    ):
+        return False
+    if not result["dispatch_started"] and any(
+        row.get("outcome") != "not-run" for row in rows if type(row) is dict
     ):
         return False
     counts = dict(passed=0, failed=0, skipped=0, **{"not-run": 0})

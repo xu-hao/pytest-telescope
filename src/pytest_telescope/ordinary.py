@@ -109,28 +109,77 @@ def run(manifest, arguments, timeout, *, mode, resources, controller, runtime_se
     from .controller import inventory_matches_manifest
 
     started = time.monotonic()
-    units, groups, observations = [], [], []
-    status = "passed"
+    units, groups = [], []
+    observations = [
+        dict(
+            name=suite.name,
+            route="ordinary",
+            files=manifest.ordinary_files[suite.name],
+            outcome="not-started",
+            complete=False,
+            collected=None,
+            inventory_digest=None,
+            accounting_group_id=None,
+            worker_seconds=None,
+            cpu_seconds=None,
+            failures=[],
+        )
+        for suite in manifest.suites
+        if manifest.ordinary_files[suite.name]
+    ]
+    status, error = "passed", None
     selected_aliases, requested = set(), set()
-    complete = True
+    complete, sessions = True, 0
+    precedence = {
+        "passed": 0,
+        "failed": 1,
+        "unsupported": 2,
+        "declaration_error": 2,
+        "infrastructure_error": 3,
+    }
+
+    def incident(value, message=None):
+        nonlocal status, error
+        if precedence[value] >= precedence[status]:
+            status, error = value, message
+
     for suite in manifest.suites:
         files = manifest.ordinary_files[suite.name]
         if not files:
             continue
-        result, selectors = session(manifest, suite, files, arguments, timeout)
-        if not inventory_matches_manifest(result, manifest):
-            raise InfrastructureError("ordinary inventory disagrees with literal declarations")
+        observation = next(row for row in observations if row["name"] == suite.name)
+        attempt_started = time.monotonic()
+        sessions += 1
+        try:
+            result, selectors = session(manifest, suite, files, arguments, timeout)
+            if not inventory_matches_manifest(result, manifest):
+                raise InfrastructureError("ordinary inventory disagrees with literal declarations")
+            if len(units) + len(result["items"]) > 100_000:
+                raise DeclarationError("combined suite inventory exceeds 100000 cases")
+        except (DeclarationError, InfrastructureError) as exc:
+            category = (
+                "infrastructure_error"
+                if isinstance(exc, InfrastructureError)
+                else "declaration_error"
+            )
+            incident(category, str(exc))
+            observation["outcome"] = category
+            complete = False
+            break
         requested.update(hashlib.sha256(value.encode()).hexdigest() for value in selectors)
         selected_aliases.update(alias for item in result["items"] for alias in item["aliases"])
-        if len(units) + len(result["items"]) > 100_000:
-            raise DeclarationError("combined suite inventory exceeds 100000 cases")
-        group_id = fingerprint(
-            {
-                "profile": "ordinary-v1",
-                "suite": suite.identity(),
-                "case_ids": result["case_ids"],
-                "args": effective_arguments(suite, arguments),
-            }
+        refused_before_dispatch = result["exit_code"] == 4 and not result["dispatch_started"]
+        group_id = (
+            None
+            if refused_before_dispatch
+            else fingerprint(
+                {
+                    "profile": "ordinary-v1",
+                    "suite": suite.identity(),
+                    "case_ids": result["case_ids"],
+                    "args": effective_arguments(suite, arguments),
+                }
+            )
         )
         case_results = {row["case_id"]: row for row in result["case_results"]}
         for item in result["items"]:
@@ -155,10 +204,14 @@ def run(manifest, arguments, timeout, *, mode, resources, controller, runtime_se
                     selected=selected,
                     file=item["file"],
                     suite=suite.name,
-                    route=None if result["exit_code"] == 4 else "ordinary",
+                    route=None if refused_before_dispatch else "ordinary",
                     outcome=outcome,
-                    reason="ordinary-fresh" if selected else "not-selected",
-                    attempts=1 if selected else 0,
+                    reason="declaration-invalid"
+                    if refused_before_dispatch
+                    else "ordinary-fresh"
+                    if selected
+                    else "not-selected",
+                    attempts=int(selected and not refused_before_dispatch),
                     collected=1,
                     passed=int(result_status == "passed"),
                     failed=int(result_status == "failed"),
@@ -180,65 +233,62 @@ def run(manifest, arguments, timeout, *, mode, resources, controller, runtime_se
             stop = "collection"
         elif not result["complete"]:
             stop = "pytest-stop" if result["exit_code"] in (1, 2) else "infrastructure"
-        groups.append(
-            dict(
-                group_id=group_id,
-                suite=suite.name,
-                files=sorted(files),
-                route="ordinary",
-                profile="ordinary-v1",
-                case_ids=result["case_ids"],
-                outcome="executed"
-                if result["exit_code"] in (0, 5)
-                else "failed"
-                if result["exit_code"] in (1, 2)
-                else "infrastructure_error",
-                complete=result["complete"],
-                cache_eligible=False,
-                attempts=1,
-                attempt_seconds=[result["worker_seconds"]],
-                worker_seconds=result["worker_seconds"],
-                cpu_seconds=None,
-                timing_complete=False,
-                passed=result["passed"],
-                failed=result["failed"],
-                skipped=result["skipped"],
-                not_run=sum(row["outcome"] == "not-run" for row in case_results.values()),
-                unresolved=0,
-                stop_reason=stop,
-                failures=result["failures"],
-            )
-        )
-        observations.append(
-            dict(
-                name=suite.name,
-                route="ordinary",
-                files=files,
-                outcome="executed" if result["inventory_complete"] else "failed",
-                complete=result["inventory_complete"],
-                collected=len(result["items"]),
-                inventory_digest=fingerprint(
-                    [[item["case_id"], item["file"]] for item in result["items"]]
+        if group_id is not None:
+            groups.append(
+                dict(
+                    group_id=group_id,
+                    suite=suite.name,
+                    files=sorted(files),
+                    route="ordinary",
+                    profile="ordinary-v1",
+                    case_ids=result["case_ids"],
+                    outcome="executed"
+                    if result["exit_code"] in (0, 5)
+                    else "failed"
+                    if result["exit_code"] in (1, 2)
+                    else "infrastructure_error",
+                    complete=result["complete"],
+                    cache_eligible=False,
+                    attempts=1,
+                    attempt_seconds=[time.monotonic() - attempt_started],
+                    worker_seconds=result["worker_seconds"],
+                    cpu_seconds=None,
+                    timing_complete=False,
+                    passed=result["passed"],
+                    failed=result["failed"],
+                    skipped=result["skipped"],
+                    not_run=sum(row["outcome"] == "not-run" for row in case_results.values()),
+                    unresolved=0,
+                    stop_reason=stop,
+                    failures=result["failures"],
                 )
-                if result["inventory_complete"]
-                else None,
-                accounting_group_id=group_id,
-                worker_seconds=None,
-                cpu_seconds=None,
-                failures=[f for f in result["failures"] if f["phase"] == "collect"],
             )
+        observation.update(
+            outcome="executed" if result["inventory_complete"] else "failed",
+            complete=result["inventory_complete"],
+            collected=len(result["items"]),
+            inventory_digest=fingerprint(
+                [[item["case_id"], item["file"]] for item in result["items"]]
+            )
+            if result["inventory_complete"]
+            else None,
+            accounting_group_id=group_id,
+            failures=[f for f in result["failures"] if f["phase"] == "collect"],
         )
         complete = complete and result["inventory_complete"]
         if result["exit_code"] == 4:
-            status = "declaration_error"
+            incident(
+                "declaration_error",
+                "Unsupported or changed declarations during ordinary collection.",
+            )
         elif result["exit_code"] == 3:
-            status = "infrastructure_error"
-        elif result["exit_code"] in (1, 2) and status == "passed":
-            status = "failed"
+            incident("infrastructure_error", "Ordinary pytest reported an infrastructure failure.")
+        elif result["exit_code"] in (1, 2):
+            incident("failed")
         if not result["inventory_complete"]:
             break
-    if requested - selected_aliases:
-        raise DeclarationError("selector does not identify a collected case")
+    if complete and requested - selected_aliases:
+        incident("declaration_error", "Selector does not identify a collected case.")
     counts = {key: 0 for key in COUNT_KEYS}
     routes = {route: dict(counts) for route in ("ordinary", "scoped", "unresolved")}
     for unit in units:
@@ -278,7 +328,7 @@ def run(manifest, arguments, timeout, *, mode, resources, controller, runtime_se
             "ordinary": {
                 "enforcement": "inherited-host",
                 "slot_limit": 1,
-                "peak_sessions": int(bool(groups)),
+                "peak_sessions": int(bool(sessions)),
             },
         },
         counts=counts,
@@ -296,7 +346,15 @@ def run(manifest, arguments, timeout, *, mode, resources, controller, runtime_se
             "cached_skipped": 0,
         },
         collection={
-            "outcome": "executed" if complete else "failed",
+            "outcome": "infrastructure_error"
+            if any(row["outcome"] == "infrastructure_error" for row in observations)
+            else "failed"
+            if any(row["outcome"] == "failed" for row in observations)
+            else "declaration_error"
+            if any(row["outcome"] == "declaration_error" for row in observations)
+            else "executed"
+            if all(row["complete"] for row in observations)
+            else "not-started",
             "collected": len(units),
             "worker_seconds": None,
             "cpu_seconds": None,
@@ -305,9 +363,9 @@ def run(manifest, arguments, timeout, *, mode, resources, controller, runtime_se
         },
         elapsed_seconds=time.monotonic() - started,
         setup_seconds=0,
-        worker_cpu_seconds=None if groups else 0,
+        worker_cpu_seconds=None if sessions else 0,
         known_scoped_cpu_seconds=0,
     )
-    if status == "declaration_error":
-        report["error"] = "Unsupported or changed declarations during ordinary collection."
+    if error is not None:
+        report["error"] = error
     return report

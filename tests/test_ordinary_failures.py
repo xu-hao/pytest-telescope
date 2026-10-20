@@ -206,9 +206,10 @@ def test_ordinary():
     Path("invalid-config-body-ran").touch()
 """,
     )
+
     def guard(operation):
         def checked(path, *args, **kwargs):
-            if isinstance(path, (str, bytes, os.PathLike)):
+            if isinstance(path, str | bytes | os.PathLike):
                 assert "unused-link" not in os.fsdecode(path).split("/"), (
                     "ordinary configuration validation inspected an unused distribution path"
                 )

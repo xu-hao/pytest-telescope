@@ -180,11 +180,23 @@ def _files(project):
     return name, files
 
 
-def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Distribution]:
-    """Freeze sources and translate configured aliases without running project code."""
+def validate_definitions(entries):
+    """Validate inert configuration shape without inspecting unused source paths."""
     entries = mapping(entries, "distributions")
     if len(entries) > MAX_DISTRIBUTIONS:
         raise DeclarationError("at most 256 distributions are supported")
+    for alias, entry in entries.items():
+        _text(alias, "distribution alias")
+        entry = mapping(entry, "distribution", {"format", "metadata", "build_inputs"})
+        _text(entry.get("format"), "distribution.format")
+        relative(_text(entry.get("metadata"), "distribution.metadata"))
+        sequence(entry.get("build_inputs", []), "distribution.build_inputs")
+    return entries
+
+
+def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Distribution]:
+    """Freeze sources and translate configured aliases without running project code."""
+    entries = validate_definitions(entries)
     result = {}
     names = set()
     total = 0

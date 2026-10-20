@@ -212,6 +212,7 @@ def main(request=None, *, ordinary=False):
             self.actual_selection = None
             self.session = None
             self.checkpoint = False
+            self.dispatch_started = False
             self.bytes = 1024
 
         @pytest.hookimpl(tryfirst=True)
@@ -425,6 +426,7 @@ def main(request=None, *, ordinary=False):
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_runtestloop(self, session):
             self.unchanged(session)
+            self.dispatch_started = True
             yield
             self.unchanged(session)
 
@@ -555,6 +557,7 @@ def main(request=None, *, ordinary=False):
         result.update(
             protocol=1,
             kind="ordinary",
+            dispatch_started=observer.dispatch_started,
             inventory_complete=observer.checkpoint
             and not declaration_error
             and not collection_failed,

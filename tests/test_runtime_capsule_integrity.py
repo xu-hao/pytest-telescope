@@ -91,7 +91,7 @@ class CoordinatedRead:
             def wrapped(path, *args, **kwargs):
                 if (
                     self.when == "before-open"
-                    and isinstance(path, (str, bytes, os.PathLike))
+                    and isinstance(path, str | bytes | os.PathLike)
                     and Path(os.fsdecode(path)).name == self.target.name
                 ):
                     self.fire()
