@@ -143,7 +143,7 @@ def snapshot(source, destination):
     return time.perf_counter() - started, manifest
 
 
-def command(runtime, view, scratch, payload):
+def command(runtime, view, scratch, payload, *, bwrap="/usr/bin/bwrap"):
     env = {
         "PATH": str(Path(sys.executable).parent),
         "PYTHONHASHSEED": "0",
@@ -153,7 +153,7 @@ def command(runtime, view, scratch, payload):
         "TMPDIR": "/tmp",
     }
     argv = [
-        "/usr/bin/bwrap",
+        str(bwrap),
         "--unshare-all",
         "--unshare-user",
         "--disable-userns",
@@ -235,9 +235,12 @@ def main():
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=8)
     parser.add_argument("--diagnostic-only", action="store_true")
+    parser.add_argument("--bwrap", type=Path, default=Path("/usr/bin/bwrap"))
     args = parser.parse_args()
     if not 4 <= args.samples <= 20:
         parser.error("samples must be between4 and20")
+    args.bwrap = args.bwrap.resolve(strict=True)
+    assert args.bwrap.is_file() and not args.bwrap.stat().st_mode & (stat.S_ISUID | stat.S_ISGID)
     args.output.mkdir(parents=True, exist_ok=False)
     import importlib.metadata
 
@@ -271,8 +274,9 @@ def main():
         "platform": platform.platform(),
         "kernel": platform.release(),
         "affinity": sorted(os.sched_getaffinity(0)),
-        "bwrap": subprocess.check_output(["/usr/bin/bwrap", "--version"], text=True).strip(),
-        "bwrap_sha256": digest(Path("/usr/bin/bwrap")),
+        "bwrap": subprocess.check_output([str(args.bwrap), "--version"], text=True).strip(),
+        "bwrap_sha256": digest(args.bwrap),
+        "bwrap_executable": str(args.bwrap),
         "samples": [],
         "enforced_cgroup": enforced,
         "scratch_noexec": True,
@@ -358,7 +362,11 @@ print(json.dumps({'read':True,'stat':True,'native':True,'subprocess':True,'reado
         (source / "data.txt").write_bytes(b"changed after snapshot")
         report["preflight"] = execute(
             command(
-                runtime, fixed_view, scratch, ["-c", f"HOST_SOURCE={str(source)!r}\n" + preflight]
+                runtime,
+                fixed_view,
+                scratch,
+                ["-c", f"HOST_SOURCE={str(source)!r}\n" + preflight],
+                bwrap=args.bwrap,
             ),
             source,
             scratch,
@@ -400,7 +408,7 @@ print(json.dumps({'read':True,'stat':True,'native':True,'subprocess':True,'reado
                     argv = (
                         [sys.executable, "-I", "-B", *payload]
                         if mode == "plain"
-                        else command(runtime, view, private, payload)
+                        else command(runtime, view, private, payload, bwrap=args.bwrap)
                     )
                     if mode in {"plain-cases", "bwrap-cases"}:
                         children = []
@@ -424,7 +432,13 @@ print(json.dumps({'read':True,'stat':True,'native':True,'subprocess':True,'reado
                                 (
                                     [sys.executable, "-I", "-B", *case_payload]
                                     if mode == "plain-cases"
-                                    else command(runtime, case_view, case_scratch, case_payload)
+                                    else command(
+                                        runtime,
+                                        case_view,
+                                        case_scratch,
+                                        case_payload,
+                                        bwrap=args.bwrap,
+                                    )
                                 ),
                                 source,
                                 case_scratch,

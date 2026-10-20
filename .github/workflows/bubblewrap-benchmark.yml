@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   fresh-comparison:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -24,7 +24,24 @@ jobs:
           set -euo pipefail
           started=$SECONDS
           sudo apt-get update -q
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y gcc meson ninja-build pkg-config libcap-dev libselinux1-dev
+          bwrap_commit=8e51677abd7e3338e4952370bf7d902e37d8cbb6
+          bwrap_archive="$RUNNER_TEMP/telescope-bubblewrap.tar.gz"
+          curl --fail --location --max-time 60 --output "$bwrap_archive" "https://codeload.github.com/containers/bubblewrap/tar.gz/$bwrap_commit"
+          printf '6cbf3efe1cbfd8ac1c174f28fa44db1d776f33d43f55292aed5db17ca4a10d22  %s\n' "$bwrap_archive" | sha256sum --check --strict
+          tar -xzf "$bwrap_archive" -C "$RUNNER_TEMP"
+          meson setup "$RUNNER_TEMP/telescope-bubblewrap-build" "$RUNNER_TEMP/bubblewrap-$bwrap_commit" \
+            --prefix="$RUNNER_TEMP/telescope-bubblewrap" --buildtype=release \
+            -Dtests=false -Dman=disabled -Dbash_completion=disabled -Dzsh_completion=disabled -Dselinux=enabled
+          meson compile -C "$RUNNER_TEMP/telescope-bubblewrap-build" -j 2
+          meson install -C "$RUNNER_TEMP/telescope-bubblewrap-build"
+          test ! -u "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          test ! -g "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          printf 'Upstream bubblewrap v0.9.0 commit: %s\n' "$bwrap_commit"
+          sha256sum "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          stat -c 'bubblewrap mode: %a' "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          dpkg-query -W gcc meson ninja-build libcap-dev libselinux1-dev
+          printf 'Hosted ubuntu-22.04 is deprecated; retirement scheduled 2027-04-17. This is current-run provenance, not a portability guarantee.\n'
           python -m venv "$RUNNER_TEMP/telescope-benchmark-venv"
           "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -m pip install pytest==8.3.5 packaging==24.2 pluggy==1.5.0 iniconfig==2.0.0
           "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -m pip check
@@ -33,7 +50,7 @@ jobs:
           printf 'One-time package/environment/scratch preparation: %s seconds\n' "$((SECONDS-started))"
           uname -a
           cat /etc/os-release
-          bwrap --version
+          "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --version
           for profile in /etc/apparmor.d/*bwrap*; do
             if [[ -f "$profile" ]]; then
               printf '\nInstalled bubblewrap profile: %s\n' "$profile"
@@ -53,7 +70,8 @@ jobs:
             /usr/bin/taskset --cpu-list "$affinity" \
             "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" benchmarks/bubblewrap_fresh.py \
             --output "$RUNNER_TEMP/telescope-benchmark-result" \
-            --scratch "$RUNNER_TEMP/telescope-benchmark-scratch" --samples 8 --diagnostic-only
+            --scratch "$RUNNER_TEMP/telescope-benchmark-scratch" --samples 8 \
+            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
       - name: Retain narrow namespace failure audit
         if: failure()
         shell: bash
