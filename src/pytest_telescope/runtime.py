@@ -513,11 +513,23 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                     "HOME=/tmp TMPDIR=/tmp\n"
                     "USER 65534:65534\nWORKDIR /project\n"
                 )
+                build_options = (
+                    ["--progress=plain", "--iidfile", str(context / "image.id")]
+                    if profile == runtime_profiles.GIT
+                    else ["--quiet"]
+                )
                 try:
                     code, output = _owned_capture(
                         directory,
                         build_data,
-                        ["docker", "build", "--quiet", "--pull", "--network=default", str(context)],
+                        [
+                            "docker",
+                            "build",
+                            *build_options,
+                            "--pull",
+                            "--network=default",
+                            str(context),
+                        ],
                         300,
                         merged=profile == runtime_profiles.GIT,
                     )
@@ -528,7 +540,7 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                         raise
                     build_failed = True
                 else:
-                    if runtime_profiles.INTEGRITY.encode() in output:
+                    if runtime_profiles.integrity_failed(output):
                         raise InfrastructureError(
                             "Git native closure integrity verification failed"
                         )
@@ -539,9 +551,18 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                             )
                         build_failed = True
                     else:
+                        if profile == runtime_profiles.GIT:
+                            try:
+                                candidates = [_read(context / "image.id", 128).decode().strip()]
+                            except (OSError, ValueError, InfrastructureError) as exc:
+                                raise CleanupError(
+                                    "runtime build did not preserve its immutable image ID"
+                                ) from exc
+                        else:
+                            candidates = output.decode().splitlines()
                         ids = [
                             line
-                            for line in output.decode().splitlines()
+                            for line in candidates
                             if re.fullmatch(r"sha256:[0-9a-f]{64}", line)
                         ]
                         if len(ids) != 1:

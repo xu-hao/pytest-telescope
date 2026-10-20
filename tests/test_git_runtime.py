@@ -402,3 +402,164 @@ def test_missing_origin(tmp_path):
         assert result["counts"]["reused"] == result["counts"]["infrastructure_error"] == 0
         assert result["groups"][0]["attempts"] == 1
         assert result["groups"][0]["cache_eligible"] is False
+
+
+def test_readonly_inspection_matches_run_without_state_writes(prepared, monkeypatch):
+    root, prepare = prepared
+    configure(root, profile="git-local-v1", requires=["git-local"])
+    prepare("git-local-v1")
+    expected = passed(root)["runtime"]
+
+    def contents():
+        return {
+            p.relative_to(root).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in root.rglob("*")
+            if p.is_file()
+        }
+
+    before = contents()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("inspection reached a state-writing or execution path")
+
+    with monkeypatch.context() as guard:
+        for name in ("build_runtime", "recover", "execute", "_state", "_durable"):
+            guard.setattr(runtime, name, forbidden)
+        guard.setattr(controller, "CacheStore", forbidden)
+        assert runtime.inspect_runtime(root, required_capabilities=["git-local"]) == expected
+    assert contents() == before
+
+
+@pytest.mark.parametrize("mode", ["case", "batch"])
+def test_git_terminal_cleanup_fault_drains_actual_sibling_worker(prepared, monkeypatch, mode):
+    import threading
+
+    from pytest_telescope.execution import DEFAULT_WORKER
+
+    root, prepare = prepared
+    configure(root, profile="git-local-v1", requires=["git-local"])
+    (root / "tests/test_example.py").unlink()
+    for name, pause in (("a", 0), ("b", 30), ("c", 0)):
+        put(
+            root,
+            f"tests/test_{name}.py",
+            f"""import subprocess,time,pytest
+pytestmark=pytest.mark.telescope(inputs=[])
+def test_git(tmp_path):
+    subprocess.run(["git","init","-b","main",str(tmp_path)],check=True,capture_output=True)
+    time.sleep({pause})
+""",
+        )
+    prepare("git-local-v1")
+    original = runtime.execute
+    entered, completed, interrupted = [], [], []
+    barrier = threading.Barrier(2, timeout=10)
+
+    def execute(*args, **kwargs):
+        if kwargs["request"]["mode"] == "collection":
+            return original(*args, **kwargs)
+        filename = args[2][-1]
+        entered.append(filename)
+        barrier.wait()
+        try:
+            result = original(*args, **kwargs)
+        except runtime.InvocationInterrupted:
+            interrupted.append(filename)
+            raise
+        completed.append(filename)
+        assert filename.endswith("test_a.py") and result["exit_code"] == 0
+        raise runtime.CleanupError("synthetic terminal cleanup fault after actual Git worker")
+
+    monkeypatch.setattr(runtime, "execute", execute)
+    result = controller.run(
+        root, execution_mode=mode, budget={key: value * 2 for key, value in DEFAULT_WORKER.items()}
+    )
+    assert result["status"] == "infrastructure_error"
+    assert len(entered) == 2 and len(completed) == len(interrupted) == 1
+    assert result["counts"]["selected"] == result["counts"]["infrastructure_error"] == 3
+    assert sum(group["attempts"] for group in result["groups"]) == 2
+    assert not any(group["cache_eligible"] for group in result["groups"])
+    assert not list((root / ".pytest-telescope/cache").rglob("*.json"))
+    assert not runtime.command(
+        [
+            "docker",
+            "ps",
+            "-aq",
+            "--filter",
+            "label=" + runtime.LABEL + "project=" + runtime._project(root),
+        ]
+    ).strip()
+    assert not list((root / ".pytest-telescope/scratch").iterdir())
+
+
+def test_runnable_local_git_example_is_cold_warm_and_input_scoped(prepared):
+    import shutil
+    from pathlib import Path
+
+    root, prepare = prepared
+    example = Path(__file__).resolve().parents[1] / "examples/git_local"
+    shutil.copytree(example, root, dirs_exist_ok=True)
+    prepare("git-local-v1")
+    assert passed(root)["counts"]["executed"] == 1
+    assert passed(root)["counts"]["reused"] == 1
+    (root / "data/message.txt").write_text("changed declared input\n")
+    assert passed(root)["counts"]["executed"] == 1
+
+
+def test_local_git_profile_with_supported_pytest_eight_worker(prepared, monkeypatch):
+    root, prepare = prepared
+    configure(root, profile="git-local-v1", requires=["git-local"])
+    put(root, "tests/test_example.py", GIT_CASES)
+    put(root, "input.txt", "declared input\n")
+    put(root, "undeclared.txt", "excluded synthetic input\n")
+    monkeypatch.setattr(
+        runtime,
+        "DEFAULT_REQUIREMENTS",
+        runtime.DEFAULT_REQUIREMENTS.replace("pytest==9.1.1", "pytest==8.3.5"),
+    )
+    prepare("git-local-v1")
+    for mode in ("case", "batch"):
+        result = passed(root, execution_mode=mode)
+        assert result["counts"]["executed"] == 2
+        assert passed(root, execution_mode=mode)["counts"]["reused"] == 2
+
+
+def test_git_profile_keeps_metadata_and_application_visibility_separate(prepared):
+    root, prepare = prepared
+    configure(root, profile="git-local-v1", requires=["git-local"])
+    with (root / "pyproject.toml").open("a") as stream:
+        stream.write(
+            '\n[tool.pytest.ini_options]\npythonpath=["."]\n[tool.pytest_telescope.distributions.addon]\nformat="pep621-static-v1"\nmetadata="packages/addon/pyproject.toml"\n'
+        )
+    put(
+        root,
+        "packages/addon/pyproject.toml",
+        '[project]\nname="example-addon"\nversion="1.0"\n[project.entry-points."example.plugins"]\naddon="example_addon:plugin"\n',
+    )
+    put(root, "example_addon.py", 'def plugin(): return "visible"\n')
+    put(
+        root,
+        "tests/test_example.py",
+        """import importlib.metadata as metadata
+import pytest
+@pytest.mark.telescope(inputs=[], distributions=["addon"])
+def test_metadata():
+    assert metadata.version("example-addon") == "1.0"
+    entry = next(iter(metadata.entry_points(group="example.plugins")))
+    with pytest.raises(ModuleNotFoundError): entry.load()
+""",
+    )
+    prepare("git-local-v1")
+    assert passed(root)["counts"]["executed"] == 1
+    assert passed(root)["counts"]["reused"] == 1
+    source = (
+        (root / "tests/test_example.py")
+        .read_text()
+        .replace("inputs=[]", 'inputs=["example_addon.py"]')
+        .replace(
+            "with pytest.raises(ModuleNotFoundError): entry.load()",
+            'assert entry.load()() == "visible"',
+        )
+    )
+    put(root, "tests/test_example.py", source)
+    assert passed(root)["counts"]["executed"] == 1

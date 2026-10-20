@@ -68,7 +68,8 @@ project defaults or bundles. Application files and host virtual environments are
 installed into the prepared runtime.
 
 Filesystem isolation does not establish universal determinism. Make clock, randomness,
-and native/external-state assumptions reproducible or mark affected cases `cache=False`.
+and native/external-state assumptions reproducible. `cache=False` executes fresh without
+recording reusable results; it does not widen permissions, capabilities or determinism guarantees.
 Use `run --force` to execute again or `run --no-cache` to bypass reuse and recording.
 
 The dedicated CLI starts no host pytest session. `pytest --telescope` also routes to

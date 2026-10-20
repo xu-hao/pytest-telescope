@@ -1,8 +1,9 @@
 # Pinned local Git runtime profile
 
 This is the 0.1.0a4 contract for a separately qualified runtime profile.
-Version 0.1.0a3 and earlier releases remain immutable. Candidate qualification is
-in progress; the recorded mechanism proof is not a final release verdict.
+Version 0.1.0a3 and earlier releases remain immutable. The mechanism proof and targeted
+qualification below establish the profile boundary; the release also requires the
+complete guarded installed-distribution gate.
 
 ## Selected capability and API
 
@@ -51,6 +52,10 @@ infrastructure failure. The opaque identity supplies no execution, cache or clea
 authority; callers must not reconstruct it or multiply its bounded retries. Preparation
 likewise permits at most two backend platform probes before any build.
 
+The repository includes a runnable
+[private local Git example](https://github.com/xu-hao/pytest-telescope/tree/main/examples/git_local) with a literal input marker,
+fixed author/committer dates, a scratch repository and a local bare-origin round trip.
+
 ## Tool provenance and reproducible payload
 
 The profile extends the existing immutable Python base, not the host installation:
@@ -94,6 +99,14 @@ image ownership inspection and complete preparation cleanup. Retry exhaustion re
 infrastructure failure and leaves no accepted new runtime state. Existing valid state
 must not be replaced by partial preparation. Existing per-project image quota and
 preparation lock/journal recovery remain authoritative.
+
+Preparation runs `docker build` in the daemon, outside the four-dimensional case-worker
+envelope. The caller must reserve build CPU/memory capacity and daemon image/build-cache
+disk separately; a host coordinator process limit does not enclose Docker builders.
+Preparation enforces the stated 300-second build deadline, at most two build attempts,
+archive/output/image size bounds and retained-image quota. It does not claim a separate
+builder CPU, memory, process or scratch cgroup limit. The existing 1 MiB captured build
+output bound applies; daemon build-cache storage is not covered by the final-image quota.
 
 ## Restricted local repository behavior
 
@@ -185,3 +198,26 @@ removed and absence verified. An earlier proof-launch failure from a mode 0600 c
 script was retained separately; setting the control script explicitly 0444 corrected
 that preparation error. None of this substitutes for production preflight, cache,
 retrieval-exhaustion or installed-package qualification.
+
+
+## Qualification checkpoint
+
+The restricted mechanism proof exercised two fresh sessions with identical controlled
+Git object identities, all supported local repository operations and owned-fault repair.
+Network evidence includes inspected `NetworkMode=none`, loopback-only interfaces and
+no default route, plus a controlled bridge-mode negative check. An unreachable external
+address alone is not isolation evidence. The initial unreadable control-file preparation
+failure is retained separately from the corrected proof.
+
+Installed 0.1.0a4 candidate controls exercise case and batch execution, warm reuse without
+workers or preparation, explicit no-cache policies, requested-profile/capability refusal,
+metadata/source visibility, read-only identity inspection and actual sibling cancellation.
+The same local operation fixture also passes with a pinned pytest 8.3.5 worker. Native
+artifact controls cover malformed archives, missing projected files and missing closure
+files as terminal failures; network/build outages remain bounded retries. A real
+at-quota preparation failure leaves the oldest currently selected runtime usable.
+
+The complete release verdict is recorded with the
+[0.1.0a4 release](https://github.com/xu-hao/pytest-telescope/releases/tag/v0.1.0a4).
+These functional controls do not claim a universal speedup or qualify remote transports,
+executable scratch, host tools, browser/service dependencies or arbitrary Git hooks.

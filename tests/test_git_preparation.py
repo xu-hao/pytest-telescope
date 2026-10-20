@@ -155,7 +155,10 @@ def test_build_retry_commits_only_after_cleanup(preparation, monkeypatch):
     def capture(*args, **kwargs):
         calls.append(1)
         assert json.loads((state / "runtime.json").read_text()) == previous
-        return (1, b"temporary failure") if len(calls) == 1 else (0, new.encode() + b"\n")
+        if len(calls) == 1:
+            return 1, b"temporary failure"
+        (args[0] / "build/image.id").write_text(new)
+        return 0, b"image exported"
 
     monkeypatch.setattr(runtime, "_owned_capture", capture)
     result = runtime.build_runtime(root, runtime_profile=profiles.GIT)
@@ -176,7 +179,8 @@ def test_terminal_preparation_never_replaces_prior_state(preparation, monkeypatc
             raise runtime.CleanupError("cannot confirm cleanup")
         if failure == "integrity":
             return 1, profiles.INTEGRITY.encode()
-        return 0, ("sha256:" + "b" * 64).encode()
+        (args[0] / "build/image.id").write_text("sha256:" + "b" * 64)
+        return 0, b"image exported"
 
     monkeypatch.setattr(runtime, "_owned_capture", capture)
     if failure == "inspection":
@@ -220,11 +224,10 @@ def test_total_download_budget_survives_build_retry(preparation, monkeypatch):
             return 0, b""
         builds.append(1)
         assert (directory / "build/git.deb").read_bytes() == payload
-        return (
-            (1, b"temporary build outage")
-            if len(builds) == 1
-            else (0, ("sha256:" + "a" * 64).encode())
-        )
+        if len(builds) == 1:
+            return 1, b"temporary build outage"
+        (directory / "build/image.id").write_text("sha256:" + "a" * 64)
+        return 0, b"image exported"
 
     monkeypatch.setattr(runtime, "_owned_capture", capture)
     runtime.build_runtime(root, runtime_profile=profiles.GIT)
@@ -278,3 +281,112 @@ def test_inspection_exhaustion_and_typed_mismatch_do_not_multiply_retries(tmp_pa
     with pytest.raises(UnsupportedCapability):
         runtime.inspect_runtime(tmp_path, required_capabilities=["git-local"])
     assert len(calls) == 2
+
+
+def test_real_oldest_runtime_remains_usable_after_quota_preparation_failure(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+    (tmp_path / "test_example.py").write_text("def test_example(): pass\n")
+    state = tmp_path / ".pytest-telescope"
+    source = runtime.worker_source()
+    try:
+        previous = runtime.build_runtime(tmp_path)
+        assert controller.run(tmp_path)["status"] == "passed"
+        original = (state / "runtime.json").read_bytes()
+        expected = runtime.inspect_runtime(tmp_path)
+        for revision in range(3):
+            with monkeypatch.context() as scope:
+                scope.setattr(
+                    runtime,
+                    "worker_source",
+                    lambda: source + f"\n# synthetic revision {revision}\n".encode(),
+                )
+                runtime.build_runtime(tmp_path)
+        (state / "runtime.json").write_bytes(original)
+        assert json.loads((state / "images.json").read_text())[0] == previous["image"]
+        with monkeypatch.context() as scope:
+            scope.setattr(
+                runtime, "_owned_capture", lambda *a, **k: (1, b"controlled build outage")
+            )
+            with pytest.raises(InfrastructureError):
+                runtime.build_runtime(tmp_path)
+        assert (state / "runtime.json").read_bytes() == original
+        assert runtime.inspect_runtime(tmp_path) == expected
+        assert controller.run(tmp_path)["counts"]["reused"] == 1
+    finally:
+        if (state / "images.json").exists():
+            for image in json.loads((state / "images.json").read_text()):
+                runtime._image_info(image, runtime._project(tmp_path))
+                runtime.command(["docker", "image", "rm", image], timeout=30)
+
+
+@pytest.mark.parametrize(
+    "fault", ["malformed-archive", "missing-projection", "missing-native-file"]
+)
+def test_fixed_payload_integrity_failure_is_terminal_in_real_builder(tmp_path, monkeypatch, fault):
+    import io
+    import tarfile
+
+    calls = []
+    if fault != "missing-native-file":
+        payload = b"inert malformed Debian archive"
+        if fault == "missing-projection":
+            # Valid inert Debian container with an empty data archive: no commands/hooks.
+            data = io.BytesIO()
+            with tarfile.open(fileobj=data, mode="w:gz"):
+                pass
+            control = io.BytesIO()
+            with tarfile.open(fileobj=control, mode="w:gz") as archive:
+                content = b"Package: example-inert\nVersion: 1\nArchitecture: amd64\nMaintainer: Example <example@example.invalid>\nDescription: inert test\n"
+                info = tarfile.TarInfo("./control")
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
+
+            def ar(name, contents):
+                header = f"{name + '/':<16}{0:<12}{0:<6}{0:<6}{'100644':<8}{len(contents):<10}`\n".encode()
+                return header + contents + (b"\n" if len(contents) % 2 else b"")
+
+            payload = (
+                b"!<arch>\n"
+                + ar("debian-binary", b"2.0\n")
+                + ar("control.tar.gz", control.getvalue())
+                + ar("data.tar.gz", data.getvalue())
+            )
+
+        def artifact(context, capture, **kwargs):
+            (context / "git.deb").write_bytes(payload)
+            return payload
+
+        monkeypatch.setattr(profiles, "fetch_archive", artifact)
+    else:
+        monkeypatch.setitem(
+            profiles.MANIFEST,
+            "native_files_sha256",
+            profiles.MANIFEST["native_files_sha256"]
+            | {"/opt/telescope/git/missing-native-file": "0" * 64},
+        )
+    original = runtime._owned_capture
+
+    def capture(directory, data, args, timeout, **kwargs):
+        if args[:2] == ["docker", "build"]:
+            calls.append(1)
+        return original(directory, data, args, timeout, **kwargs)
+
+    monkeypatch.setattr(runtime, "_owned_capture", capture)
+    with pytest.raises(InfrastructureError, match="integrity"):
+        runtime.build_runtime(tmp_path, runtime_profile=profiles.GIT)
+    assert len(calls) == 1
+    assert not (tmp_path / ".pytest-telescope/runtime.json").exists()
+    assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
+
+
+@pytest.mark.parametrize(
+    "output,expected",
+    [
+        (b"TELESCOPE_GIT_PROFILE_INTEGRITY\n", True),
+        (b"#7 0.123 TELESCOPE_GIT_PROFILE_INTEGRITY\n", True),
+        (b"RUN echo TELESCOPE_GIT_PROFILE_INTEGRITY; exit 72\n", False),
+        (b"dependency outage\n", False),
+    ],
+)
+def test_integrity_classifier_distinguishes_emitted_marker_from_command_rendering(output, expected):
+    assert profiles.integrity_failed(output) is expected

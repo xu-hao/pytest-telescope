@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -88,7 +89,11 @@ def normalize(spec, profile=None, required=None):
 
 
 def provenance(profile):
-    definition = dict(schema=1, profile=profile)
+    implementation = hashlib.sha256()
+    for name in ("runtime.py", "runtime_profiles.py"):
+        implementation.update(name.encode())
+        implementation.update(Path(__file__).with_name(name).read_bytes())
+    definition = dict(schema=1, profile=profile, preparation=implementation.hexdigest())
     if profile == GIT:
         definition.update(manifest=MANIFEST, environment=ENVIRONMENT, projection=1)
     return hashlib.sha256(
@@ -174,7 +179,11 @@ def dockerfile(context, base):
     verifier = (
         "import hashlib,pathlib,sys\n"
         f"expected={MANIFEST['native_files_sha256']!r}\n"
-        "if any(hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()!=digest for name,digest in expected.items()):\n"
+        "try:\n"
+        " valid=all(hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==digest for name,digest in expected.items())\n"
+        "except OSError:\n"
+        " valid=False\n"
+        "if not valid:\n"
         f" print('{INTEGRITY}',flush=True);sys.exit(72)\n"
         "for name in expected:\n"
         " if name.startswith('/opt/telescope/git/'):\n"
@@ -188,11 +197,11 @@ def dockerfile(context, base):
     prefix = (
         f"FROM {base} AS git-payload\n"
         "COPY git.deb /tmp/git.deb\n"
-        "RUN dpkg-deb --extract /tmp/git.deb /tmp/package && "
+        "RUN (dpkg-deb --extract /tmp/git.deb /tmp/package && "
         "mkdir -p /opt/telescope/git/bin /opt/telescope/git/templates && "
         "cp /tmp/package/usr/bin/git /opt/telescope/git/bin/git && "
         "cp /tmp/package/usr/share/doc/git/copyright /opt/telescope/git/copyright && "
-        f"{aliases}\n"
+        f"{aliases}) || {{ echo {INTEGRITY}; exit 72; }}\n"
         "COPY verify_git.py /tmp/verify_git.py\n"
         "RUN python /tmp/verify_git.py\n"
         f"FROM {base}\n"
@@ -204,3 +213,11 @@ def dockerfile(context, base):
         + "\n"
     )
     return prefix, environment
+
+
+def integrity_failed(output):
+    """Recognize emitted markers, not a rendered Dockerfile instruction containing one."""
+    return any(
+        re.fullmatch(rb"(?:#[0-9]+ [0-9.]+ )?" + INTEGRITY.encode(), line.strip())
+        for line in output.splitlines()
+    )

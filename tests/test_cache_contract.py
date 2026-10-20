@@ -133,7 +133,7 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, monkeypatch):
     monkeypatch.setattr(
         controller.runtime,
         "identity",
-        lambda root: {"image": "fixture", "execution": {"fixture": True}},
+        lambda root, *, runtime_profile=None: {"image": "fixture", "execution": {"fixture": True}},
     )
     monkeypatch.setattr(controller.runtime, "invocation", invocation)
     monkeypatch.setattr(
@@ -155,7 +155,7 @@ def test_unavailable_backend_reports_unknown_inventory_after_bounded_retry(tmp_p
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     attempts = []
 
-    def unavailable(root):
+    def unavailable(root, *, runtime_profile=None):
         attempts.append(1)
         raise controller.InfrastructureError("backend unavailable")
 
@@ -222,7 +222,7 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path,
     monkeypatch.setattr(
         controller.runtime,
         "identity",
-        lambda root: {"image": "fixture", "execution": {"fixture": True}},
+        lambda root, *, runtime_profile=None: {"image": "fixture", "execution": {"fixture": True}},
     )
     monkeypatch.setattr(controller.runtime, "invocation", invocation)
     monkeypatch.setattr(controller.runtime, "execute", execute)
