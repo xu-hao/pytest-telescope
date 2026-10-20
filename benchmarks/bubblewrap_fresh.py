@@ -155,6 +155,7 @@ def command(runtime, view, scratch, payload):
     argv = [
         "/usr/bin/bwrap",
         "--unshare-all",
+        "--unshare-user",
         "--disable-userns",
         "--die-with-parent",
         "--new-session",
