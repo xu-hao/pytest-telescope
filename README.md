@@ -47,6 +47,9 @@ The [complete quickstart](docs/index.md) contains copyable application, test, JS
 TOML files, parameter-specific declarations and a denied-read example. It shows expected
 replacement behavior; no replacement installation command is claimed qualified yet.
 An all-ordinary invocation needs neither Bubblewrap nor a prepared scoped runtime.
+“All-ordinary” means there are no potential scoped declarations anywhere in the effective
+structural file boundary. Selecting only ordinary cases with `-k` or `-m` from a mixed
+boundary still requires scoped discovery and preflight for its potential scoped cases.
 
 ## Fixture and import boundaries
 
