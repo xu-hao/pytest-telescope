@@ -76,12 +76,21 @@ jobs:
             set +e
             printf 'Owned manager restart failed: exit=%s\n' "$restart_status"
             timeout 10s systemctl show "$manager_unit" -p LoadState -p ActiveState -p SubState -p Result \
-              -p ExecMainCode -p ExecMainStatus -p ControlPID -p ControlGroup -p Delegate -p DelegateControllers
+              -p ExecMainPID -p ExecMainCode -p ExecMainStatus -p ControlPID -p ControlGroup -p Delegate -p DelegateControllers
             printf 'Manager show exit: %s\n' "$?"
             timeout 10s systemctl status "$manager_unit" --full --no-pager
             printf 'Manager status exit: %s\n' "$?"
             sudo timeout 10s journalctl --unit "$manager_unit" --since "$setup_start" --lines 80 --no-pager -o short-iso
             printf 'Exact-unit journal exit: %s\n' "$?"
+            failed_pid=$(timeout 10s systemctl show "$manager_unit" --property=ExecMainPID --value)
+            pid_query_status=$?
+            printf 'Failed child PID query exit: %s; value: %s\n' "$pid_query_status" "$failed_pid"
+            if [[ "$pid_query_status" == 0 && "$failed_pid" =~ ^[1-9][0-9]*$ ]]; then
+              sudo timeout 10s journalctl "_PID=$failed_pid" --since "$setup_start" --lines 80 --no-pager -o short-iso
+              printf 'Exact-child journal exit: %s\n' "$?"
+            else
+              printf 'Exact-child journal unavailable: no valid positive failed PID.\n'
+            fi
             for group in /sys/fs/cgroup/user.slice "/sys/fs/cgroup/user.slice/user-$runner_uid.slice" "/sys/fs/cgroup/user.slice/user-$runner_uid.slice/$manager_unit"; do
               for field in cgroup.controllers cgroup.subtree_control cpu.max memory.max pids.max; do
                 printf 'Owned-manager ancestor field: %s/%s\n' "$group" "$field"
