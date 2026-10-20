@@ -277,3 +277,25 @@ module. The implementation gate must additionally cover frozen provenance and mu
 unsupported metadata, membership changes, selectors, parallel quota/isolation/cancellation,
 retry exhaustion, cleanup, supported Python/pytest, existing regressions, and useful-scale
 cold/warm/selective benchmarks. Measurements must report startup overhead honestly.
+
+### Candidate qualification status
+
+As of 2026-10-20, focused qualification of the 0.1.0a3 candidate includes:
+
+| Controls | Result and boundary |
+| --- | --- |
+| Structural file overrides | 34 passed: static preflight and path bounds, exclusion before parsing/import, selector contrast, exact-list identity, unaffected suites, empty inventories, and unchanged broad input visibility in case and batch modes. |
+| Session and collection verdict regressions | 25 passed: execution-side collection failures and nonzero pytest session verdicts remain failures, preserve observed member outcomes and bounded evidence, and cannot produce reusable success. |
+| Installed-wheel host matrix | 110 focused controls passed on each of Python 3.11 with pytest 8.3.5 and Python 3.13 with pytest 9.1.1, using the same wheel bytes. |
+
+The host matrix includes real Docker controls and uses the profile's pinned worker
+runtime. It does not qualify alternate worker interpreters or every host Python/pytest
+combination. Focused counts overlap; they must not be added to claim distinct coverage.
+
+An earlier complete behavioral run recorded **296 passed, 1 failed**. Its execution-side
+collection-verdict regression has since been fixed and verified by the focused controls
+above. That earlier run remains a failed receipt. The mandatory guarded full gate for
+the integrated candidate is still pending; these focused results do not replace it or
+establish release qualification. See [development](development.md) for the full gate and
+[benchmark methodology](benchmark.md#comparing-case-and-batch-on-the-same-scopes) for the
+separate performance comparison.

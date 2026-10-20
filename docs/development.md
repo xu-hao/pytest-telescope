@@ -63,3 +63,7 @@ The CI matrix covers supported host Python/pytest versions. Backend qualificatio
 additionally execute on a supported Docker host. Keep build/documentation tools in
 development dependencies and keep runtime contents explicit. Never use an editable
 application install as evidence of a clean isolated runtime.
+
+The [candidate qualification status](scoped-execution.md#candidate-qualification-status)
+records focused evidence and remaining release gates separately. A corrected regression
+does not turn its earlier failed full-run receipt into a passing one.

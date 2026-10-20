@@ -184,3 +184,35 @@ statistical study. The columns exclude Docker daemon CPU and do not establish un
 speedups, linear scaling, or performance for a different workload. The
 [structured scoped measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/scoped-linux-docker.json)
 retain exact budgets, counts, inventory digests and timings.
+
+## Comparing case and batch on the same scopes
+
+The scaling harness can generate a second layout with eight cases per module sharing
+exactly the same declared inputs and one JSON resource. Compare execution modes with
+that same layout and worker budget:
+
+```sh
+python benchmarks/scaling.py --output /tmp/telescope-shared-case --cases 128 --parallel 4 --scope-layout shared-module --execution-mode case
+python benchmarks/scaling.py --output /tmp/telescope-shared-batch --cases 128 --parallel 4 --scope-layout shared-module --execution-mode batch
+```
+
+Each command creates its own new project and evidence directory. Both modes execute 128
+cases in 16 modules across two suites. Case mode uses 128 singleton groups; batch mode
+uses 16 groups of eight members. Batch grouping preserves those exact scopes: it does
+not combine unequal declarations to make a larger group. Cold, warm and selective phases
+run under both the one-worker and four-worker resource envelopes described above.
+
+A shared-module resource mutation has **eight consumers in both modes**. Case mode
+reruns eight singleton groups; batch mode reruns one atomic eight-member group. The
+other 120 cases remain reusable. The earlier per-case resource layout has one consumer
+and therefore reports 1 fresh / 127 reused after a mutation. Comparing those two
+selective phases as if they represented identical work would be misleading.
+
+Batch mode reduces fresh sessions and permits module/class/session fixtures, mutable
+Python state and scratch to live across its members. Case mode recreates that state
+for every case. The modes therefore offer different isolation and fixture lifetimes,
+even with identical file scopes. Group-level worker CPU must be counted once; batch
+member timing is intentionally unavailable. Warm reuse and atomic group counts must
+also reconcile before timings are accepted. See the [batching contract](batching.md)
+for the lifecycle boundary. No timing result for this comparison is claimed here yet;
+the earlier per-case measurements remain a separate workload receipt.
