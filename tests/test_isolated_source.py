@@ -444,13 +444,34 @@ def test_order():
     assert disabled["status"] == "failed" and disabled["counts"]["reused"] == 0
 
 
-def test_empty_roots_project_only_selected_metadata(prepared):
+def test_empty_roots_project_only_selected_metadata(prepared, monkeypatch, capsys):
     root, prepare = prepared
     source_project(root)
     prepare()
     result = passed(root, source_roots=[], arguments=["-k", "metadata_only or omitted"])
     assert result["counts"]["executed"] == 2 and result["counts"]["not-selected"] == 3
     assert result["python"]["suites"][0]["source_roots"] == []
+    monkeypatch.chdir(root)
+    assert (
+        controller.main(
+            [
+                "run",
+                "--python-profile",
+                "isolated-source-v1",
+                "--source-root",
+                "first",
+                "--",
+                "-k",
+                "metadata_only or omitted",
+            ]
+        )
+        == 0
+    )
+    cli = json.loads(capsys.readouterr().out)
+    assert cli["counts"]["selected"] == 2 and cli["counts"]["not-selected"] == 3
+    assert cli["python"]["suites"][0]["source_roots"] == ["first"]
+    assert cli["python"]["suites"][0]["profile"] == "isolated-source-v1"
+    assert cli["runtime"] == result["runtime"]
 
 
 def test_all_visible_startup_layouts_refuse_before_any_worker_or_warm_acceptance(
