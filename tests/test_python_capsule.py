@@ -89,7 +89,20 @@ def assembled(tmp_path_factory):
             inputs.mkdir()
             wheel = inputs / "capsule_sample-1.0-py3-none-any.whl"
             wheel.write_bytes(raw)
-            results.append(prepare(root / name, INTERPRETER, [wheel]))
+            result = prepare(root / name, INTERPRETER, [wheel])
+            results.append(result)
+            (root / (name + "-receipt.json")).write_text(
+                json.dumps(
+                    dict(
+                        identity=result.identity(),
+                        bytes=result.payload.bytes_used,
+                        entries=len(result.payload.records) + len(result.payload.directories),
+                        timings=result.timings,
+                        wheel_hashes=result.wheel_hashes,
+                    ),
+                    sort_keys=True,
+                )
+            )
     return dict(root=root, source=source, marker=marker, raw=raw, results=results)
 
 
@@ -104,7 +117,9 @@ def lexical_target(records, name, *, directories=()):
             target if target.startswith("/") else str(PurePosixPath("/" + name).parent / target)
         )
         name = os.path.normpath(absolute).removeprefix("/")
-        assert name in records or name in directories, f"runtime symlink target is not frozen: {name}"
+        assert name in records or name in directories, (
+            f"runtime symlink target is not frozen: {name}"
+        )
     return name
 
 

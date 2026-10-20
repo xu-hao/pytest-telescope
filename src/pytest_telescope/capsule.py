@@ -278,10 +278,16 @@ def _elf_bytes(data):
     try:
         if data[:7] != b"\x7fELF\x02\x01\x01" or len(data) < 64:
             raise ValueError()
-        _, machine, _, _, phoff, _, _, _, phsize, phnum, *_ = struct.unpack_from(
+        object_kind, machine, _, _, phoff, _, _, _, phsize, phnum, *_ = struct.unpack_from(
             "<HHIQQQIHHHHHH", data, 16
         )
-        if machine != 62 or phsize != 56 or phnum > 4096 or phoff + phsize * phnum > len(data):
+        if (
+            object_kind not in (2, 3)
+            or machine != 62
+            or phsize != 56
+            or phnum > 4096
+            or phoff + phsize * phnum > len(data)
+        ):
             raise ValueError()
         segments = [
             struct.unpack_from("<IIQQQQQQ", data, phoff + index * phsize) for index in range(phnum)
