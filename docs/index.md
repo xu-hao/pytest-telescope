@@ -2,29 +2,28 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-Put input declarations beside your tests. By default every actual pytest case gets a fresh Linux
-Docker worker and its own cached result, including each parametrized variant. Change a
-case's declared input to rerun that case; unchanged cases can reuse their successes.
+Ordinary tests run fresh in the invoking Python environment. Literal input declarations
+opt cases into scoped execution and successful-result reuse. This tutorial keeps the
+tests, data and bundle configuration together so each input boundary is visible.
 
-**Start broad, then narrow.** An unmarked case sees and hashes the whole project-file
-snapshot. A literal `@pytest.mark.telescope(inputs=[...])` or `bundles=[...]` narrows its
-visible files and cache inputs. The host filesystem and host virtual environment remain
-outside the worker. [Excluded project directories and runtime files](execution-contract.md)
-have explicit rules.
+**Replacement status: UNQUALIFIED.** The examples below describe the accepted
+[ordinary/Bubblewrap routing contract](bubblewrap.md) and expected results. They are not
+an installation recipe for a qualified release. The published 0.1.0a3 Docker release
+retains its historical behavior; these routing changes do not alter its artifacts.
+The [API/runtime proposal](bubblewrap-api.md) records preparation requirements. Only the
+bounded resource mechanism has passed; production runtime and lifecycle controls remain.
 
-## Install
+## Prepare the example files
 
-This tutorial uses **0.1.0a4**. Version 0.1.0a1 used file/group declarations and does not
-support this marker interface. You need Linux, Python 3.11+, and permission to build and
-run Linux containers using a local Docker daemon's Unix socket. Runtime preparation
-needs network access; test workers have no network.
+Use a Python 3.11+ environment for the project. An all-ordinary invocation uses its
+installed pytest/plugins and needs no prepared scoped runtime. This mixed tutorial also
+contains scoped tests, so running the proposed controller commands requires the future
+qualified replacement candidate and explicit scoped runtime preparation. No replacement
+version is currently prescribed for installation.
 
 ```sh
 mkdir telescope-demo
 cd telescope-demo
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a4
 mkdir -p app data tests
 ```
 
@@ -141,10 +140,11 @@ defaults add the package initializer. The containing test source and `pyproject.
 are included automatically; conftest files and other helpers need explicit declarations
 for narrow cases.
 
-The unmarked note test stays broad. Defaults do not narrow it. All visible project files,
-including hidden and Git-ignored files outside excluded directories, affect that case's
-result. An explicit empty `inputs=[]` narrows to automatic inputs plus defaults; a
-`cache=False` marker alone retains broad visibility.
+The unmarked note test is ordinary and always fresh; defaults do not opt it into scope.
+A literal inherited `inputs`, `bundles` or `distributions` field, even `[]`, opts into
+scoped execution. A `cache=False` or `absent` marker alone does not. Absence-only
+assertions still validate exactly their named paths without snapshotting unrelated files.
+An explicit empty `inputs=[]` receives automatic inputs plus applicable defaults.
 
 ## Run cold, then warm
 
@@ -155,20 +155,20 @@ python -m pytest_telescope run --explain -- -q
 python -m pytest_telescope run --explain -- -q
 ```
 
-`runtime` prepares a clean image with pinned dependencies. `plan` previews static scopes;
-it does not import project code or enumerate real parametrized cases. `run` discovers
-actual cases in an isolated collection worker, then executes each miss in a separate
-worker with its own scope.
+These are the proposed commands after candidate installation and explicit preparation.
+`runtime` prepares a frozen interpreter/wheel/native closure, not a host venv mount.
+`plan` previews static scopes without importing code or enumerating actual parameters.
+`run` independently discovers scoped cases in their restricted collection union, then
+collects and runs the ordinary suite session before starting scoped execution.
 
-The first run executes **3 cases**. The second reuses **3 cases**. The JSON summary
-separates collection work, executed/reused outcomes, and fresh/cached passes. A reused
-case is a previous result, not a test executed on the current run. A fully warm
-inventory-and-result hit starts no worker containers. These selected fields are from
-the cold and warm summaries (other fields and timings are omitted):
+The first run executes **3 cases**. An unchanged second run executes the ordinary note
+test and reuses the **2 scoped successes**. Ordinary collection remains fresh even when
+all scoped records hit. These selected fields illustrate expected results rather than
+recorded qualification receipts:
 
 ```json
-{"collection": {"outcome": "executed", "collected": 3}, "counts": {"executed": 3, "reused": 0}, "case_outcomes": {"fresh_passed": 3, "cached_passed": 0}}
-{"collection": {"outcome": "reused", "collected": 3}, "counts": {"executed": 0, "reused": 3}, "case_outcomes": {"fresh_passed": 0, "cached_passed": 3}}
+{"counts": {"executed": 3, "reused": 0}, "case_outcomes": {"fresh_passed": 3, "cached_passed": 0}}
+{"counts": {"executed": 1, "reused": 2}, "case_outcomes": {"fresh_passed": 1, "cached_passed": 2}}
 ```
 
 ## See what reruns
@@ -190,7 +190,7 @@ python -c 'from pathlib import Path; Path("data/currency.json").write_text("{\"c
 python -m pytest_telescope run --explain -- -q
 ```
 
-**Broad-only resource:** change the project note.
+**Ordinary-only resource:** change the project note.
 
 ```sh
 python -c 'from pathlib import Path; Path("notes.txt").write_text("An updated project note.\n")'
@@ -200,14 +200,15 @@ python -m pytest_telescope run --explain -- -q
 | Run | Fresh passes | Cached passes | Why |
 | --- | --- | --- | --- |
 | Cold | 3 | 0 | No successes recorded yet. |
-| Unchanged | 0 | 3 | All scopes and results match. |
-| Red price changed | 2 | 1 | Red and the broad note case rerun; blue reuses. |
-| Shared currency changed | 3 | 0 | Both pricing consumers and the broad case rerun. |
-| Note changed | 1 | 2 | Only the broad case includes this file. |
+| Unchanged | 1 | 2 | The ordinary note test runs fresh; both scoped results match. |
+| Red price changed | 2 | 1 | Red and the ordinary note case run; blue reuses. |
+| Shared currency changed | 3 | 0 | Both pricing consumers and the ordinary case run. |
+| Note changed | 1 | 2 | The note test always runs; scoped cases do not include this file. |
 
 A changed discovery input refreshes collection without discarding unrelated per-case
-results. Changing the common test file affects every case in that file. Changing
-`pyproject.toml` affects every case because configuration is always an input.
+results. Changing the common test file invalidates its scoped results. Changing
+`pyproject.toml` invalidates scoped results because configuration is always an input.
+Ordinary cases execute regardless of either change.
 
 ## Give each parameter its own input
 
@@ -245,8 +246,8 @@ python -m pytest_telescope run --explain -- -q
 ```
 
 There are now **5 actual cases**. The first invocation executes the two new variants and
-the broad note case, which sees the new file; the original red/blue cases reuse. The
-second reuses all five. Each `pytest.param` declaration belongs to its actual variant.
+the ordinary note case; the original red/blue cases reuse. The
+second executes the note case and reuses all four scoped cases. Each `pytest.param` declaration belongs to its actual variant.
 The red variant cannot read blue's JSON merely because collection saw both resources.
 
 Change the red price once more to check parameter-specific reuse:
@@ -256,7 +257,7 @@ python -c 'from pathlib import Path; Path("data/red.json").write_text("{\"unit_p
 python -m pytest_telescope run --explain -- -q
 ```
 
-The red case, red variant, and broad note case execute: **3 fresh passes**. The blue
+The red case, red variant, and ordinary note case execute: **3 fresh passes**. The blue
 case and blue variant reuse: **2 cached passes**.
 
 ## Observe a denied read
@@ -285,10 +286,11 @@ python -m pytest_telescope run -- tests/test_denied.py::test_denied
 
 The command exits with status **1** and reports one failed case with
 `FileNotFoundError`; the other five cases are unselected. The inventory has six cases,
-while the selected-case totals contain only the failing case:
+while result pass/fail totals contain only the selected failing case. `cases.collected`
+accounts for all six validated identities:
 
 ```json
-{"collection": {"collected": 6}, "counts": {"failed": 1, "not-selected": 5}, "cases": {"collected": 1, "failed": 1, "passed": 0, "skipped": 0}}
+{"collection": {"collected": 6}, "counts": {"failed": 1, "not-selected": 5}, "cases": {"collected": 6, "failed": 1, "passed": 0, "skipped": 0}}
 ```
 
 These are selected summary fields. The empty input list establishes
@@ -302,13 +304,13 @@ rm tests/test_denied.py
 
 ## Reuse policy and fixture lifetime
 
-`@pytest.mark.telescope(cache=False)` disables result reuse; by itself it does **not**
-narrow file visibility.
+`@pytest.mark.telescope(cache=False)` alone is ordinary and fresh.
+`@pytest.mark.telescope(inputs=[], cache=False)` is scoped, fresh and nonrecording.
 Use `run --force` to refresh successes or `run --no-cache` to bypass result reading and
 recording. These flags also refresh collection. Literal declarations at module, class,
 function, and parameter levels add together; any inherited `cache=False` wins.
 
-In the default `case` mode, every actual case starts a new pytest session. Session/module/class fixtures are
+In the default scoped `case` mode, every actual scoped case starts a new pytest session. Session/module/class fixtures are
 recreated for each case, and mutable state does not carry between cases. Collection may
 see the union of potential inputs, but each execution starts with its own scope before
 imports. Shared import and parametrization resources must be declared for every narrow
@@ -326,10 +328,17 @@ reference](specification.md) for exact syntax, defaults, bundles, absence, and e
 the [execution contract](execution-contract.md) covers isolation, collection, cache
 identity, limits, and failure recovery.
 
-The 0.1.0a3 [scoped execution guide](scoped-execution.md) adds local distribution
-metadata, independent suites and bounded parallel workers. Its [result reference](result-schema.md)
-describes versioned inventories and explicit capability refusals. These additions are not
-available in version 0.1.0a2.
+Each suite's ordinary cases instead share one real pytest session and normal fixture
+lifetimes. In a mixed module, its imports and conftest may run in ordinary context.
+Scoped items are removed before pytest dispatches fixtures or bodies. Restricted
+collection must independently agree with mixed-file membership and selection; otherwise
+the invocation refuses without widening. Declare shared import/parameter dependencies
+for restricted collection even when the host can already import them.
+
+The [scoped execution guide](scoped-execution.md) covers local distribution metadata,
+independent suites and explicit parallel budgets. [Schema 3](result-schema.md) separates
+actual routes and reports unknown ordinary CPU as null. Runtime and capabilities remain
+UNQUALIFIED until the full production controls pass.
 
 ```{toctree}
 :hidden:

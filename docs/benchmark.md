@@ -1,5 +1,13 @@
 # Reproducible benchmark
 
+> **Historical measurements:** the Docker runs below use the earlier broad-unmarked
+> contract. They are retained evidence, not replacement qualification or an instruction
+> to run the old proof during migration. Under the accepted replacement, unmarked tests
+> run ordinary pytest fresh and never supply reusable scoped results. See the
+> [ordinary/Bubblewrap contract](bubblewrap.md) for matched fresh 1/2/4-worker benchmark
+> requirements, end-to-end costs and complete CPU accounting. No new speedup or complete
+> backend qualification follows from the resource mechanism proof alone.
+
 The original seven-case measurements below describe version 0.1.0a2. The
 [128-case scoped execution measurement](#scoped-execution-at-128-cases) qualifies
 version 0.1.0a3 with independent suites, local metadata and explicit worker budgets.

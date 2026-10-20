@@ -1,5 +1,12 @@
 # Publishing
 
+> **Replacement publication is pending.** The ordinary/Bubblewrap runtime, root closure,
+> routing, lifecycle and retained Git/isolated-child capabilities are UNQUALIFIED.
+> Resource proof run 39503556501 qualifies only its bounded mechanism. No 0.1.0a4
+> replacement release or current publication approval is claimed here. Preserve previous
+> releases and failed receipts; require the exact installed-production gate described in
+> [development](development.md) before applying the publication procedure below.
+
 ## Read the Docs
 
 The repository includes `.readthedocs.yaml` and a strict Sphinx configuration using

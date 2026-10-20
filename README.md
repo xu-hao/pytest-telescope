@@ -2,9 +2,10 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-Put input declarations beside pytest cases. By default each actual case, including each parametrized
-variant, runs in a fresh Linux Docker worker and has its own reusable successful result.
-Two cases in the same file can declare different resources and rerun independently.
+Unmarked tests run fresh through ordinary pytest in the invoking Python environment.
+Literal input declarations opt cases into an independent restricted execution route,
+where unchanged successful results can be reused. Two cases in one file can declare
+different resources and rerun independently:
 
 ```python
 import pytest
@@ -14,75 +15,71 @@ import pytest
 def test_red(): ...
 
 
-@pytest.mark.telescope(inputs=["data/blue.json"], bundles=["pricing"])
-def test_blue(): ...
+@pytest.mark.parametrize(
+    "product",
+    [pytest.param("blue", marks=pytest.mark.telescope(
+        inputs=["data/blue.json"], bundles=["pricing"]
+    ))],
+)
+def test_price(product): ...
 ```
 
-**Unmarked cases see and hash the whole project-file snapshot.** Literal `inputs` or
-`bundles` marker fields narrow that scope. Declarations at module, class, function, and
-parameter levels add together with project defaults. `cache=False` alone stays broad.
-The containing test source and configuration are always included.
-
-## Try it
-
-Requirements: Linux, Python 3.11+, and permission to build/run Linux containers through
-a local Docker daemon's Unix socket. Runtime preparation needs network; workers have no
-network.
-
-```sh
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a4
+```toml
+[tool.pytest_telescope.bundles.pricing]
+inputs = ["app/__init__.py", "app/pricing.py", "data/currency.json"]
 ```
 
-Follow the [complete runnable quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
-for copyable application code, tests, JSON, and TOML. It demonstrates cold/warm reuse,
-same-file independent inputs, parameter-specific declarations, shared bundles, broad
-invalidation, and an undeclared read failure. The base files are also in
-[examples/quickstart](https://github.com/xu-hao/pytest-telescope/blob/main/examples/quickstart).
+**Replacement status: UNQUALIFIED.** These guides describe the accepted
+[ordinary/Bubblewrap contract](docs/bubblewrap.md), not a published backend or a qualified
+0.1.0a4 release. Only the bounded resource mechanism has passed its native proof.
+Runtime preparation, routing, lifecycle and full installed-package qualification remain
+required. Published 0.1.0a3 keeps its historical Docker behavior; its artifacts are immutable.
 
-From your configured project root:
+## Start with ordinary tests, then declare scopes
 
-```sh
-python -m pytest_telescope runtime
-python -m pytest_telescope plan
-python -m pytest_telescope run --explain -- -q
-python -m pytest_telescope run --explain -- -q
-```
+A literal inherited `inputs`, `bundles` or `distributions` marker opts into scoped
+execution, including an empty list. Module, class, function and `pytest.param`
+declarations add together. Project defaults alone, absence assertions alone and
+`cache=False` alone leave a case ordinary. Absence assertions still check exactly their
+named paths. Invalid declarations refuse rather than becoming ordinary tests.
 
-`plan` previews static scopes. `run` collects actual cases inside an isolated worker;
-each execution then starts with only that case's scope. A warm inventory/result hit
-starts no worker containers. Summaries distinguish collection, fresh execution, cached
-results, failures, and unselected cases. New files or parametrized cases cannot hide
-behind an old result.
+The [complete quickstart](docs/index.md) contains copyable application, test, JSON and
+TOML files, parameter-specific declarations and a denied-read example. It shows expected
+replacement behavior; no replacement installation command is claimed qualified yet.
+An all-ordinary invocation needs neither Bubblewrap nor a prepared scoped runtime.
 
-## Know the boundary
+## Fixture and import boundaries
 
-The default `case` mode creates a fresh pytest session for every case, recreating
-module/class/session fixtures. Optional [batch mode](https://pytest-telescope.readthedocs.io/en/latest/batching/)
-shares ordinary pytest fixture lifetimes only among selected cases with exactly equal
-scopes in one suite/module. Choose that lifetime explicitly with `run --execution-mode batch`;
-reuse is atomic for the complete group and input permissions stay unchanged. Shared import and
-parametrization resources must be declared for every narrow consumer, typically in
-project defaults or bundles. Application files and host virtual environments are not
-installed into the prepared runtime.
+Each suite has one fresh ordinary pytest session, with its invoking interpreter,
+installed plugins, environment, cwd, rootdir, configuration and arguments. Ordinary
+results are never reused. Session/module/class fixtures keep normal pytest lifetimes
+among that suite's ordinary tests.
 
-Filesystem isolation does not establish universal determinism. Make clock, randomness,
-and native/external-state assumptions reproducible. `cache=False` executes fresh without
-recording reusable results; it does not widen permissions, capabilities or determinism guarantees.
-Use `run --force` to execute again or `run --no-cache` to bypass reuse and recording.
+Scoped `case` mode remains the default: every actual scoped case gets a fresh restricted
+session and private scratch. Explicit [batch mode](docs/batching.md) shares fixtures
+only within one suite/module and exactly equal effective scopes. Any member miss reruns
+the complete selected group; groups never union unequal inputs.
 
-The dedicated CLI starts no host pytest session. `pytest --telescope` also routes to
-workers, but other plugins may execute during host pytest startup. `pytest
---telescope-plan` is a static planning adapter. Ordinary pytest stays ordinary when
-telescope mode is disabled; `-p no:telescope` disables plugin loading entirely.
+Mixed modules and conftest files may be imported in ordinary context. The collection
+checkpoint removes scoped items before pytest fixture setup or test bodies. Independently
+restricted discovery supplies scoped authority; ordinary collection never does. Inventory
+disagreement refuses without widening or replay. A refusal does not imply no earlier
+ordinary import or test ran. The [execution contract](docs/execution-contract.md) explains
+these boundaries and the ordering of sessions.
 
-**Version note:** 0.1.0a4 adds an explicit [pinned local Git runtime](https://pytest-telescope.readthedocs.io/en/latest/git-runtime/) while retaining the default Python profile. Version 0.1.0a3 introduced [scoped project metadata, independent suites and explicit parallel budgets](https://pytest-telescope.readthedocs.io/en/latest/scoped-execution/).
-The marker interface introduced in 0.1.0a2 remains supported. Immutable 0.1.0a1 used file/group
-targets; central `targets` declarations must migrate to markers, defaults, and bundles.
-The [benchmark](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md)
-records measured per-case cold/warm and selective reruns, including broad-case costs.
+## Runtime and results
 
-See the [marker/project reference](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md), [execution contract](https://github.com/xu-hao/pytest-telescope/blob/main/docs/execution-contract.md),
-[development guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/development.md), and [publishing guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md).
-Licensed under the [MIT License](https://github.com/xu-hao/pytest-telescope/blob/main/LICENSE).
+The replacement proposes `bubblewrap-v1` with explicitly prepared `python-v2` or
+`git-local-v2` frozen runtimes; old Docker artifacts are ineligible and never silently
+migrated. [Git](docs/git-runtime.md) and [isolated child lookup](docs/isolated-source.md)
+remain required qualification work. No Bash, browser or service profile is added.
+
+[Schema 3](docs/result-schema.md) distinguishes ordinary/scoped routes, configured and
+observed resource limits, and unknown CPU measurements. Ordinary execution is not a
+sandbox or cache-authority claim. Filesystem isolation alone does not make arbitrary
+Python deterministic; scoped `cache=False` runs fresh without reusable recording.
+
+See the [marker reference](docs/specification.md), [scoped guide](docs/scoped-execution.md),
+[development guide](docs/development.md), and [publishing guide](docs/publishing.md).
+The [benchmark](docs/benchmark.md) retains historical measurements; they do not qualify
+the replacement. Licensed under the [MIT License](LICENSE).

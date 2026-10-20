@@ -1,8 +1,10 @@
 # Declared source in isolated Python children
 
-This is the 0.1.0a4 contract for the explicit `isolated-source-v1` capability.
-It adds source lookup for isolated Python children without application installation.
-Release qualification includes the complete guarded installed-distribution gate.
+The accepted replacement retains explicit `isolated-source-v1` lookup without application
+installation. **UNQUALIFIED:** the runtime/root, projection and child capability require
+new production controls. Historical Docker mechanism receipts do not qualify the
+replacement. This capability stays in the required delivery queue alongside Git.
+See the [exact migration seam](bubblewrap-api.md#pinned-git-abi-and-isolated-children).
 
 ## Explicit selection and source scope
 
@@ -61,7 +63,7 @@ verified system site-packages directory. An opted-in worker overlays that one sl
 an owned immutable generated `.pth` file containing only absolute `/project/...` paths
 and, when selected metadata exists, `/metadata`. It contains no executable `import`
 lines. Source directories remain inside the exact read-only worker snapshot; metadata
-remains a separate read-only static projection. No application bytes enter the image,
+remains a separate read-only static projection. No application bytes enter the prepared runtime,
 site-packages, host environment or shared global layer. No wheel/editable installation,
 build hook, user-supplied path file or generated launcher is executed.
 
@@ -81,14 +83,12 @@ the prepared slot; missing or mismatched slots refuse boundedly rather than gues
 another interpreter directory. The generated mount has no application code and never
 widens the source or metadata mounts.
 
-An older prepared image without the current slot must be rebuilt explicitly; neither
-`run` nor runtime inspection repairs it. The
-[known-policy upgrade path](execution-contract.md#explicit-rebuilds-after-runtime-upgrades)
-allows bounded cleanup of registered historical project-owned images using the labels
-published with their release, while preserving the selected image during replacement.
-Historical cleanup eligibility never substitutes for validating the current execution
-policy and source slot. Unknown/foreign records or unconfirmed removal remain terminal
-incidents with accepted state preserved, rather than triggering a wider cleanup.
+A replacement prepared runtime must contain the exact verified empty slot. Missing or
+corrupt preparation is never repaired implicitly by run/inspection. The
+[explicit upgrade path](execution-contract.md#explicit-rebuilds-after-runtime-upgrades)
+leaves old Docker artifacts untouched and requires explicit preparation. Runtime
+migration to python-v2/git-local-v2 does not silently change this lookup profile.
+Ordinary sessions receive no projection; they use their real host import environment.
 
 Source roots cannot provide implicit startup hooks or additional installed metadata.
 Visible root-level `sitecustomize`/`usercustomize` modules or package directories,
@@ -132,44 +132,26 @@ identities; a suite setting identity does not claim its individual views are equ
 
 Worker CPU/memory/process/scratch quotas, read-only source/root, noexec scratch,
 network-none, nonroot execution and descendant cleanup remain unchanged. Child
-processes use the same container limits and must finish before evidence is eligible.
+processes use the same scoped cgroup limits and must finish before evidence is eligible.
 Use the existing two-attempt infrastructure retry with a fresh worker and owned path
 projection; no extra nested retry or import fallback. Invalid configuration/unsupported
 layout is terminal. Projection write/mount/backend failures are infrastructure incidents;
-cleanup failure prevents all new cache publication. Warm valid reuse starts neither a
-worker nor an application import and never repairs a missing preparation implicitly.
+cleanup failure prevents all new cache publication. Warm scoped result reuse starts no execution worker, but per-invocation runtime
+verification/freezing remains required. Ordinary collection/imports remain fresh, and
+missing preparation is never repaired implicitly.
 
-## Foreground proof and qualification
+## Qualification still required
 
-The small actual Docker proof compares an ordinary child with `python -I` before the
-projection, then tests opted-in `-I -c` and `-I -m` source imports, version/entry-point
-lookup and loading, source-only and metadata-only negative controls, omitted packages,
-read-only source, absent undeclared files, ignored hostile PYTHONPATH/user site, inert
-source `.pth`, unsupported startup-hook refusal, and `-I -S` retaining standard site-disabled behavior.
-Inspect network-none plus loopback-only/no-default-route state and keep private noexec
-scratch and explicit worker limits. Cleanup only exact owned containers/image.
+The replacement must compare ordinary children with `python -I` before projection, then
+prove opted-in `-I -c`/`-I -m`, version/entry-point lookup/load, source-only and metadata-only
+negative controls, omitted packages, root ordering and namespace portions. Read-only
+source, undeclared-source denial, ignored host PYTHONPATH/user site, inert source `.pth`,
+startup-hook refusal across ALL views and ordinary `-I -S` site-disabled behavior remain
+required. Runtime-only metadata collision inspection must exclude selected projections.
 
-After review, production qualification covers both runtime profiles and case/batch
-modes, namespaces/root order, source/metadata/config/runtime mutation, omissions,
-selection and scope separation, warm reuse, corrupt projection/slot, bounded retry and
-exhaustion, cancellation/live descendants, output bounds and supported host corners.
-Keep the earlier Git gate and every failed proof receipt; do not replace them with a
-claim that the new capability was already qualified.
-
-## Mechanism checkpoint
-
-On 2026-10-20 the restricted proof passed seven actual container scenarios and three
-pre-worker layout refusals. The baseline confirmed that ordinary Python could use a
-source path from its environment while `-I` could not. The projected complete,
-source-only and metadata-only views preserved both positive lookup and negative load
-behavior. Two independent views resolved the same package name to different source
-values through their selected roots. A projected runtime-package alias was detected
-as a collision by the separate runtime-only metadata enumeration; the ordinary
-unfiltered scan was also shown to include selected project metadata itself.
-
-These are mechanism results, not production cache or suite-parser qualification.
-The path-file slot was overlaid directly in the proof image; production qualification additionally covers
-prepared empty-slot validation, full view preflight, protocol/schema integration
-and lifecycle controls. All exact owned proof containers and the prepared image were
-removed and their absence verified. The first four-scenario proof is retained separately
-from the extended proof; neither changes the earlier Git release gate receipt.
+Production controls cover both runtime profiles and case/batch modes, source/metadata/
+configuration/runtime mutation, selectors, scope separation, warm reuse, corrupt slots,
+bounded retries/exhaustion, cancellation, live descendants, protocol bounds and supported
+host/runtime layouts. Ordinary tests receive no isolated-source projection. Keep the
+historical proof receipts as historical evidence; do not rename them replacement
+qualification or claim a release before the complete guarded installed-package gate.

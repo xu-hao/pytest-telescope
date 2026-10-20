@@ -1,8 +1,9 @@
 # Scoped metadata, independent suites, and parallel workers
 
-This document specifies the 0.1.0a3 extension to the
-[execution contract](execution-contract.md). Implementation and qualification must
-satisfy these boundaries before publication. Existing releases are immutable.
+This guide carries the metadata/suite/resource boundaries into the accepted
+[ordinary/Bubblewrap replacement](bubblewrap.md). **UNQUALIFIED:** the resource mechanism
+proof does not qualify production runtime, routing, lifecycle or capabilities. Existing
+releases remain immutable; see the [API/runtime contract](bubblewrap-api.md).
 
 ## Static project metadata
 
@@ -35,7 +36,7 @@ def test_entry_point():
 
 `distributions` is additive in markers, defaults, and bundles. Like `inputs` and
 `bundles`, a literal marker field establishes narrow scope, including an empty list.
-Broad cases receive all configured distribution metadata. A narrow case receives only
+Ordinary cases use their invoking environment. A scoped case receives only
 its effective distribution names, their metadata source and declared build inputs.
 Declaring metadata never implicitly grants the package's application source.
 
@@ -65,7 +66,7 @@ access/modification times. The worker mount is read-only. This representation pa
 in the exact case key and is mounted at `/metadata` only for that worker. The worker adds this
 metadata-only directory to Python's search path before pytest startup. All application
 imports still resolve through the declared `/project` snapshot and explicit pytest
-configuration. No application source enters the shared image or metadata tree.
+configuration. No application source enters the prepared runtime or metadata tree.
 
 The explicit [isolated Python source profile](isolated-source.md) can make selected
 metadata and declared source roots discoverable by `python -I` children as well. It
@@ -77,7 +78,7 @@ negative lookups. Duplicate normalized names or conflicts with installed runtime
 packages refuse rather than shadowing runtime metadata. Changing a selected metadata
 source, build input, entry point, generated representation, or relevant application
 source invalidates its consumers. Unrelated narrow resources do not. Missing/deleted
-required sources fail validation. Broad cases retain broad invalidation.
+required sources fail validation. Ordinary results are always fresh; explicitly broad scoped inputs key their declared content.
 
 ## Independent suites and structural membership
 
@@ -98,7 +99,7 @@ test_roots = ["tests/addon"]
 plugins = []
 ```
 
-Suite names identify separate pytest invocations. Each has its own collection worker,
+Suite names identify separate pytest invocations. Each preserves its own ordinary session and independent scoped collection boundary,
 working directory, actual pytest root directory, explicit configuration, options and
 plugin activation. `root` sets pytest's root directory. Optional `cwd` sets the worker's
 working directory independently and defaults to `root`; both are existing directories
@@ -158,7 +159,7 @@ unknown or unselected suite keys, and nonfiles refuse before backend startup.
 This is a narrowing operation only. It never changes cwd, rootdir, source declarations,
 resource limits or runtime capabilities. Input declarations remain beside tests.
 `plan.make_plan(root, suites=None, structural_files=None)` supports the same static
-validation and effective file preview without importing tests or contacting Docker.
+validation and effective file preview without importing tests or contacting a backend.
 It cannot establish the real parametrized inventory or determine runtime capabilities.
 
 Suite identity includes the normalized explicit override (including an empty list),
@@ -176,9 +177,10 @@ requirement. Newly added files are discovered automatically only in suites witho
 explicit exact-file override, or when the caller adds them to that override.
 
 Pinned third-party dependencies continue to be prepared from exact wheel pins with a
-complete dependency closure and `pip check`. Autoload is disabled. Suite plugins are
-explicit import names. Distributed schedulers (including xdist), scheduler options and
-conflicting plugin declarations are rejected; telescope alone owns parallel workers.
+complete dependency closure. Scoped autoload is disabled. Suite plugins are
+explicit import names. Ordinary sessions use invoking-environment plugins. Effective
+distributed scheduling (including xdist) refuses; overridden inert addopts and an installed
+inactive plugin are not active scheduling. Pytest option precedence remains intact.
 Local distribution metadata never satisfies third-party runtime installation.
 
 ## Resource-derived fresh parallelism
@@ -197,33 +199,34 @@ processes = 512
 scratch_bytes = 268435456
 ```
 
-Defaults retain one worker with the existing resource policy. When a worker or budget
-table is supplied, every dimension is explicit. Positive integer dimensions are validated
-before collection or any cache hit. Concurrency is the minimum of each aggregate budget
-divided by its per-worker limit, capped at 32 to reserve bounded lifecycle journal
-capacity. An envelope that cannot fit one worker refuses. Host CPU discovery does not
-set concurrency. Collection runs sequentially within one worker slot, then independent
-case misses use the computed bound. By default each case starts a fresh container and pytest
-session with private scratch. The approved optional [batch profile](batching.md) instead
-shares one fresh session and scratch only among exactly equal scopes in one suite/module. Aggregate limits bound active worker containers; bounded
-host control, frozen pool storage and output retain their separate documented limits.
+Defaults retain one scoped worker. Every supplied worker or budget table includes all
+four positive integer dimensions. Memory/scratch values must be 4096-byte multiples.
+Concurrency is the minimum aggregate-to-worker ratio, capped at 32; no host CPU inference.
+Potential scoped work requires a budget that fits one worker before restricted collection.
+A true all-ordinary invocation does not require Bubblewrap, prepared runtime artifacts or
+scoped-resource prerequisites, and does not fit-check the configured worker envelope.
+Syntax errors remain errors. Unselected scoped cases can still require restricted discovery.
 
-Per-worker CPU, memory (without extra swap), process and scratch quotas are Docker
-limits and are cache identity. Aggregate scheduling budgets affect scheduling; because project configuration is an
-automatic input, changing a budget conservatively invalidates results too. The aggregate budget does not itself opt into batching; execution mode is explicit.
-The controller schedules at most the worker bound, without an unbounded future queue.
-All summary rows appear in deterministic suite/node order and each current case is
-accounted exactly once. Completion order never changes identity or counts.
+Scoped workers enforce real per-worker CPU, memory without extra swap, process and tmpfs
+byte/inode limits, and the aggregate worker pool enforces its budget. Scheduler counts
+and RLIMIT_AS alone are insufficient. Controller/setup CPU, memory, processes and frozen
+storage are admitted separately; worker budget retains its aggregate-worker meaning.
+The [API/runtime contract](bubblewrap-api.md) specifies all four controller fields and
+actual resource reporting. Scope identity includes normalized actual limits.
 
-A single controller owns the existing stable cache lock and all cache mutation. Worker
-threads return fully validated results only after their own container/client/descendant
-cleanup. New records stay pending until every worker, cancellation handler, frozen pool,
-and invocation cleanup completes. Any terminal lifecycle failure prevents publication
-of all new records; previously eligible records remain intact. The scheduler stops
-submitting work on cancellation/terminal cleanup failure, cancels and drains owned active
-work, marks unscheduled selected cases with explicit infrastructure outcomes, and never
-accepts half-cleaned successes. Infrastructure retry remains at most two attempts per
-case; retry attempts occupy the same worker slot. No global Docker pruning is permitted.
+Complete independent restricted discovery/preflight first. Then ordinary suite sessions
+run sequentially, each occupying one permit while alive. Every ordinary session ends
+before scoped execution starts; at concurrency one no retained host pytest process can
+block discovery. Ordinary tests inherit host limits, not the scoped slice. Explicit
+case/batch policy affects scoped fixture lifetime only. Independent scoped groups run
+concurrently within the admitted envelope, each in a fresh sandbox/session/scratch.
+
+The scoped controller owns the stable cache lock and pending-record staging through all
+worker and outer cleanup. New records become eligible only after complete cleanup;
+terminal lifecycle failure prevents all new publication while preserving prior valid
+records. Cancellation stops submission and drains exact owned resources. Scoped
+infrastructure retry remains at most two attempts per group in the same slot; ordinary
+sessions are never automatically replayed. Never use broad cleanup or relaxed fallback.
 
 ## Explicit capability refusals
 
@@ -240,8 +243,9 @@ capabilities require a separately qualified profile. Explicit capability declara
 that this profile cannot satisfy return a machine-readable
 `unsupported` result with a stable capability code and exit status 4. They cannot mint a
 success or a reusable cache entry. Refusal does not silently widen the execution profile.
-Choose structural partitions and preflight routing to ordinary pytest before starting a
-run: a refusal or incomplete inventory alone does not prove that no earlier case executed.
+Literal declarations determine ordinary/scoped routing before execution; restricted
+collection supplies independent scoped authority. A refusal or incomplete inventory
+alone does not prove that no earlier ordinary import or case executed.
 Do not automatically replay an invocation after a runtime refusal.
 Missing files or invalid syntax remain declaration errors;
 backend outages remain infrastructure errors. Runtime code that invokes an undeclared
@@ -250,9 +254,9 @@ arbitrary test bodies or retry under relaxed restrictions.
 
 ## Result and privacy contract
 
-The [run result reference](result-schema.md) defines schema 2, complete/incomplete
+The [run result reference](result-schema.md) defines schema 3, complete/incomplete
 inventories, selected-case accounting and typed refusals for CLI and Python callers.
-Collection protocol 4 emits opaque case identities, hashed selector aliases and each selected case's actual execution-order position (null for unselected cases). Raw
+Collection emits opaque case identities, hashed selector aliases and each selected case's actual execution-order position (null for unselected cases). Raw
 collected node IDs remain transient inside the worker; execution requests, inventory
 records and public results use the opaque identity. Explicit caller-supplied `-k` and
 `-m` expressions still reach the worker unchanged, as the result reference explains.
@@ -274,37 +278,24 @@ and host-environment paths are not supported inputs.
 
 ## Qualification
 
-The synthetic Docker investigation in `scripts/probe_boundaries.py` checks standard
-version/entry-point lookup and load, source without metadata, metadata without source,
-negative lookup of the other distribution, independent root/cwd/conftest behavior,
-explicit asynchronous fixtures, and a deliberately unimportable structurally excluded
-module. The implementation gate must additionally cover frozen provenance and mutations,
-unsupported metadata, membership changes, selectors, parallel quota/isolation/cancellation,
-retry exhaustion, cleanup, supported Python/pytest, existing regressions, and useful-scale
-cold/warm/selective benchmarks. Measurements must report startup overhead honestly.
+Production controls must cover metadata projection, omitted distributions, source without
+metadata, metadata without source, version/entry-point lookup/load, independent cwd/root/
+configuration/plugins, and structural exclusion before imports. They also cover source
+mutation, selectors, mixed ordinary/scoped reconciliation, preserved fixture lifetimes,
+resource enforcement, cancellation, bounded retries, descendant cleanup and supported
+Python/pytest/runtime layouts. Mock responses do not qualify native enforcement.
 
 ### Candidate qualification status
 
-As of 2026-10-20, focused qualification of the 0.1.0a3 candidate includes:
+**UNQUALIFIED.** The bounded resource mechanism passed
+[run 39503556501](https://github.com/xu-hao/pytest-telescope/actions/runs/39503556501).
+It proved the measured controller/worker/pool/aggregate quotas, concurrent declared views,
+CPU throttling, owned memory/PID exhaustion, scratch limits and exact cleanup. It did
+not qualify prepared runtimes, root filesystem closure, mixed routing, lifecycle or
+schema integration. Historical Docker candidate receipts remain historical; they do
+not qualify the replacement or establish a 0.1.0a4 release.
 
-| Controls | Result and boundary |
-| --- | --- |
-| Structural file overrides | 34 passed: static preflight and path bounds, exclusion before parsing/import, selector contrast, exact-list identity, unaffected suites, empty inventories, and unchanged broad input visibility in case and batch modes. |
-| Session and collection verdict regressions | 25 passed: execution-side collection failures and nonzero pytest session verdicts remain failures, preserve observed member outcomes and bounded evidence, and cannot produce reusable success. |
-| Installed-wheel host matrix | 110 focused controls passed on each of Python 3.11 with pytest 8.3.5 and Python 3.13 with pytest 9.1.1, using the same wheel bytes. |
-
-The host matrix includes real Docker controls and uses the profile's pinned worker
-runtime. It does not qualify alternate worker interpreters or every host Python/pytest
-combination. Focused counts overlap; they must not be added to claim distinct coverage.
-
-An earlier complete behavioral run recorded **296 passed, 1 failed**. Its execution-side
-collection-verdict regression has since been fixed and verified by the focused controls
-above. That earlier run remains a failed receipt. The mandatory guarded full gate for
-the integrated candidate is still pending; these focused results do not replace it or
-establish release qualification. See [development](development.md) for the full gate and
-[benchmark methodology](benchmark.md#comparing-case-and-batch-on-the-same-scopes) for the
-separate performance comparison.
-
-The separately proposed [pinned local Git profile](git-runtime.md) defines a narrow
-additional tool capability. It does not change the published alpha3 runtime or qualify
-Bash, executable scratch, browsers or services.
+The [Git runtime](git-runtime.md) and [isolated child lookup](isolated-source.md) remain
+required work in the replacement queue. Neither Bash, executable scratch, browsers nor
+services are added. See [development](development.md) for remaining production gates and
+[benchmark methodology](benchmark.md) for historical measurements and required new trials.

@@ -1,29 +1,39 @@
 # Local development
 
-Use a dedicated Python 3.11+ virtual environment. From the repository root:
+The accepted [ordinary/Bubblewrap contract](bubblewrap.md) is **UNQUALIFIED** as a complete
+backend. The [API/runtime seam](bubblewrap-api.md) defines the required production work.
+Only the bounded native resource mechanism passed
+[run 39503556501](https://github.com/xu-hao/pytest-telescope/actions/runs/39503556501).
+Runtime preparation/root closure, Git ABI, isolated children, ordinary/scoped routing,
+continuous descendant supervision and final cgroup CPU accounting remain required.
+
+Use a dedicated Python 3.11+ virtual environment and install development dependencies:
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install '.[dev]'
-python scripts/check.py --artifacts /tmp/telescope-check
 ```
 
-The check command runs Ruff lint and formatting checks, builds the sdist and a wheel
-from it, validates package metadata, builds documentation with warnings as errors,
-installs the built wheel without dependencies, and runs behavioral tests. It requires a
-virtual environment and uses its interpreter. The artifact directory must not already
-exist; use a new directory for another run. Build dependencies may need network access.
-No package is uploaded by this command.
-Each stage has a five-minute deadline, except the complete real-Docker behavioral suite,
-which has a fifteen-minute deadline. A timeout fails the gate.
+The existing `python scripts/check.py --artifacts <new-directory>` command builds an
+sdist and wheel, validates metadata, runs behavioral controls and strict documentation.
+Its Docker-era native controls and gate recipe do not qualify the replacement. The
+replacement gate must build/install the exact submitted candidate and execute every
+required real native control without skips. Concrete preparation, administrator
+preflight and complete gate commands must be verified against that production path
+before this guide can claim a runnable qualification recipe.
 
-Linux and a usable Docker daemon are required for real enforcement qualification. The
-runtime build uses the pinned public Python base described in the
-[specification](specification.md), not an existing application image. Do not treat
-skipped integration tests or mocked Docker responses as enforcement evidence. Ordinary
-pytest behavior, disabled-plugin behavior, malformed declarations, and static planning
-can be tested without running the backend.
+Local unsupported namespace/controller prerequisites must fail explicitly. Run entry
+preflight in the invoking admission context before any external user service. A denied
+context cannot be bypassed by a more permissive service. Administrator delegation setup
+is separate from normal launch; the package must never provision or stop/reconfigure the
+user manager itself. See [the prerequisites](bubblewrap-api.md#bubblewrap-provenance-and-failure-ownership).
+
+The proposed hosted executor runs inside one guarded landing row, binding exact source,
+workflow/job identity, artifact hashes, enforced resources, terminal verdict and exact
+owned cleanup. It has bounded retries/deadlines and cancels only its own run. A stale
+head or incomplete/failed receipt cannot authorize publication. Strict documentation
+validation alone is proportionate for documentation changes and proves no runtime behavior.
 
 Behavioral tests should cover collection/import/fixture/teardown isolation, undeclared
 reads from Python/native code/subprocesses, immutable inputs, network restrictions,
@@ -54,13 +64,17 @@ Check the quickstart, sidebar links, search, source links, and mobile navigation
 real browser after layout changes. Stop the local server when finished. Edit navigation
 in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples first.
 
-The [benchmark](benchmark.md) uses a copied synthetic project and external clocks. It
-must preserve per-phase command results and distinguish host controller CPU from
-container worker CPU. Benchmark output is qualification evidence, not a universal
-speedup guarantee.
+The [benchmark](benchmark.md) retains historical Docker measurements. New fresh trials
+must match selected cases, session counts, scopes and admitted resources at 1/2/4 workers
+with caching disabled. Separate launch-only costs from end-to-end verification/freezing,
+planning, materialization and cleanup. Record actual overlap, isolated views, outcomes,
+sample order/dispersion and complete CPU accounting. Unknown ordinary CPU stays null;
+RUSAGE_CHILDREN is not complete sandbox CPU. A fixture-lifetime change is not pure
+sandbox overhead or a universal speedup claim.
 
-The CI matrix covers supported host Python/pytest versions. Backend qualification must
-additionally execute on a supported Docker host. Keep build/documentation tools in
+The CI matrix must cover supported host Python/pytest versions. Replacement qualification
+must additionally exercise both distro and dedicated CPython layouts on supported native
+hosts, plus pinned Git and isolated-source child profiles. Keep build/documentation tools in
 development dependencies and keep runtime contents explicit. Never use an editable
 application install as evidence of a clean isolated runtime.
 

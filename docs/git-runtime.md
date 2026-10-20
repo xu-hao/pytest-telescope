@@ -1,122 +1,74 @@
 # Pinned local Git runtime profile
 
-This is the 0.1.0a4 contract for a separately qualified runtime profile.
-Version 0.1.0a3 and earlier releases remain immutable. The mechanism proof and targeted
-qualification below establish the profile boundary; the release also requires the
-complete guarded installed-distribution gate.
+**Replacement status: UNQUALIFIED.** `git-local-v2` is the explicit proposed migration
+from the Docker `git-local-v1` profile. The local Git operation boundary remains required
+work; it is not removed to complete the replacement. Historical Git mechanism/candidate
+receipts do not qualify the new runtime or establish a 0.1.0a4 release.
+The [API/runtime contract](bubblewrap-api.md#pinned-git-abi-and-isolated-children) owns
+exact loader, closure and migration rules.
 
 ## Selected capability and API
 
-The existing runtime becomes the explicitly named `python-v1` default. An invocation
-may select `git-local-v1`, initially qualified for Linux/amd64 only:
-
 ```toml
 [tool.pytest_telescope.runtime]
-profile = "git-local-v1"
+profile = "git-local-v2"
 requires = ["git-local"]
+
+[tool.pytest_telescope.execution]
+backend = "bubblewrap-v1"
 ```
 
-`runtime.build_runtime(root, requirements=None, *, runtime_profile=None)` prepares the
-configured profile or explicit override. `controller.run(..., runtime_profile=None,
-required_capabilities=None)` and `plan.make_plan(..., runtime_profile=None,
-required_capabilities=None)` use the same normalization. CLI `runtime`, `run` and `plan`
-accept `--runtime-profile`; `run` and `plan` accept repeated `--require-capability`.
-Overrides are invocation-only and never rewrite configuration. Configured requirements
-and caller requirements are a set union; a caller cannot remove a declared requirement.
-Each requirements value is a list of at most 16 strings, normalized to a sorted set.
-The only additional capability in this version is `git-local`; unknown profiles
-(including unknown profile versions) produce `runtime:profile`, and unknown or unmet
-capabilities produce `runtime:capability`. Neither selects a broader runtime.
+`python-v2` is the proposed default; requiring `git-local` with that profile refuses
+with `runtime:capability`. Unknown profiles/versions use `runtime:profile`. Runtime
+selection is separate from case/batch mode, source lookup and literal scope markers.
+Ordinary cases still use their invoking environment and do not receive prepared Git.
+Scoped cases still receive only their declared project inputs; choosing Git grants no
+application source, host repository, writable source or additional capabilities.
 
-These are invocation-level requirements, not a central case registry. Structural suite
-selection remains the mechanism for choosing a supported partition. Selecting a Git
-profile makes its immutable tool payload available throughout that invocation, while
-per-case/group project file visibility remains unchanged. It does not confer application
-source visibility. No marker syntax changes are required.
+CLI `runtime`, `run` and `plan` retain `--runtime-profile`; `run`/`plan` accept repeated
+`--require-capability`. Configured/caller requirements form a sorted unique union, bounded
+to 16 strings per supplied list. A caller cannot remove configured requirements. See
+[the interface reference](result-schema.md#runtime-profiles) for exact Python signatures.
 
-Known profile/requirement incompatibility is checked before Docker, collection, tests,
-or cache lookup: `python-v1` with `requires=["git-local"]` produces typed unsupported
-`runtime:capability`. Unsupported architecture produces `runtime:platform`. Missing,
-stale, mismatched or corrupted prepared runtime state is an infrastructure failure,
-with the existing bounded recovery policy; it is not silently prepared during `run`.
-The prepared profile must exactly match the requested profile, even when a wider image
-happens to contain the requested executable. `plan` proves static compatibility only.
+Preparation is explicit. Missing, stale, mismatched or corrupt prepared state is an
+infrastructure failure; neither run nor read-only inspection repairs it. Inspection
+returns exactly `{profile, required_capabilities, identity}` and supplies identity only,
+with at most two retryable attempts and no state/cache writes. A wider runtime containing
+Git is not a substitute for the requested exact profile. Static planning establishes no
+prepared-runtime or host-platform qualification.
 
-`runtime.inspect_runtime(root, *, runtime_profile=None, required_capabilities=None)`
-returns the same three-field `runtime` envelope as a successful run. It applies the same
-requirements union and requested-profile validation, and owns at most two retryable
-inspection attempts (including the backend platform probe). Typed unsupported mismatches
-are immediate. Inspection never prepares, downloads, recovers, collects, accesses the
-case cache or writes project/state files. Missing/stale/corrupt prepared state is an
-infrastructure failure. Malformed inspection JSON, missing/non-table ownership labels
-and invalid platform encoding also refuse with bounded typed infrastructure evidence;
-inspection never removes a foreign or unlabeled image. The opaque identity supplies no execution, cache or cleanup
-authority; callers must not reconstruct it or multiply its bounded retries. Preparation
-likewise permits at most two backend platform probes before any build.
+The [local Git example](https://github.com/xu-hao/pytest-telescope/tree/main/examples/git_local)
+keeps the literal input marker, fixed identities/dates, scratch repository and local bare
+origin round trip. Its v2 configuration demonstrates the proposed migration, not a
+qualified execution receipt.
 
-The repository includes a runnable
-[private local Git example](https://github.com/xu-hao/pytest-telescope/tree/main/examples/git_local) with a literal input marker,
-fixed author/committer dates, a scratch repository and a local bare-origin round trip.
+## Tool provenance and private ABI closure
 
-## Tool provenance and reproducible payload
+Do not reinterpret v1. Its Debian 13 Git 2.47.3/libc 2.41 closure is distinct from an
+Ubuntu 22/glibc 2.35 Python closure. V2 proposes that exact tool closure in a private
+runtime directory, launched through its own explicit loader with `--library-path`,
+`--inhibit-cache` and exact `--argv0`. Trusted immutable runtime Python entry scripts
+exec Git and its three local transport aliases; they are not scratch scripts and use
+no shell. Python's native loader paths remain untouched; no global LD_LIBRARY_PATH or
+PATH Git substitution is allowed. Launcher source/bytes bind runtime identity.
 
-The profile extends the existing immutable Python base, not the host installation:
-`python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1`.
-The initial Git payload is selected from Debian's amd64 package
-`git_2.47.3-0+deb13u1_amd64.deb`, exact size 8,861,572 bytes, SHA256
+The existing Git archive comparison anchor is Debian's
+`git_2.47.3-0+deb13u1_amd64.deb`, 8,861,572 bytes, SHA256
 `3e35662fd5c46add561703e54031a1d8ad9df45811927689f0a51122b13be722`.
-[Debian publishes the package version, size and digest](https://packages.debian.org/trixie/amd64/git/download).
-The upstream/debian source is identified by
-[the matching source package](https://sources.debian.org/src/git/1%3A2.47.3-0%2Bdeb13u1/).
+The [API/runtime contract](bubblewrap-api.md) records the accepted libc archive anchor
+and remaining exact library archive verification. Verify Git/libc/pcre2/zlib archives
+before inert extraction; project only the native allowlist, SONAME links, copyrights
+and empty templates. No apt, package scripts, remote helpers, editors or optional tools.
+Unknown closure/ABI/layout refuses instead of adding host mounts or floating packages.
 
-Project only the native `git` executable, its required local transport aliases and the
-package copyright/license record. Do not run package maintainer scripts, apt resolution,
-Git build hooks or host binaries. Do not install Perl commands, remote helper plugins,
-SSH clients, credential helpers, editors, Bash/browser/service tooling or package-wide
-optional features. The native dependency closure consists of the verified executable
-and the exact loader/shared-library files already in the digest-pinned base; record and
-verify those paths, hashes and base package versions before publishing the profile.
-If any dependency is missing or differs, preparation fails instead of resolving a new
-package dynamically. The decisive proof records the actual closure before implementation.
-
-The payload is reproducible from these immutable inputs. Image metadata/build timestamps
-need not be bit-identical: the actual immutable image/rootfs identity remains part of
-cache evidence. Each profile revision pins its payload, architecture, projection format,
-controlled environment and preparation policy; changing those requires a new keyed
-identity. Profiles do not accept arbitrary executable URLs, host paths or user packages.
-
-Preparation may download the exact archive from the fixed official Debian pool URL.
-Network retrieval is bounded to two attempts, 30 seconds per attempt and 16 MiB; verify
-size and SHA256 before extraction. Hash/format mismatch is terminal, not retried as a
-network fault. No mirror guessing or floating-version fallback. Extract only in the
-owned Docker build context/container, with the existing 300-second build deadline and
-2 GiB final-image bound. Git-profile builds allow at most two complete
-attempts, with a fresh owned context after confirmed cleanup. The verified bounded archive
-is retained between these attempts; retrieval remains limited to two attempts across the
-whole preparation. An immutable candidate image permits at most two read-only ownership
-inspections in its existing context, without rebuilding it; an integrity mismatch or
-unconfirmed cleanup is terminal. There is no unbounded stage retry or broader recipe.
-Commit runtime state atomically only after closure validation,
-image ownership inspection and complete preparation cleanup. Retry exhaustion reports
-infrastructure failure and leaves no accepted new runtime state. Existing valid state
-must not be replaced by partial preparation. Existing per-project image quota and
-preparation lock/journal recovery remain authoritative.
-
-Explicit preparation also follows the shared
-[known-policy upgrade path](execution-contract.md#explicit-rebuilds-after-runtime-upgrades).
-At the retention limit, verified historical project-owned images can be inspected for
-cleanup using their published label format; they do not need Git-profile labels that
-their release never wrote. This grants no execution authority under the new policy.
-The selected runtime stays protected, and unknown ownership/policy or unconfirmed
-removal stops preparation without a broader recipe or blind cleanup retry.
-
-Preparation runs `docker build` in the daemon, outside the four-dimensional case-worker
-envelope. The caller must reserve build CPU/memory capacity and daemon image/build-cache
-disk separately; a host coordinator process limit does not enclose Docker builders.
-Preparation enforces the stated 300-second build deadline, at most two build attempts,
-archive/output/image size bounds and retained-image quota. It does not claim a separate
-builder CPU, memory, process or scratch cgroup limit. The existing 1 MiB captured build
-output bound applies; daemon build-cache storage is not covered by the final-image quota.
+Each dependency has one retry owner: at most two retrievals per archive/preparation,
+reusing already verified bytes; hash/format/layout mismatch is terminal. Preparation
+has a 300-second attempt cap, 16 MiB archive cap and bounded runtime/controller storage.
+Atomic publication and cleanup preserve the prior valid runtime on failure. The
+[explicit upgrade path](execution-contract.md#explicit-rebuilds-after-runtime-upgrades)
+leaves old Docker artifacts untouched and ineligible. V1 to v2 requires explicit
+configuration/API changes and complete cache invalidation; `git-local` remains the
+capability string.
 
 ## Restricted local repository behavior
 
@@ -138,9 +90,9 @@ Git configuration live in scratch; system configuration is disabled. The profile
 local-file transport policy and an empty immutable template directory. Hooks are disabled
 by default and executable hooks/generated executable scratch programs are unsupported.
 Noexec is a mount execution restriction, not a claim that Python cannot interpret data.
-The existing base's shell may be used internally by Git's local transport; this does not
-qualify a general shell-script or Bash capability. External networking is prevented by
-Docker regardless of Git configuration. SSH/HTTP transports and external helpers are
+The proposed native loader and trusted Python entry scripts require no shell dispatch.
+They do not qualify a general shell-script or Bash capability. Scoped networking is
+disabled regardless of Git configuration. SSH/HTTP transports and external helpers are
 outside this profile even if a caller changes Git settings.
 
 Git object identity can depend on author/committer dates, identity, configuration and
@@ -156,78 +108,25 @@ remain limited to infrastructure failures, with fresh scratch and complete owned
 
 ## Cache, accounting and qualification
 
-Bind profile name/version, normalized required capabilities, package/source provenance,
-projection and closure hashes, controlled environment, platform, preparation recipe,
-actual image/rootfs identity and runner implementation to runtime/inventory/result
-identities. A result prepared under another profile is never eligible, including
-singleton groups. Case-v1/batch-v1 grouping and staged publication remain unchanged;
-Git does not create mutable sessions between workers. Profile/requirement changes key
-reuse even when selected case IDs happen to match. Config bytes retain conservative
-invalidation; invocation overrides have explicit normalized identity.
+Runtime identity binds profile, requirements, archive/native closure, launcher bytes,
+controlled environment, platform, preparation policy and frozen content. Case/group
+identity additionally binds actual scoped inputs, ordered membership, source lookup,
+backend and enforced resource policy. Case-v1/batch-v1 atomic staging remains unchanged;
+Git never creates mutable sessions between groups. Ordinary evidence is never reusable.
+[Schema 3](result-schema.md) keeps runtime's exact three fields separate from backend
+and execution identities; no host executable paths or arbitrary Git stderr enter results.
 
-The existing schema2 `execution.profile` continues to mean case-v1/batch-v1. Add a
-separate `runtime` object to plan/run results with exact fields `profile` (string),
-`required_capabilities` (sorted unique string list) and `identity` (null before backend
-validation, otherwise an opaque SHA256 of the validated immutable runtime identity).
-Static plans always have null identity. Do not overload the execution profile. Runtime
-preparation returns its existing image/recipe metadata plus the selected profile and
-verified provenance identity. Refusals retain the schema2 envelope and typed capability
-field; they do not pretend to contain a validated runtime identity.
-No paths to host executables, credentials or arbitrary Git stderr become public evidence.
+The loader/trampoline mechanism is UNPROVEN. Production controls must exercise every
+alias, local clone/fetch/push, merge/worktree operations, controlled faults/recovery,
+local child execution and Python `-I` alongside the separate Python closure. A failed
+executable-discovery boundary must return for review instead of widening mounts or
+substituting Git. Preparation controls include tampering, missing closure, bounded
+retrieval exhaustion, quotas and preservation of prior valid state.
 
-The foreground mechanism proof covers successful local operations, missing origins,
-lock/FETCH_HEAD obstructions and explicit recovery, read-only/undeclared-input denial,
-noexec scratch, blocked networking and exact-owned cleanup. It establishes mechanism,
-not production cache correctness. Subsequent installed-distribution qualification must
-cover default-profile preflight before tests/cache hits, archive tampering and bounded
-retrieval exhaustion, closure changes, both execution modes, atomic group/cache behavior,
-worker failure/cancellation/drain, supported host/worker corners and canonical package
-publication. Retain failures honestly and run one guarded complete gate before landing.
-
-
-## Recorded mechanism checkpoint
-
-On 2026-10-20, `scripts/probe_git.py` passed two independent restricted workers using
-the exact archive above. Both runs produced identical commit IDs and native-file hashes.
-The [proof manifest](https://github.com/xu-hao/pytest-telescope/blob/main/scripts/git_profile_proof.json)
-records the executable, loader and three shared-library hashes, exact base package
-versions and projection aliases. No additional library package was installed.
-
-The proof exercised owned author configuration, add/commit, branch/checkout, local
-remote/set-url, push/fetch/clone, merge and ancestor checks, revision/status queries and
-worktree add/remove. Four deliberate faults (missing origin, index lock, ref lock and
-FETCH_HEAD directory) returned nonzero; removing each owned fault restored the operation.
-Both workers denied project writes, lacked the undeclared source file, refused direct
-execution of a native binary copied into scratch, and had inspected Docker network mode
-`none`, loopback-only interfaces and no default route. A controlled bridge-mode worker
-had a non-loopback interface and a default route, distinguishing the network control
-from an unreachable test endpoint. The TEST-NET connection failure is only an ancillary
-observation, not the isolation evidence.
-The default base contained no Git. Exact owned containers and the proof image were
-removed and absence verified. An earlier proof-launch failure from a mode 0600 control
-script was retained separately; setting the control script explicitly 0444 corrected
-that preparation error. None of this substitutes for production preflight, cache,
-retrieval-exhaustion or installed-package qualification.
-
-
-## Qualification checkpoint
-
-The restricted mechanism proof exercised two fresh sessions with identical controlled
-Git object identities, all supported local repository operations and owned-fault repair.
-Network evidence includes inspected `NetworkMode=none`, loopback-only interfaces and
-no default route, plus a controlled bridge-mode negative check. An unreachable external
-address alone is not isolation evidence. The initial unreadable control-file preparation
-failure is retained separately from the corrected proof.
-
-Installed 0.1.0a4 candidate controls exercise case and batch execution, warm reuse without
-workers or preparation, explicit no-cache policies, requested-profile/capability refusal,
-metadata/source visibility, read-only identity inspection and actual sibling cancellation.
-The same local operation fixture also passes with a pinned pytest 8.3.5 worker. Native
-artifact controls cover malformed archives, missing projected files and missing closure
-files as terminal failures; network/build outages remain bounded retries. A real
-at-quota preparation failure leaves the oldest currently selected runtime usable.
-
-The complete release verdict is recorded with the
-[0.1.0a4 release](https://github.com/xu-hao/pytest-telescope/releases/tag/v0.1.0a4).
-These functional controls do not claim a universal speedup or qualify remote transports,
-executable scratch, host tools, browser/service dependencies or arbitrary Git hooks.
+Installed controls must additionally cover both execution modes, metadata/source
+visibility, warm reuse, no-cache policy, profile/capability refusal, inspection,
+cancellation, continuous descendant reaping, complete CPU accounting and exact cleanup.
+Only the bounded resource mechanism has passed
+[run 39503556501](https://github.com/xu-hao/pytest-telescope/actions/runs/39503556501).
+That proof does not qualify Git, runtimes or the complete backend gate. Bash, browsers,
+services, remote transports, executable hooks and executable scratch remain unsupported.

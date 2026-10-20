@@ -1,12 +1,12 @@
 # Optional identical-scope batches
 
-This is the execution contract for the optional 0.1.0a3 batching profile.
+This is the accepted scoped batching contract for the UNQUALIFIED replacement backend.
 The [scoped execution contract](scoped-execution.md)
 continues to own source, metadata, suite and resource boundaries.
 
 ## Choose fixture lifetime explicitly
 
-The default remains `case`: every selected case owns a fresh pytest session, restricted
+The scoped default remains `case`: every selected scoped case owns a fresh pytest session, restricted
 worker and private scratch. Opt into `batch` when ordinary pytest fixture sharing within
 an exactly equal scope is appropriate:
 
@@ -26,10 +26,15 @@ per-worker resource limits retain their current meanings: a batch occupies one w
 slot and has one worker's limits, regardless of member count. Parallelism never infers
 host CPU capacity. Batch mode never changes readable source or metadata permissions.
 
+Ordinary cases always use one fresh suite session, independently of this mode. Their
+fixture sharing is normal pytest behavior and never reusable scoped evidence. Mixed
+module imports may occur in ordinary context; independently restricted collection and
+checkpoint reconciliation remain required. See the [routing contract](bubblewrap.md).
+
 ## Exact scope and deterministic membership
 
-Partition selected cases by suite, source module, exactly equal effective readable file
-sets, declared absence, generated metadata visibility/identity, and cache policy. The
+Partition selected scoped cases by suite, source module, exactly equal effective readable file
+sets, declared absence, generated metadata visibility/identity, runtime/source-lookup settings, and cache policy. The
 frozen file identities include contents and supported modes. Equivalent declarations
 may share a batch only after expansion to exactly equal effective scopes; different
 scopes are never unioned. `cache=False` cases form separate noncacheable policy groups;
@@ -87,7 +92,7 @@ attempt supplies member results and worker measurements. Controller wall time sp
 attempts; `timing_complete` is false after retries or unavailable results, because worker
 CPU/time from an opaque failed attempt is unknown. These measurements are separate from
 member counts. Invalid worker output, collection drift, cancellation,
-failed descendant/container cleanup and outer lifecycle failure cannot mint successes.
+failed descendant/worker cleanup and outer lifecycle failure cannot mint successes.
 Cancellation stops new submissions and drains all owned active groups. Unstarted
 members remain explicitly accounted. No fallback widens runtime capabilities or source.
 
@@ -98,7 +103,7 @@ prevents publication of all new records, including other groups' successes.
 
 ## Machine accounting
 
-The public result schema becomes **2** for both execution modes and typed refusals.
+The public result schema is **3** for both execution modes and typed refusals.
 Existing inventory/case digest rules and count spellings remain unchanged. The
 [run result reference](result-schema.md) remains the authority for those fields.
 
@@ -111,32 +116,35 @@ if planning was interrupted before completion. A group row contains:
 | Field | Meaning |
 | --- | --- |
 | `group_id` | Opaque lowercase SHA-256 identity bound to the exact execution context above. |
-| `suite`, `file` | Public structural membership. |
+| `suite`, `files`, `route`, `profile` | Structural membership; scoped groups have one file and case-v1/batch-v1. Ordinary groups can span files and use ordinary-v1. |
 | `case_ids` | Ordered selected opaque member identities. |
 | `outcome` | `executed`, `reused`, `failed`, `incomplete`, or `infrastructure_error`. |
 | `complete` | Every requested member produced a validated final teardown outcome. |
-| `cache_eligible` | Complete successful evidence accepted after lifecycle and enabled reuse policy; false for `--no-cache` or `cache=False`. |
+| `cache_eligible` | Complete successful evidence accepted after lifecycle and enabled reuse policy; always false for ordinary groups, and false for scoped `--no-cache` or `cache=False`. |
 | `attempts` | Worker attempts for this group; zero on reuse or before worker start. |
 | `attempt_seconds` | Controller wall time across group attempts and retries. |
-| `worker_seconds`, `cpu_seconds` | Final valid attempt worker measurements, counted once; zero on reuse or when unavailable. |
+| `worker_seconds`, `cpu_seconds` | Final valid attempt worker measurements, counted once; zero on reuse, null when unavailable. |
 | `timing_complete` | False when retries or unavailable worker measurements prevent complete timing accounting. |
 | `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Final-attempt member totals; distinguish known unrun members from attempted members without a valid result. |
 
 Each case row adds `group_id`, `result_status` (`passed`, `failed`, `skipped`, `not-run`,
 or `null` for unselected/unresolved infrastructure), and `complete`. Case `attempts`
-reports its group's attempt count; do not sum member attempts to count workers. In batch
+reports its group's attempt count; do not sum member attempts to count workers. For ordinary cases and scoped batch
 mode every case row, including unselected and unresolved members, has `worker_seconds`
 and `cpu_seconds` set to `null`: shared fixture and worker costs
-cannot honestly be attributed to individual cases. Case mode retains singleton timings.
+cannot honestly be attributed to individual cases. Scoped case mode retains singleton timings.
 Group `failures` retains bounded phase/location/type/opaque-ID evidence, including
 collection errors whose IDs do not identify a requested member. A nonzero pytest
 session verdict fails the group/run even if every member report passed; those observed
 passes do not become reusable evidence. See the result reference for the preserved
 case-profile collection-failure verdict and separate not-run member counts.
 
-Group timings are the authority for execution totals and `worker_cpu_seconds` counts each
-group once plus collection. Per-worker limits and aggregate concurrency remain in
-`resources` and apply equally to either profile.
+Group timings count each session once. `worker_cpu_seconds` is null when any actual
+session CPU is unknown; `known_scoped_cpu_seconds` is only the known scoped subtotal.
+Ordinary group CPU is null and ordinary collection references its session group instead
+of double counting timing. Per-worker limits and aggregate concurrency remain in
+`resources` and apply equally to both scoped profiles. Ordinary execution inherits host
+limits and has no scoped enforcement claim.
 
 Case `outcome` keeps the existing vocabulary. Observed passed/skipped members are
 `executed` even in a failed/incomplete group; observed failures are `failed`; missing
@@ -148,7 +156,7 @@ uses `"cancelled"`, and complete groups use `null`. A pytest-stop run reports st
 members together and preserves their passed/skipped statuses. Group `cache_eligible`
 distinguishes observed results from reusable evidence. Complete inventory does not imply
 complete execution. A refusal or incomplete inventory never proves no earlier member
-ran; choose ordinary execution through structural/preflight routing before a run.
+ran; never replay a started scoped run on an ordinary fallback.
 
 If a worker attempt supplies no valid result, its members may already have executed:
 `unresolved` counts those members, `not_run` is zero, and their `result_status` is null.
@@ -162,18 +170,17 @@ summaries. Explicit caller selector expressions still reach isolated workers unc
 The existing bounded inventories, output and cache storage remain bounded; groups are
 limited by the same 100,000-case invocation bound and validated serialized record limits.
 
-## Decisive proof and qualification
+## Qualification still required
 
-The synthetic installed-runtime Docker proof in `scripts/probe_batching.py` checks
-ordinary shared session/module/class setup and teardown, distinct function `tmp_path`,
-shared scratch, denied undeclared reads, equal-scope eligibility, unequal-scope separation,
-and honest partial execution for `-x`/`--maxfail` and shared teardown failure. It proves
-pytest/runtime mechanisms, not production cache correctness.
+The replacement must prove shared session/module/class setup and teardown, distinct
+function `tmp_path`, private shared scratch, denied undeclared reads, equal-scope
+eligibility, unequal-scope separation, honest partial `-x`/`--maxfail` execution and
+shared teardown failure. Historical Docker proofs do not qualify Bubblewrap sessions.
 
-Production behavioral controls additionally cover suite/module/context boundaries,
-selection/membership/order and all source/resource/metadata/runtime invalidation,
-partial/corrupt records, noncacheable groups, bounded retries, cancellation and cleanup.
-Qualification uses installed distributions and real restricted Docker execution, followed
-by proportionate Python/pytest matrix coverage and ordinary/cold/warm/selective timings
-at the same synthetic scale as the retained 128-case per-case trial. Report overhead and
-fixture-lifetime tradeoffs without universal speedup claims.
+Installed production controls additionally cover suite/module/context boundaries,
+selection/order, source/metadata/runtime/resource invalidation, partial/corrupt records,
+noncacheable groups, bounded retries, cancellation and exact cleanup. Runtime/root and
+capabilities remain UNQUALIFIED until these native controls and the complete gate pass.
+Fresh benchmarks must compare identical sessions/scopes/budgets at 1/2/4 workers and
+include per-run preparation verification/materialization/cleanup costs. Shared fixture
+startup savings are not pure sandbox overhead or a universal speedup claim.
