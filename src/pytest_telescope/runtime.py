@@ -389,11 +389,22 @@ def worker_source():
     return _read(Path(__file__).with_name("worker.py"), 131072)
 
 
-def _image_info(image, project, recipe=None):
+def _inspect_owned_image(image, project, *, attempts=1):
     if type(image) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
         raise InfrastructureError("runtime did not return an immutable image ID")
+    # Only the cleanup caller requests a second read. Current-runtime inspection
+    # retains its existing outer retry owner, and validation failures never retry.
+    for attempt in range(attempts):
+        try:
+            output = command(["docker", "image", "inspect", image])
+            break
+        except CleanupError:
+            raise
+        except InfrastructureError:
+            if attempt + 1 == attempts:
+                raise
     try:
-        response = json.loads(command(["docker", "image", "inspect", image]))
+        response = json.loads(output)
     except (ValueError, UnicodeError) as exc:
         raise InfrastructureError("runtime image inspection returned invalid JSON") from exc
     if type(response) is not list or len(response) != 1 or type(response[0]) is not dict:
@@ -406,12 +417,48 @@ def _image_info(image, project, recipe=None):
     if (
         info.get("Id") != image
         or labels.get(LABEL + "project") != project
-        or labels.get(LABEL + "policy") != POLICY
-        or (recipe is not None and labels.get(LABEL + "recipe") != recipe)
         or type(info.get("Size")) is not int
         or info["Size"] < 0
     ):
         raise InfrastructureError("runtime image ownership or identity mismatch")
+    return info
+
+
+def _image_info(image, project, recipe=None):
+    """Qualify only the current execution policy; historical ownership is insufficient."""
+    info = _inspect_owned_image(image, project)
+    labels = info["Config"]["Labels"]
+    if labels.get(LABEL + "policy") != POLICY or (
+        recipe is not None and labels.get(LABEL + "recipe") != recipe
+    ):
+        raise InfrastructureError("runtime image ownership or identity mismatch")
+    return info
+
+
+def _retained_image_info(image, project):
+    """Inspect registered historical ownership for cleanup, never for execution."""
+    info = _inspect_owned_image(image, project, attempts=2)
+    labels = info["Config"]["Labels"]
+    policy = labels.get(LABEL + "policy")
+    recipe = labels.get(LABEL + "recipe")
+    if (
+        type(policy) is not str
+        or policy not in {"docker-nonroot-ro-none-v2", "docker-nonroot-ro-none-v3", POLICY}
+        or type(recipe) is not str
+        or not re.fullmatch(r"[0-9a-f]{64}", recipe)
+    ):
+        raise InfrastructureError("retained runtime image policy or recipe is unrecognized")
+    if policy == POLICY:
+        provenance = labels.get(LABEL + "provenance")
+        profile = labels.get(LABEL + "profile")
+        if (
+            type(profile) is not str
+            or profile not in {runtime_profiles.DEFAULT, runtime_profiles.GIT}
+            or type(provenance) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", provenance)
+            or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
+        ):
+            raise InfrastructureError("retained runtime image provenance is invalid")
     return info
 
 
@@ -466,7 +513,15 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
             images = json.loads(_read(state / "images.json", 8192))
         except FileNotFoundError:
             images = []
-        if type(images) is not list or len(images) > MAX_IMAGES:
+        if (
+            type(images) is not list
+            or len(images) > MAX_IMAGES
+            or any(
+                type(image) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", image)
+                for image in images
+            )
+            or len(set(images)) != len(images)
+        ):
             raise InfrastructureError("runtime image registry is invalid")
         # Protect the currently selected image even when it is the oldest entry.
         try:
@@ -479,8 +534,13 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
             if not candidates:
                 raise InfrastructureError("runtime image quota cannot preserve current preparation")
             old = candidates[0]
-            _image_info(old, project)
-            command(["docker", "image", "rm", old], timeout=30)
+            _retained_image_info(old, project)
+            try:
+                command(["docker", "image", "rm", old], timeout=30)
+            except InfrastructureError as exc:
+                raise CleanupError(
+                    "retained runtime image removal unconfirmed; preparation stopped"
+                ) from exc
             images.remove(old)
             _durable(state / "images.json", images)
         verified_archive = None

@@ -110,6 +110,7 @@ def preparation(tmp_path, monkeypatch):
         }
 
     monkeypatch.setattr(runtime, "_image_info", image_info)
+    monkeypatch.setattr(runtime, "_retained_image_info", image_info)
 
     @contextmanager
     def invocation(root):
