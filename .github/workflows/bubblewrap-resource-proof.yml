@@ -60,7 +60,7 @@ jobs:
           sudo systemctl start "user@$(id -u).service"
           systemctl show "user@$(id -u).service" -p Delegate -p ControlGroup -p ActiveState
           systemd --version
-      - name: Run bounded ordinary-user resource proof
+      - name: Observe resource ownership without launching workers
         shell: bash
         run: |
           set -euo pipefail
@@ -69,7 +69,7 @@ jobs:
           systemctl --user is-active default.target
           "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -B scripts/probe_bubblewrap_resources.py \
             --output "$RUNNER_TEMP/telescope-resource-proof" \
-            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --run-id "$GITHUB_RUN_ID"
+            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --run-id "$GITHUB_RUN_ID" --diagnostic-only
       - name: Retain narrow namespace failure audit
         if: failure()
         shell: bash

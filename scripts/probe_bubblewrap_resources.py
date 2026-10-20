@@ -311,15 +311,18 @@ def controller(config):
     print(json.dumps(report))
 
 
-def unit_state(name):
+def unit_state(name, *, detail=False):
+    fields = {"LoadState", "ActiveState", "ControlGroup"}
+    if detail:
+        fields |= {"FragmentPath", "DropInPaths", "Transient"}
     result = subprocess.run(
-        ["systemctl", "--user", "show", name, "--property=LoadState,ActiveState,ControlGroup"],
+        ["systemctl", "--user", "show", name, "--property=" + ",".join(sorted(fields))],
         text=True,
         capture_output=True,
         timeout=15,
     )
     values = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-    if set(values) != {"LoadState", "ActiveState", "ControlGroup"}:
+    if set(values) != fields:
         raise RuntimeError("owned unit state unavailable: " + result.stderr)
     if result.returncode and values["LoadState"] != "not-found":
         raise RuntimeError("owned unit state query failed: " + result.stderr)
@@ -327,6 +330,8 @@ def unit_state(name):
         assert values["ActiveState"] == "inactive" and not values["ControlGroup"], values
     elif values["LoadState"] != "loaded":
         raise RuntimeError("unexpected owned unit load state")
+    if detail and values["Transient"] not in {"yes", "no"}:
+        raise RuntimeError("unexpected unit transient state")
     return values
 
 
@@ -391,6 +396,35 @@ def cleanup(config):
         raise RuntimeError("owned cleanup evidence incomplete")
 
 
+def ownership_preflight(run_id):
+    prefix = "telescope52" + run_id
+    directory = Path(os.environ["XDG_RUNTIME_DIR"]) / "systemd/user"
+    observations = []
+    for name in [
+        prefix + ".slice",
+        prefix + "-workers.slice",
+        prefix + "controller.service",
+        prefix + "A.service",
+        prefix + "B.service",
+    ]:
+        path = directory / name
+        row = dict(
+            name=name,
+            path=str(path),
+            path_exists=path.exists(),
+            path_is_symlink=path.is_symlink(),
+            manager=unit_state(name, detail=True),
+        )
+        observations.append(row)
+        print(json.dumps(dict(ownership_observation=row)), flush=True)
+    # Preserve the original predicate until actual manager state has been reviewed.
+    if any(
+        row["path_exists"] or row["path_is_symlink"] or row["manager"]["LoadState"] != "not-found"
+        for row in observations
+    ):
+        raise RuntimeError("proof resource name already owned")
+
+
 def launch(args):
     prefix = "telescope52" + args.run_id
     config = dict(
@@ -400,18 +434,9 @@ def launch(args):
         worker_slice=prefix + "-workers.slice",
     )
     directory = Path(os.environ["XDG_RUNTIME_DIR"]) / "systemd/user"
+    ownership_preflight(args.run_id)
     directory.mkdir(parents=True, exist_ok=True)
     files = []
-    for name in [
-        prefix + ".slice",
-        config["worker_slice"],
-        prefix + "controller.service",
-        prefix + "A.service",
-        prefix + "B.service",
-    ]:
-        path = directory / name
-        if path.exists() or path.is_symlink() or unit_state(name)["LoadState"] != "not-found":
-            raise RuntimeError("proof resource name already owned")
     config_path = args.output.with_suffix(".launch.json")
     config_path.write_text(json.dumps(config))
     controller_name = prefix + "controller.service"
@@ -496,8 +521,11 @@ def main():
     parser.add_argument("--unit")
     parser.add_argument("--controller", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
+    parser.add_argument("--diagnostic-only", action="store_true")
     args = parser.parse_args()
-    if args.cleanup:
+    if args.diagnostic_only:
+        ownership_preflight(args.run_id)
+    elif args.cleanup:
         cleanup(json.loads(args.config.read_text()))
     elif args.unit:
         unit(json.loads(args.config.read_text()), args.unit)
