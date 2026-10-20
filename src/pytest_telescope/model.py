@@ -6,17 +6,22 @@ import hashlib
 import io
 import json
 import os
-import shlex
 import stat
 import tomllib
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 from pathlib import Path
 
 
 class DeclarationError(ValueError):
     pass
+
+
+class UnsupportedCapability(DeclarationError):
+    def __init__(self, capability, message):
+        super().__init__(message)
+        self.capability = capability
 
 
 class InfrastructureError(RuntimeError):
@@ -45,6 +50,7 @@ class Unit:
     inputs: list[str]
     absent: list[str]
     cache: bool
+    distributions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -60,6 +66,9 @@ class Manifest:
     defaults: Unit
     broad_inputs: list[str]
     source_hashes: dict[str, str]
+    suites: list = field(default_factory=list)
+    distributions: dict = field(default_factory=dict)
+    execution: dict = field(default_factory=dict)
 
     @cached_property
     def registry_by_id(self):
@@ -150,6 +159,20 @@ def excluded_path(name, excluded=()):
     )
 
 
+def excluded_namespace(root, name, excluded=()):
+    """Apply the same environment boundary to explicit and discovered inputs."""
+    if excluded_path(name, excluded):
+        return True
+    parts = Path(name).parts
+    for depth in range(1, len(parts) + 1):
+        directory = Path(*parts[:depth])
+        config = directory / "pyvenv.cfg"
+        if os.path.lexists(root / config):
+            regular_bytes(root, config.as_posix(), 65536)
+            return True
+    return False
+
+
 def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), budget=None):
     pending = [start]
     if budget is None:
@@ -194,7 +217,7 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
         budget = [0]
     for name in sequence(names, label):
         name = relative(name)
-        if excluded_path(name, excluded):
+        if excluded_namespace(root, name, excluded):
             raise DeclarationError("metadata, cache and host environments are not project inputs")
         if name == ".":
             raise DeclarationError("declare project subdirectories or files, not the checkout root")
@@ -241,11 +264,15 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
                     for parent in selected.parents
                     if parent != root and parent.is_relative_to(root)
                 ):
-                    raise DeclarationError("symlink directories are unsupported")
+                    raise UnsupportedCapability(
+                        "project:links", "symlink directories are unsupported"
+                    )
                 if selected.is_symlink() and Path(os.readlink(selected)).is_absolute():
                     raise DeclarationError("leaf symlinks must use relative targets")
                 if selected.is_symlink() and selected.is_dir():
-                    raise DeclarationError("symlink directories are unsupported")
+                    raise UnsupportedCapability(
+                        "project:links", "symlink directories are unsupported"
+                    )
                 if not (selected.is_file() or selected.is_dir() or selected.is_symlink()):
                     raise DeclarationError(
                         "inputs must be regular files, directories, or leaf symlinks"
@@ -261,7 +288,7 @@ def _with_first(first, rest):
     yield from rest
 
 
-def load(root, *, cache_dir=None):
+def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
@@ -284,7 +311,11 @@ def load(root, *, cache_dir=None):
         raise DeclarationError(
             "central targets are unsupported; migrate inputs to literal pytest.mark.telescope markers"
         )
-    mapping(spec, "pytest_telescope", {"defaults", "bundles", "test_roots", "env"})
+    mapping(
+        spec,
+        "pytest_telescope",
+        {"defaults", "bundles", "test_roots", "env", "suites", "distributions", "execution"},
+    )
     bundles = mapping(spec.get("bundles", {}), "bundles")
     if len(bundles) > 256 or any(not name or len(name) > 128 for name in bundles):
         raise DeclarationError("declare at most 256 bundles with names of 1 to 128 characters")
@@ -300,19 +331,68 @@ def load(root, *, cache_dir=None):
             )
         return expansions[key]
 
+    from .execution import envelope
+    from .execution import suites as parse_suites
+    from .project_metadata import load_distributions
+
+    configured_suites = parse_suites(root, spec, suite_names)
+    overrides = mapping({} if structural_files is None else structural_files, "structural_files")
+    if set(overrides) - {suite.name for suite in configured_suites}:
+        raise DeclarationError("structural_files keys must name selected configured suites")
+    for suite in configured_suites:
+        if suite.name not in overrides:
+            continue
+        names = sequence(overrides[suite.name], "structural_files")
+        if len(names) != len(set(names)):
+            raise DeclarationError("structural_files cannot contain duplicate paths")
+        for name in names:
+            if (
+                relative(name) != name
+                or not name.endswith(".py")
+                or len(name.encode()) > 4096
+                or any(ord(char) < 32 for char in name)
+                or excluded_namespace(root, name, excluded)
+            ):
+                raise DeclarationError(
+                    "structural_files requires canonical project-relative Python test files"
+                )
+            try:
+                with parent_fd(root, name) as (directory, leaf):
+                    metadata = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+                    if not stat.S_ISREG(metadata.st_mode):
+                        raise DeclarationError(
+                            "structural_files requires regular files without symlinks"
+                        )
+            except OSError as exc:
+                raise DeclarationError(
+                    "structural_files requires existing regular files without symlink ancestors"
+                ) from exc
+        suite.structural_files = sorted(names)
+    execution = spec.get("execution", {})
+    envelope(execution)
+    distributions = load_distributions(root, spec.get("distributions", {}), expanded)
+
     def declaration(item, label):
-        item = mapping(item, label, {"inputs", "bundles", "absent", "cache"})
+        item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions"})
         inputs = set(expanded(item.get("inputs", []), label + " inputs"))
         absent = set(expanded(item.get("absent", []), label + " absence", missing=True))
+        metadata = set(sequence(item.get("distributions", []), "distributions"))
+        if metadata - distributions.keys():
+            raise DeclarationError("unknown local distribution")
         for dependency in sequence(item.get("bundles", []), "bundle references"):
             child = bundle(dependency)
             inputs.update(child.inputs)
             absent.update(child.absent)
+            metadata.update(child.distributions)
+        for name in metadata:
+            inputs.update(distributions[name].inputs)
         if type(item.get("cache", True)) is not bool:
             raise DeclarationError("cache must be a boolean")
         if len(inputs) + len(absent) > 100_000:
             raise DeclarationError("effective declaration exceeds 100000 paths")
-        return Unit(label, [], sorted(inputs), sorted(absent), item.get("cache", True))
+        return Unit(
+            label, [], sorted(inputs), sorted(absent), item.get("cache", True), sorted(metadata)
+        )
 
     def bundle(name):
         if name not in bundles:
@@ -323,7 +403,7 @@ def load(root, *, cache_dir=None):
             raise DeclarationError("bundle nesting exceeds 32 levels")
         if name not in resolved:
             active.add(name)
-            mapping(bundles[name], "bundle", {"inputs", "bundles", "absent"})
+            mapping(bundles[name], "bundle", {"inputs", "bundles", "absent", "distributions"})
             resolved[name] = declaration(bundles[name], "bundle " + name)
             depth = 1 + max((depths[dep] for dep in bundles[name].get("bundles", [])), default=0)
             if depth > 32:
@@ -335,40 +415,51 @@ def load(root, *, cache_dir=None):
     for name in bundles:
         bundle(name)
     defaults = declaration(spec.get("defaults", {}), "defaults")
-    for name in ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg"):
-        if os.path.lexists(root / name):
-            raise DeclarationError(
-                "move pytest configuration into pyproject.toml; other pytest config files are unsupported"
-            )
-    pytest_config = mapping(
-        mapping(tool.get("pytest", {}), "tool.pytest").get("ini_options", {}), "pytest ini_options"
-    )
-    addopts = pytest_config.get("addopts", [])
-    if isinstance(addopts, str):
-        try:
-            addopts = shlex.split(addopts)
-        except ValueError as exc:
-            raise DeclarationError("invalid pytest addopts quoting") from exc
-    addopts = sequence(addopts, "pytest addopts")
-    patterns = pytest_config.get("python_files", ["test_*.py", "*_test.py"])
-    if isinstance(patterns, str):
-        patterns = patterns.split()
-    patterns = sequence(patterns, "python_files")
     inventory = set()
-    for name in sequence(spec.get("test_roots", ["."]), "test_roots"):
-        path = root / relative(name)
-        if not path.is_dir() or not path.resolve().is_relative_to(root) or path.is_symlink():
-            raise DeclarationError("test_roots must name existing project directories")
-        for candidate in walk_bounded(root, path, excluded=excluded, budget=budget):
-            if candidate.is_dir():
-                continue
-            if any(fnmatch.fnmatchcase(candidate.name, pattern) for pattern in patterns):
+    for suite in configured_suites:
+        members = set()
+        for name in suite.test_roots:
+            if excluded_namespace(root, name, excluded):
+                raise DeclarationError("test_roots cannot expose excluded namespaces")
+            path = root / name
+            if not path.exists() or not path.resolve().is_relative_to(root) or path.is_symlink():
+                raise DeclarationError("test_roots require existing project files or directories")
+            candidates = (
+                walk_bounded(root, path, excluded=excluded, budget=budget)
+                if path.is_dir()
+                else [path]
+            )
+            for candidate in candidates:
+                if candidate.is_dir():
+                    continue
+                filename = candidate.relative_to(root).as_posix()
+                if not any(glob_match(filename, pattern) for pattern in suite.include) or any(
+                    glob_match(filename, pattern) for pattern in suite.exclude
+                ):
+                    continue
+                if not any(
+                    fnmatch.fnmatchcase(candidate.name, pattern) for pattern in suite.patterns
+                ):
+                    continue
                 if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
                     raise DeclarationError("test source must be a regular project file")
-                inventory.add(candidate.relative_to(root).as_posix())
-                if len(inventory) > 100_000:
+                members.add(filename)
+                if len(members) > 100_000:
                     raise DeclarationError("test inventory exceeds 100000 files")
+        if suite.structural_files is not None:
+            if set(suite.structural_files) - members:
+                raise DeclarationError("structural_files cannot widen configured suite membership")
+            members = set(suite.structural_files)
+        suite.inventory = sorted(members)
+        inventory.update(members)
+        if len(inventory) > 100_000:
+            raise DeclarationError("test inventory exceeds 100000 files")
+    addopts = [*configured_suites[0].config_args, *configured_suites[0].args]
     registry, declarations, hashes = [], {}, {"pyproject.toml": hashlib.sha256(raw).hexdigest()}
+    for suite in configured_suites:
+        hashes[suite.config] = hashlib.sha256(suite.raw).hexdigest()
+    for distribution in distributions.values():
+        hashes.update(distribution.source_hashes)
     total_bytes = total_nodes = 0
     broad_possible = False
     for filename in sorted(inventory):
@@ -388,22 +479,48 @@ def load(root, *, cache_dir=None):
         if not any(
             row["kind"] == "scope"
             and not row["owner"]
-            and {"inputs", "bundles"}.intersection(row["kwargs"])
+            and {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
             for row in found
         ):
             broad_possible = True
         for row in found:
             declarations[row["id"]] = declaration(row["kwargs"], row["id"])
     broad = project_paths(root, excluded=excluded, budget=budget) if broad_possible else []
-    inputs = set(broad) | set(inventory) | {"pyproject.toml"} | set(defaults.inputs)
-    absent = set(defaults.absent)
-    cache = defaults.cache
-    for unit in declarations.values():
-        inputs.update(unit.inputs)
-        absent.update(unit.absent)
-        cache = cache and unit.cache
-    collection = Unit("collection", sorted(inventory), sorted(inputs), sorted(absent), cache)
-    validate_scope(root, collection)
+    collections = []
+    for suite in configured_suites:
+        suite_rows = [row for row in registry if row["file"] in suite.inventory]
+        suite_broad = any(
+            not any(
+                row["kind"] == "scope"
+                and not row["owner"]
+                and {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
+                for row in suite_rows
+                if row["file"] == filename
+            )
+            for filename in suite.inventory
+        )
+        inputs = (
+            set(broad if suite_broad else [])
+            | set(suite.inventory)
+            | {"pyproject.toml", suite.config}
+            | set(defaults.inputs)
+        )
+        absent, metadata, cache = set(defaults.absent), set(defaults.distributions), defaults.cache
+        if suite_broad:
+            metadata.update(distributions)
+        for row in suite_rows:
+            unit = declarations[row["id"]]
+            inputs.update(unit.inputs)
+            absent.update(unit.absent)
+            metadata.update(unit.distributions)
+            cache = cache and unit.cache
+        for name in metadata:
+            inputs.update(distributions[name].inputs)
+        collection = Unit(
+            suite.name, suite.inventory, sorted(inputs), sorted(absent), cache, sorted(metadata)
+        )
+        validate_scope(root, collection)
+        collections.append(collection)
     env = sequence(spec.get("env", []), "env")
     forbidden = {
         "PYTHONPATH",
@@ -422,7 +539,7 @@ def load(root, *, cache_dir=None):
     return Manifest(
         root,
         raw,
-        [collection],
+        collections,
         sorted(set(env)),
         sorted(inventory),
         addopts,
@@ -431,6 +548,9 @@ def load(root, *, cache_dir=None):
         defaults,
         broad,
         hashes,
+        configured_suites,
+        distributions,
+        execution,
     )
 
 
@@ -453,7 +573,7 @@ def validate_scope(root, unit):
                 )
 
 
-def case_unit(manifest, item):
+def case_unit(manifest, item, suite=None):
     origins = item["origins"]
     registry = manifest.registry_by_id
     if any(
@@ -461,25 +581,35 @@ def case_unit(manifest, item):
     ):
         raise InfrastructureError("collected marker origin disagrees with static declarations")
     narrow = any(
-        {"inputs", "bundles"}.intersection(registry[origin]["kwargs"]) for origin in origins
+        {"inputs", "bundles", "distributions"}.intersection(registry[origin]["kwargs"])
+        for origin in origins
     )
     if not narrow and not manifest.broad_inputs:
         raise DeclarationError("collected item invalidates the module's declared narrow scope")
     inputs = set(manifest.defaults.inputs) | {item["file"], "pyproject.toml"}
+    if suite is not None:
+        inputs.add(suite.config)
+    metadata = set(manifest.defaults.distributions)
     absent = set(manifest.defaults.absent)
     cache = manifest.defaults.cache
     for origin in origins:
         declaration = manifest.declarations[origin]
         inputs.update(declaration.inputs)
         absent.update(declaration.absent)
+        metadata.update(declaration.distributions)
         cache = cache and declaration.cache
+    if not narrow:
+        metadata.update(manifest.distributions)
+    for name in metadata:
+        inputs.update(manifest.distributions[name].inputs)
     effective_inputs = sorted(inputs) if narrow else manifest.broad_inputs
     unit = Unit(
-        hashlib.sha256(item["nodeid"].encode()).hexdigest(),
+        item["case_id"],
         [item["file"]],
         effective_inputs,
         sorted(absent),
         cache,
+        sorted(metadata),
     )
     if narrow:
         validate_scope(manifest.root, unit)
@@ -495,7 +625,9 @@ def project_paths(root, *, excluded=(), budget=None):
                 or Path(os.readlink(path)).is_absolute()
                 or not path.resolve().is_relative_to(root)
             ):
-                raise DeclarationError("broad project scope contains an unsupported symlink")
+                raise UnsupportedCapability(
+                    "project:links", "broad project scope contains an unsupported symlink"
+                )
         elif not path.is_file() and not path.is_dir():
             raise DeclarationError("broad project scope contains a special file")
         paths.append(path.relative_to(root).as_posix())

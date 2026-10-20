@@ -1,5 +1,6 @@
 """Corrupt records and controller boundaries must fail closed."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -166,6 +167,9 @@ def test_unavailable_backend_reports_unknown_inventory_after_bounded_retry(tmp_p
     assert report["units"] == []
     assert report["collection"]["outcome"] == "infrastructure_error"
     assert report["collection"]["reason"] == "backend unavailable"
+    assert report["inventory_complete"] is False
+    assert report["inventory_digest"] is None
+    assert report["collection"]["suites"][0]["files"] == ["test_first.py", "test_second.py"]
 
 
 def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path, monkeypatch):
@@ -189,14 +193,15 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path,
             raise controller.runtime.CleanupError("frozen pool cleanup failed")
 
     item = {
-        "nodeid": "test_unit.py::test_unit",
+        "case_id": "a" * 64,
         "file": "test_unit.py",
         "origins": [],
-        "aliases": ["test_unit.py", "test_unit.py::test_unit"],
+        "aliases": sorted(["a" * 64, hashlib.sha256(b"test_unit.py").hexdigest()]),
         "selected": True,
+        "order": 0,
     }
     collected = {
-        "protocol": 2,
+        "protocol": 4,
         "kind": "collection",
         "nonce": "b" * 32,
         "exit_code": 0,
@@ -221,8 +226,11 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path,
     )
     monkeypatch.setattr(controller.runtime, "invocation", invocation)
     monkeypatch.setattr(controller.runtime, "execute", execute)
-    with pytest.raises(controller.runtime.CleanupError, match="frozen pool"):
-        controller.run(tmp_path)
+    report = controller.run(tmp_path)
+    assert report["status"] == "infrastructure_error"
+    assert report["inventory_complete"] is True
+    assert len(report["units"]) == 1
+    assert "frozen pool" in report["collection"]["reason"]
     assert calls == ["collection", "execution"]
     cache = tmp_path / ".pytest-telescope" / "cache"
     assert not list(cache.glob("*.json"))

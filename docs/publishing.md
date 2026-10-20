@@ -26,23 +26,23 @@ label the version published merely because the trigger was accepted.
 
 ## PyPI
 
-The initial version is `0.1.0a1`. Its release must provide the complete isolated
+Version `0.1.0a3` extends the per-case interface introduced in `0.1.0a2`; the original
+`0.1.0a1` release used file/group declarations. Every release must provide its complete
 execution and result-reuse contract, including real backend qualification and measured
-benchmark results; a planner-only build is not a release candidate. No package release
+benchmark results. No package release
 is implied by a source merge. The `publish.yml` workflow runs only when a GitHub Release
 is published. It requires a tag of `v` followed by the exact package version, and it
 refuses publication until a license is recorded in package metadata and a `LICENSE` file
 exists.
 
-Before the first release:
+Before each release:
 
 1. Verify the MIT license text, package metadata, README rendering, source, wheel,
    sdist, and qualification results.
 2. Retain the GitHub `pypi` environment's release-tag restrictions. This project's
    release policy has no required-reviewer gate.
-3. Configure the encrypted GitHub secret `PYPI_API_TOKEN` with a token authorized
-   to publish `pytest-telescope`. The project name must be available to that PyPI
-   account. Never put the credential in source, build artifacts, or logs.
+3. Use the configured encrypted GitHub secret `PYPI_API_TOKEN` authorized to publish
+   `pytest-telescope`. Never put credentials in source, build artifacts, or logs.
 4. Publish the intended GitHub Release with the exact version tag and describe
    the supported guarantees and limits. Verify the uploaded version and files.
 

@@ -105,7 +105,13 @@ def project(tmp_path):
 
 
 def assert_outcomes(summary, *, executed=0, reused=0, failed=0, unselected=0):
-    assert summary["counts"] == {
+    assert summary["counts"]["selected"] == executed + reused + failed
+    assert summary["counts"]["unsupported"] == 0
+    assert {
+        key: value
+        for key, value in summary["counts"].items()
+        if key not in {"selected", "unsupported"}
+    } == {
         "executed": executed,
         "reused": reused,
         "failed": failed,
@@ -522,7 +528,8 @@ def test_cache_is_not_an_input():
     assert_outcomes(project.run(*args), reused=1)
 
 
-def test_a_narrow_case_cannot_borrow_another_cases_collection_input(project):
+@pytest.mark.parametrize("execution_mode", ["case", "batch"])
+def test_a_narrow_case_cannot_borrow_another_cases_collection_input(project, execution_mode):
     project.prepare(
         {
             "tests/test_subject.py": """
@@ -539,13 +546,30 @@ def test_other(): pass
             "collection.txt": "shared",
         }
     )
-    summary = project.run(expected=1)
-    assert_outcomes(summary, executed=1, failed=1)
-    assert any(
-        failure["phase"] == "collect"
-        for unit in summary["units"]
-        for failure in unit.get("failures", [])
-    )
+    summary = project.run("--execution-mode", execution_mode, expected=1)
+    if execution_mode == "case":
+        assert_outcomes(summary, executed=1, failed=1)
+        assert any(
+            failure["phase"] == "collect"
+            for unit in summary["units"]
+            for failure in unit["failures"]
+        )
+    else:
+        assert summary["counts"]["executed"] == 1
+        assert summary["counts"]["infrastructure_error"] == 1
+        assert summary["counts"]["selected"] == 2
+    group = next(group for group in summary["groups"] if group["stop_reason"] == "collection")
+    assert group["not_run"] == 1 and group["unresolved"] == 0
+    assert group["passed"] == group["failed"] == group["skipped"] == 0
+    assert not group["complete"] and not group["cache_eligible"]
+    assert any(failure["phase"] == "collect" for failure in group["failures"])
+    member = next(row for row in summary["units"] if row["group_id"] == group["group_id"])
+    assert member["result_status"] == "not-run" and not member["complete"]
+    assert member["passed"] == member["failed"] == member["skipped"] == 0
+    for group in summary["groups"]:
+        assert sum(
+            group[name] for name in ("passed", "failed", "skipped", "not_run", "unresolved")
+        ) == len(group["case_ids"])
 
 
 def test_class_parametrization_carries_literal_parameter_declarations(project):
@@ -605,3 +629,22 @@ def pytest_collection_finish(session):
         }
     )
     assert project.run(expected=4)["status"] == "declaration_error"
+
+
+@pytest.mark.parametrize("execution_mode", ["case", "batch"])
+def test_nonzero_session_verdict_cannot_become_successful_member_evidence(project, execution_mode):
+    project.prepare(
+        {
+            "conftest.py": "def pytest_sessionfinish(session):\n    if not session.config.option.collectonly: session.exitstatus = 1\n",
+            "tests/test_subject.py": "import pytest\npytestmark=pytest.mark.telescope(inputs=['conftest.py'])\ndef test_one(): pass\ndef test_two(): pass\n",
+        }
+    )
+    summary = project.run("--execution-mode", execution_mode, expected=1)
+    assert summary["status"] == "failed"
+    assert summary["cases"]["passed"] == 2
+    assert summary["cases"]["failed"] == summary["cases"]["skipped"] == 0
+    assert all(
+        group["outcome"] == "failed" and group["complete"] and not group["cache_eligible"]
+        for group in summary["groups"]
+    )
+    assert not list((project.root / ".pytest-telescope/cache").glob("*.json"))

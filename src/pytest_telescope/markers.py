@@ -37,7 +37,13 @@ def literal(node):
 
 
 def validate_kwargs(kwargs):
-    if type(kwargs) is not dict or set(kwargs) - {"inputs", "bundles", "absent", "cache"}:
+    if type(kwargs) is not dict or set(kwargs) - {
+        "inputs",
+        "bundles",
+        "absent",
+        "cache",
+        "distributions",
+    }:
         raise MarkerError("unsupported telescope marker fields")
     for name, value in kwargs.items():
         if name == "cache":

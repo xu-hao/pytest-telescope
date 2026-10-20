@@ -2,7 +2,7 @@
 
 Declared inputs. Isolated tests. Focused reruns.
 
-Put input declarations beside your tests. Every actual pytest case gets a fresh Linux
+Put input declarations beside your tests. By default every actual pytest case gets a fresh Linux
 Docker worker and its own cached result, including each parametrized variant. Change a
 case's declared input to rerun that case; unchanged cases can reuse their successes.
 
@@ -14,7 +14,7 @@ have explicit rules.
 
 ## Install
 
-This tutorial uses **0.1.0a2**. Version 0.1.0a1 used file/group declarations and does not
+This tutorial uses **0.1.0a3**. Version 0.1.0a1 used file/group declarations and does not
 support this marker interface. You need Linux, Python 3.11+, and permission to build and
 run Linux containers using a local Docker daemon's Unix socket. Runtime preparation
 needs network access; test workers have no network.
@@ -24,7 +24,7 @@ mkdir telescope-demo
 cd telescope-demo
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a2
+python -m pip install pytest-telescope==0.1.0a3
 mkdir -p app data tests
 ```
 
@@ -308,17 +308,28 @@ Use `run --force` to refresh successes or `run --no-cache` to bypass result read
 recording. These flags also refresh collection. Literal declarations at module, class,
 function, and parameter levels add together; any inherited `cache=False` wins.
 
-Every actual case starts a new pytest session. Session/module/class fixtures are
+In the default `case` mode, every actual case starts a new pytest session. Session/module/class fixtures are
 recreated for each case, and mutable state does not carry between cases. Collection may
 see the union of potential inputs, but each execution starts with its own scope before
 imports. Shared import and parametrization resources must be declared for every narrow
 consumer, often through defaults or a bundle.
+
+Optional [batch mode](batching.md) shares session/module/class fixtures among selected
+cases with exactly equal input scopes in one suite/module. Use `run --execution-mode batch`
+only when that fixture lifetime suits the tests. A batch has one fresh worker and one
+atomic cached result; differing input scopes are never combined. The tutorial above uses
+the default per-case mode and keeps its fresh/reused counts.
 
 Filesystem isolation does not prove arbitrary Python deterministic. Clocks, randomness,
 and changing external/native state require explicit care. Read the [marker and project
 reference](specification.md) for exact syntax, defaults, bundles, absence, and environment;
 the [execution contract](execution-contract.md) covers isolation, collection, cache
 identity, limits, and failure recovery.
+
+The 0.1.0a3 [scoped execution guide](scoped-execution.md) adds local distribution
+metadata, independent suites and bounded parallel workers. Its [result reference](result-schema.md)
+describes versioned inventories and explicit capability refusals. These additions are not
+available in version 0.1.0a2.
 
 ```{toctree}
 :hidden:
@@ -327,6 +338,9 @@ identity, limits, and failure recovery.
 Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
+Optional batches <batching>
+Scoped execution extension <scoped-execution>
+Run result reference <result-schema>
 Benchmark <benchmark>
 Development <development>
 Publishing <publishing>

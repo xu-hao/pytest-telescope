@@ -2,13 +2,14 @@
 
 ## Status
 
-Version 0.1.0a2 implements this per-case marker contract with Linux Docker
-enforcement and lifecycle recovery. Version 0.1.0a1 remains immutable and uses
-the earlier file/group target interface.
+Version 0.1.0a3 implements this per-case marker contract with Linux Docker
+enforcement and lifecycle recovery, plus the [scoped execution extension](scoped-execution.md)
+and versioned [result schema](result-schema.md). Version 0.1.0a2 introduced per-case markers;
+0.1.0a1 used the earlier file/group target interface. Those releases remain immutable.
 
 ## User interface and scope
 
-Every actual pytest item is one independent execution and successful-result cache unit. This includes unmarked items and every parametrized variant. There is no central per-case registry. A new test file or generated case enters the current inventory automatically; it cannot disappear behind an old result.
+In the default `case` mode, every actual pytest item is one independent execution and successful-result cache unit. This includes unmarked items and every parametrized variant. There is no central per-case registry. A new test file or generated case enters the current inventory automatically; it cannot disappear behind an old result.
 
 Use literal declarations beside tests:
 
@@ -40,7 +41,7 @@ The excluded namespaces are version-control metadata (`.git`, `.hg`, `.svn`), te
 
 Pyproject contains `[tool.pytest_telescope]` test roots/environment settings, a `[tool.pytest_telescope.defaults]` table for shared inputs/bundles/absence/cache policy, and reusable `[tool.pytest_telescope.bundles.NAME]` tables. Defaults add common support to explicit scopes; they do not silently narrow otherwise unmarked cases. Conftest, application modules, package initializers, helpers and collection resources must be visible in the effective scope. Broad scope includes them automatically; narrow scope declares them. Existing central `targets` is rejected with a migration message rather than silently treated as per-case configuration.
 
-No new shared-session grouping API is introduced: each case starts a fresh pytest session. Module/class/session fixtures are recreated per case. Tests requiring cross-case mutable state must be rewritten; this version does not promise ordinary pytest's shared-session behavior. The supported filesystem is read-only, and scratch is private to each case.
+The default `case` mode starts a fresh pytest session per case and recreates module/class/session fixtures. The optional [batch profile](batching.md) shares ordinary pytest fixture lifetime and private scratch only within one suite/module and an exactly equal expanded scope. Groups never union different readable inputs. Complete group evidence is reused atomically, and every group starts a fresh worker. The project filesystem remains read-only in both modes.
 
 ## Static discovery and real pytest agreement
 
@@ -50,7 +51,7 @@ A pre-import worker guard validates each supported marker factory call against i
 
 Discovery collects all current test files inside a worker with the explicit union of every potential case scope. When an unmarked item is possible, discovery includes the broad project snapshot from the outset. Function/class/parameter-only declarations cannot prove complete dynamic coverage; a validated inherited module-level file scope can establish a narrow discovery union. Real collected provenance must confirm that guarantee, or collection fails without a broader retry. Discovery can therefore see more files than any one narrow case. This is a separate, documented collection boundary; a case body never runs with the discovery union. Real pytest enumerates dynamic and parametrized items and maps inherited literal origins to effective declarations. Hooks that add, remove or change items after the validated collection checkpoint are rejected. Duplicate/invalid node identities are errors.
 
-Per-case execution begins a new sandbox with only that case's effective scope, before conftest/test imports. It collects its containing file, verifies the actual item/declaration inventory against the discovery record, and executes exactly the selected item. A narrow execution missing a shared collection dependency fails with bounded collection evidence; it does not borrow another case's inputs. Common import/parametrization dependencies belong in shared declarations. The fresh worker's collection must agree even when a data-dependent item generator produces different nodes under a narrow scope.
+Per-case execution begins a new sandbox with only that case's effective scope, before conftest/test imports. It collects its containing file, verifies the actual item/declaration inventory against the discovery record, and executes exactly the selected item in case mode. Batch execution instead validates the complete containing-module inventory and the requested ordered subset before executing that equal-scope group. A narrow execution missing a shared collection dependency fails with bounded collection evidence; it does not borrow another case's inputs. Common import/parametrization dependencies belong in shared declarations. The fresh worker's collection must agree even when a data-dependent item generator produces different nodes under a narrow scope.
 
 ## Inventory, selection and reuse
 
@@ -64,11 +65,11 @@ Full current inventory is accounted for before selectors: selected cases are exe
 
 ## Bounds and performance
 
-Bounded defaults: 100,000 actual cases; 100,000 visible files; 200,000 visited entries; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual execution response. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
+Bounded defaults: 100,000 actual cases; 100,000 visible files; 200,000 visited entries; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
 
-Retain up to 100,000 successful case records within a 256 MiB total cache budget, plus at most eight inventory records within a 64 MiB inventory budget. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete frozen-pool invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
+Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete frozen-pool invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
 
-Freeze each distinct file once per invocation. Derive case keys from immutable frozen-file records and memoized scope identities. Materialize only missed cases, using immutable files from the frozen pool without exposing its broader parent directory. Broad scopes can reuse a complete immutable snapshot; narrow snapshots contain only their own selected paths. Do not copy/hash the whole project once per case. Cold execution remains serial and starts one isolated pytest session per case; repeated collection of a large parametrized module is a real cost, not hidden by file-group benchmark claims. Warm inventory/result hits start no worker containers.
+Freeze each distinct file once per invocation. Derive case keys from immutable frozen-file records and memoized scope identities. Materialize only missed cases, using immutable files from the frozen pool without exposing its broader parent directory. Broad scopes can reuse a complete immutable snapshot; narrow snapshots contain only their own selected paths. Do not copy/hash the whole project once per case. The default budget runs one worker; explicit resource envelopes permit bounded parallel fresh workers as specified in the [scoped execution extension](scoped-execution.md). Each miss starts one isolated pytest session per case by default, or per exact-scope group in batch mode; repeated collection of a large parametrized module is a real cost, not hidden by file-group benchmark claims. Warm inventory/result hits start no worker containers.
 
 ## Project configuration
 
@@ -104,8 +105,9 @@ absent in the source project and participate in identity. Relative leaf symlinks
 require their destination in the effective scope; absolute links and directory
 symlinks are unsupported. Explicit hidden glob components are supported.
 
-Keep pytest configuration in this pyproject's `[tool.pytest.ini_options]`; other
-pytest configuration files are rejected. Discovery honors configured `python_files`
+The default suite keeps pytest configuration in this pyproject's `[tool.pytest.ini_options]`.
+The 0.1.0a3 [independent suite declarations](scoped-execution.md) also support explicit
+pytest.ini, .pytest.ini, tox.ini and setup.cfg files. Discovery honors configured `python_files`
 and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
 truncates matching files. Only named `env` variables are forwarded and keyed, including
 presence. Controlled Python/pytest variables and `TELESCOPE_*` protocol names are
@@ -158,9 +160,12 @@ prune it. The Docker administrator must configure its storage quotas and garbage
 collection; the image retention bound is not a bound on the daemon's shared build-cache
 storage.
 
-The initial worker policy gives each case one CPU, 512 MiB memory with no added swap
-allowance, 128 processes, 256 open descriptors, 64 MiB of private `/tmp`, and at most 1
-MiB of captured worker output. Limits are part of the backend policy; exceeding them
+The initial worker policy gives each case or batch one CPU, 512 MiB memory with no added swap
+allowance, 128 processes, 256 open descriptors, 64 MiB of private `/tmp`. The combined merged worker-output stream is limited to
+1 MiB for case execution and 64 MiB for batch execution or collection, including
+structured protocol results and direct file-descriptor writes. Ordinary Python/pytest
+output is normally suppressed; batch mode has no separate smaller arbitrary-output
+channel. Structured batch results/cache records also have a 64 MiB limit. Limits are part of the backend policy; exceeding them
 produces failure, not a broader execution boundary.
 
 A container is an OS-enforced filesystem boundary sharing the host kernel. This contract
@@ -181,6 +186,10 @@ dependencies. If Docker cannot establish the required restrictions, report
 infrastructure failure without running an unrestricted substitute.
 
 ## Outcome accounting
+
+The 0.1.0a3 [result schema](result-schema.md) adds versioned complete/incomplete
+inventory accounting, opaque case identities and explicit unsupported-capability refusals.
+
 
 The controller reports current collected cases, selection, independent execution units,
 and collection work separately. Each selected case has one outcome: executed success,

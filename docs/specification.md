@@ -2,8 +2,9 @@
 
 The [quickstart](index.md) provides every file for a runnable project. The
 [execution contract](execution-contract.md) is authoritative for the supported boundary.
-This interface is for 0.1.0a2; old central `targets` declarations are rejected with a
-migration message.
+The base marker interface is available in 0.1.0a2; old central `targets` declarations
+are rejected with a migration message. Version 0.1.0a3 additions are specified in the
+[scoped execution guide](scoped-execution.md) and [result reference](result-schema.md).
 
 ## Markers beside cases
 
@@ -103,8 +104,8 @@ and host Python environments (`.venv`, `venv`, or a directory with validated
 `pyvenv.cfg`). Other large trees such as `build`, `dist`, and `node_modules` count toward
 snapshot limits. Explicit declarations into excluded namespaces are errors.
 
-Keep pytest settings in `[tool.pytest.ini_options]`; other pytest configuration files
-are rejected. Forwarding environment names is not a secret-distribution mechanism.
+The default suite keeps pytest settings in `[tool.pytest.ini_options]`. Next-alpha
+[independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
 Only named user variables are forwarded; runtime-controlled variables remain reserved.
 
 ## Select and control execution
@@ -122,7 +123,72 @@ a filtered invocation cannot reuse an unfiltered run's result. `--force` refresh
 inventory and executes successes again; `--no-cache` also prevents recording them.
 `plan` is only a nonexecuting static scope preview, not actual case enumeration.
 
+Python callers can narrow a suite's files before marker parsing or collection imports:
+
+```python
+from pathlib import Path
+from pytest_telescope.controller import run
+from pytest_telescope.plan import make_plan
+
+files = {"core": ["tests/core/test_prices.py"]}
+preview = make_plan(Path("."), suites=["core"], structural_files=files)
+result = run(Path("."), suites=["core"], structural_files=files)
+```
+
+Unlike a node selector in `arguments`, this exact list excludes other test modules from
+the invocation's inventory. `collection.suites` reports the effective files, and
+`inventory_complete` covers only that boundary. Omitted files have no unselected rows.
+This API does not change a case's input scope: unmarked cases still see and key the
+broad project snapshot. It also preserves suite cwd, root, resources and capabilities.
+
+Unspecified suites keep their configured membership; `{}` changes nothing and `[]`
+makes one suite empty. Lists contain at most 4,096 canonical existing regular Python
+test files within configured roots and patterns; duplicates, symlinks and foreign or
+excluded paths are refused. List order is normalized. An explicit list has its own
+cache identity even if it matches automatic discovery; changing it refreshes that
+suite's context while unchanged suites retain theirs. New files enter an exact-list
+invocation only when added to the list. See the
+[structural narrowing contract](scoped-execution.md#invocation-only-structural-file-narrowing)
+for validation and coverage rules. This override is available through the Python API.
+
 Each case gets a new pytest session. Fixtures with broader pytest scopes are recreated
-for each case; tests depending on cross-case mutable state need rewriting. See the
+for each case in default `case` mode. Optional [batch mode](batching.md) shares ordinary
+pytest fixture lifetime only inside equal-scope suite/module groups. See the
 [execution contract](execution-contract.md) for supported options, runtime requirements,
 bounded failures, exact cache identity, and outcome accounting.
+
+
+## Next-alpha scoped execution
+
+A literal `distributions=["core"]` marker adds selected local metadata and establishes
+narrow scope, including an empty list. Distribution names also compose through defaults
+and bundles. Metadata does not grant application source: declare package modules through
+`inputs` as usual. Broad cases receive every configured distribution.
+
+The [complete scoped guide](scoped-execution.md) provides versioned static metadata,
+independent suite and worker-budget configuration. A suite's `root`, `config`,
+`test_roots`, `include` and `exclude` paths are all outer-project-relative. Exclusions
+remove files before parsing or importing them. `args` preserve argument order; `plugins`
+name installed explicit plugins with autoload disabled. A project using explicit suites
+cannot also set top-level `test_roots`.
+
+Configured `addopts` are resolved before scheduler validation. For a suite configuration
+containing `addopts = -n auto`, an explicit `-o addopts=` removes that option; the run
+then uses telescope's declared resource envelope. Without that override, nested scheduler
+options return an explicit unsupported capability. This does not enable xdist workers.
+
+
+## Choose execution and fixture lifetime
+
+`[tool.pytest_telescope.execution] mode = "case"` is the default. Set `mode = "batch"`
+to share one fresh pytest session among selected cases with exactly equal effective
+scope, metadata and cache policy in one suite/module. Module/class/session fixtures and
+scratch share only inside that group; function `tmp_path` remains per test.
+
+`run --execution-mode case|batch` and `controller.run(root, execution_mode="case"|"batch")`
+override the configuration without editing it. `plan` reports the configured mode/profile,
+not dynamically collected group membership. Each group occupies one resource slot and
+has one worker's limits. Group records are atomic: failures, partial runs or corrupted
+records cause the whole selected group to rerun. See [batching](batching.md) for ordering,
+4,096-member limits and lifecycle rules, and [result schema 2](result-schema.md) for
+member/group outcomes, partial pytest stops and honest shared-worker timing.

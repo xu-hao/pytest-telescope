@@ -23,7 +23,7 @@ def identity(value):
 
 
 def project_file(filename):
-    path = Path(os.path.abspath(filename)).relative_to(Path.cwd())
+    path = Path(os.path.abspath(Path("/project") / filename)).relative_to(Path("/project"))
     text = path.as_posix()
     if (
         not text
@@ -46,8 +46,36 @@ def main():
     if len(encoded) > MAX_INVENTORY:
         raise ValueError("request limit exceeded")
     request = json.loads(encoded)
+    if request.get("metadata"):
+        from importlib import metadata
+
+        def normalize(name):
+            return re.sub(r"[-_.]+", "-", name).lower()
+
+        installed = {normalize(dist.metadata["Name"]) for dist in metadata.distributions()}
+        local = {
+            normalize(dist.metadata["Name"]) for dist in metadata.distributions(path=["/metadata"])
+        }
+        if installed & local:
+            print(
+                "TELESCOPE_UNSUPPORTED "
+                + canonical({"capability": "project-metadata:runtime-conflict"}),
+                flush=True,
+            )
+            return 4
+        sys.path.insert(0, "/metadata")
+    suite_root = request["suite_root"]
+
+    def case_identity(nodeid):
+        return identity(canonical([request["suite"], canonical_nodeid(nodeid)]))
+
+    def canonical_nodeid(value):
+        filename, separator, suffix = value.partition("::")
+        path = (Path("/project") / suite_root / filename).resolve()
+        return project_file(path) + (separator + suffix if separator else "")
+
     mode = request["mode"]
-    if mode not in ("collection", "execution"):
+    if mode not in ("collection", "execution", "batch"):
         raise ValueError("invalid request mode")
     cases, finished, selected_ids, failures = {}, set(), [], []
     origins, positions_cache, source_calls, required_origins = {}, {}, {}, {}
@@ -134,7 +162,7 @@ def main():
                 "exception_type": kind
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", kind)
                 else "TestError",
-                "case_id": identity(nodeid),
+                "case_id": case_identity(nodeid),
             }
         )
 
@@ -146,7 +174,13 @@ def main():
             self.checkpoint = False
             self.bytes = 1024
 
+        @pytest.hookimpl(tryfirst=True)
         def pytest_configure(self, config):
+            if any(
+                getattr(plugin, "__name__", "").split(".")[0] == "xdist"
+                for _, plugin in config.pluginmanager.list_name_plugin()
+            ):
+                invalid("nested distributed scheduling is unsupported")
             config.addinivalue_line(
                 "markers", "telescope: literal per-case input and reuse declarations"
             )
@@ -186,9 +220,16 @@ def main():
                 required = required_origins.get((filename, tuple(owner[:depth])), set())
                 if not required.issubset(declaration_ids):
                     invalid("collected case lost an inherited literal declaration")
-            aliases = {node.nodeid for node in chain if node.nodeid}
+            aliases = {
+                canonical_nodeid(node.nodeid) for node in chain if node.nodeid and node is not item
+            }
             aliases.update(
-                (filename, nodeid, originalname, item.parent.nodeid + "::" + originalname)
+                (
+                    filename,
+                    canonical_nodeid(nodeid),
+                    originalname,
+                    canonical_nodeid(item.parent.nodeid) + "::" + originalname,
+                )
             )
             if len(aliases) > 128 or any(
                 type(value) is not str
@@ -199,21 +240,21 @@ def main():
             ):
                 invalid("invalid collected selector aliases")
             return {
-                "nodeid": nodeid,
+                "case_id": case_identity(nodeid),
                 "file": filename,
                 "origins": sorted(declaration_ids),
-                "aliases": sorted(aliases),
+                "aliases": sorted({identity(alias) for alias in aliases} | {case_identity(nodeid)}),
                 "selected": False,
             }
 
         def pytest_itemcollected(self, item):
             row = self.describe(item)
-            if row["nodeid"] in self.captured or len(self.captured) >= 100_000:
+            if item.nodeid in self.captured or len(self.captured) >= 100_000:
                 invalid("duplicate case identity or inventory limit exceeded")
             self.bytes += len(canonical(row).encode())
             if self.bytes > MAX_INVENTORY - 4096:
                 invalid("collection inventory exceeds 64 MiB")
-            self.captured[row["nodeid"]] = (item, row)
+            self.captured[item.nodeid] = (item, row)
 
         def unchanged(self, session):
             for item, row in self.captured.values():
@@ -242,28 +283,35 @@ def main():
                 ):
                     invalid("invalid case selectors")
                 aliases = {alias for _, row in self.captured.values() for alias in row["aliases"]}
-                if any(selector not in aliases for selector in selectors):
+                if not request.get("allow_unknown_selectors", False) and any(
+                    selector not in aliases for selector in selectors
+                ):
                     invalid("selector does not identify a collected case")
                 selector_set = set(selectors)
                 chosen = [
                     item
                     for item in items
-                    if not selectors
-                    or not selector_set.isdisjoint(self.captured[item.nodeid][1]["aliases"])
+                    if not request.get("selection_disabled", False)
+                    and (
+                        not selectors
+                        or not selector_set.isdisjoint(self.captured[item.nodeid][1]["aliases"])
+                    )
                 ]
             else:
                 file_inventory = sorted(
                     (
-                        {"nodeid": row["nodeid"], "origins": row["origins"]}
+                        {"case_id": row["case_id"], "origins": row["origins"]}
                         for _, row in self.captured.values()
                     ),
-                    key=lambda row: row["nodeid"],
+                    key=lambda row: row["case_id"],
                 )
                 if identity(canonical(file_inventory)) != request["expected_digest"]:
                     invalid("containing-file inventory differs from discovery")
-                chosen = [item for item in items if item.nodeid == request["case_nodeid"]]
-                if len(chosen) != 1:
-                    invalid("execution did not select exactly the discovered case")
+                requested = request["case_ids"] if mode == "batch" else [request["case_id"]]
+                wanted = set(requested)
+                chosen = [item for item in items if case_identity(item.nodeid) in wanted]
+                if [case_identity(item.nodeid) for item in chosen] != requested:
+                    invalid("execution membership or order differs from discovery")
             chosen_set = set(chosen)
             deselected = [item for item in items if item not in chosen_set]
             items[:] = chosen
@@ -278,8 +326,8 @@ def main():
             self.session = session
             self.unchanged(session)
             self.checkpoint = not collection_failed and self.selection is not None
-            if mode == "execution" and self.checkpoint:
-                selected_ids[:] = [identity(item.nodeid) for item in session.items]
+            if mode != "collection" and self.checkpoint:
+                selected_ids[:] = [case_identity(item.nodeid) for item in session.items]
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_runtestloop(self, session):
@@ -310,7 +358,7 @@ def main():
                 )
 
         def pytest_runtest_logreport(self, report):
-            case = identity(report.nodeid)
+            case = case_identity(report.nodeid)
             previous = cases.get(case)
             if report.failed:
                 cases[case] = "failed"
@@ -353,14 +401,14 @@ def main():
         "failures": failures,
     }
     if mode == "collection":
-        selected = {item.nodeid for item in observer.selection or ()}
+        selected = {item.nodeid: order for order, item in enumerate(observer.selection or ())}
         items = [
-            {**row, "selected": nodeid in selected}
+            {**row, "selected": nodeid in selected, "order": selected.get(nodeid)}
             for nodeid, (_, row) in sorted(observer.captured.items())
         ]
         result = {
             **common,
-            "protocol": 2,
+            "protocol": 4,
             "kind": "collection",
             "items": items,
             "complete": observer.checkpoint
@@ -384,6 +432,19 @@ def main():
             and set(selected_ids) == finished
             and len(cases) == len(selected_ids),
         }
+    if mode == "batch":
+        requested = request["case_ids"]
+        result.update(
+            protocol=2,
+            group_id=request["group_id"],
+            case_ids=requested,
+            collected=len(requested),
+            case_results=[
+                dict(case_id=case, outcome=cases.get(case, "not-run"), complete=case in finished)
+                for case in requested
+            ],
+        )
+        result["complete"] = result["complete"] and selected_ids == requested
     print("TELESCOPE_RESULT " + canonical(result), flush=True)
     return exit_code
 

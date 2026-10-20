@@ -1,5 +1,6 @@
 """Strict, distinct collection and single-case execution result protocols."""
 
+import hashlib
 import json
 import math
 import re
@@ -130,7 +131,7 @@ def validate_collection(result, nonce=None, successful_only=False):
     """Validate real item inventory without interpreting it as executed test success."""
     if type(result) is not dict or set(result) != COLLECTION_FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 2:
+    if type(result["protocol"]) is not int or result["protocol"] != 4:
         return False
     if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5)):
         return False
@@ -141,23 +142,28 @@ def validate_collection(result, nonce=None, successful_only=False):
     encoded_budget = len(json.dumps({**result, "items": []}, separators=(",", ":")).encode())
     for index, item in enumerate(items):
         if type(item) is not dict or set(item) != {
-            "nodeid",
+            "case_id",
             "file",
             "origins",
             "aliases",
             "selected",
+            "order",
         }:
             return False
         if (
-            not _text(item["nodeid"])
+            (type(item["case_id"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", item["case_id"]))
             or not _path(item["file"])
-            or item["nodeid"].split("::", 1)[0] != item["file"]
             or type(item["selected"]) is not bool
         ):
             return False
-        if item["nodeid"] in identities:
+        if item["selected"]:
+            if type(item["order"]) is not int or not 0 <= item["order"] < len(items):
+                return False
+        elif item["order"] is not None:
             return False
-        identities.add(item["nodeid"])
+        if item["case_id"] in identities:
+            return False
+        identities.add(item["case_id"])
         origins, aliases = item["origins"], item["aliases"]
         if type(origins) is not list or len(origins) > 100_000:
             return False
@@ -171,22 +177,84 @@ def validate_collection(result, nonce=None, successful_only=False):
         if (
             type(aliases) is not list
             or not 1 <= len(aliases) <= 128
-            or any(not _text(alias) for alias in aliases)
+            or any(
+                type(alias) is not str or not re.fullmatch(r"[0-9a-f]{64}", alias)
+                for alias in aliases
+            )
         ):
             return False
         if (
             aliases != sorted(set(aliases))
-            or item["nodeid"] not in aliases
-            or item["file"] not in aliases
+            or item["case_id"] not in aliases
+            or hashlib.sha256(item["file"].encode()).hexdigest() not in aliases
         ):
             return False
         encoded_budget += len(json.dumps(item, separators=(",", ":")).encode()) + bool(index)
         if encoded_budget > MAX_INVENTORY_BYTES:
             return False
+    orders = [item["order"] for item in items if item["selected"]]
+    if sorted(orders) != list(range(len(orders))):
+        return False
     if result["exit_code"] == 0 and (not result["complete"] or result["failures"]):
         return False
     if result["exit_code"] == 5 and (
         not result["complete"] or result["failures"] or any(item["selected"] for item in items)
+    ):
+        return False
+    return not successful_only or result["exit_code"] == 0
+
+
+def validate_batch(result, nonce=None, successful_only=False, group_id=None, case_ids=None):
+    """Validate one atomic ordered session, including honest partial pytest stops."""
+    if type(result) is not dict or set(result) != FIELDS | {"group_id", "case_results"}:
+        return False
+    if type(result["protocol"]) is not int or result["protocol"] != 2:
+        return False
+    if not _common(result, nonce, (0, 1, 2, 4, 5)):
+        return False
+    identity = result["group_id"]
+    if type(identity) is not str or not re.fullmatch(r"[0-9a-f]{64}", identity):
+        return False
+    if group_id is not None and identity != group_id:
+        return False
+    ids = result["case_ids"]
+    if type(ids) is not list or not 1 <= len(ids) <= 4096:
+        return False
+    if any(type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value) for value in ids):
+        return False
+    if len(set(ids)) != len(ids) or (case_ids is not None and ids != case_ids):
+        return False
+    for field in ("collected", "passed", "failed", "skipped"):
+        if type(result[field]) is not int or not 0 <= result[field] <= len(ids):
+            return False
+    if result["collected"] != len(ids):
+        return False
+    rows = result["case_results"]
+    if type(rows) is not list or len(rows) != len(ids):
+        return False
+    counts = dict(passed=0, failed=0, skipped=0, **{"not-run": 0})
+    for case, row in zip(ids, rows):
+        if type(row) is not dict or set(row) != {"case_id", "outcome", "complete"}:
+            return False
+        if row["case_id"] != case or type(row["complete"]) is not bool:
+            return False
+        outcome = row["outcome"]
+        if type(outcome) is not str or outcome not in counts:
+            return False
+        if outcome == "not-run" and row["complete"]:
+            return False
+        counts[outcome] += 1
+    if any(result[name] != counts[name] for name in ("passed", "failed", "skipped")):
+        return False
+    if result["complete"] and not all(row["complete"] for row in rows):
+        return False
+    if any(
+        failure["phase"] != "collect" and failure["case_id"] not in ids
+        for failure in result["failures"]
+    ):
+        return False
+    if result["exit_code"] == 0 and (
+        not result["complete"] or counts["failed"] or counts["not-run"] or result["failures"]
     ):
         return False
     return not successful_only or result["exit_code"] == 0

@@ -27,7 +27,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "telescope(inputs=(), bundles=(), absent=(), cache=True): declared case inputs and reuse policy",
+        "telescope(inputs=(), bundles=(), distributions=(), absent=(), cache=True): declared case inputs and reuse policy",
     )
 
 

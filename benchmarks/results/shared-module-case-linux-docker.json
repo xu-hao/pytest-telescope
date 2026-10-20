@@ -1,0 +1,191 @@
+{
+  "schema": 1,
+  "python": "3.11.15",
+  "pytest": "8.3.5",
+  "pytest_telescope": "0.1.0a3",
+  "cases": 128,
+  "execution_mode": "case",
+  "scope_layout": "shared-module",
+  "suites": 2,
+  "modules": 16,
+  "ordinary_elapsed_seconds": 1.0792829049169086,
+  "ordinary_controller_cpu_seconds": 0.9801879999999998,
+  "runtime_preparation_seconds": 0.755553365976084,
+  "phases": [
+    {
+      "phase": "cold",
+      "elapsed_seconds": 66.7682996490039,
+      "controller_cpu_seconds": 13.157752,
+      "log": "workers-1-cold.log",
+      "concurrency": 1,
+      "budget": {
+        "cpus": 1,
+        "memory_bytes": 536870912,
+        "processes": 128,
+        "scratch_bytes": 67108864
+      },
+      "counts": {
+        "executed": 128,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 0,
+        "selected": 128,
+        "unsupported": 0
+      },
+      "groups": 128,
+      "fresh_groups": 128,
+      "reused_groups": 0,
+      "inventory_digest": "5578146e66ac73299bb8b461abf8b889fec65ebe44c47ac808c45912eb964e01",
+      "collection": "executed",
+      "worker_cpu_seconds": 30.642992999999983,
+      "setup_seconds": 1.2197908139205538
+    },
+    {
+      "phase": "warm",
+      "elapsed_seconds": 0.26421995903365314,
+      "controller_cpu_seconds": 0.24234100000000058,
+      "log": "workers-1-warm.log",
+      "concurrency": 1,
+      "budget": {
+        "cpus": 1,
+        "memory_bytes": 536870912,
+        "processes": 128,
+        "scratch_bytes": 67108864
+      },
+      "counts": {
+        "executed": 0,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 128,
+        "selected": 128,
+        "unsupported": 0
+      },
+      "groups": 128,
+      "fresh_groups": 0,
+      "reused_groups": 128,
+      "inventory_digest": "5578146e66ac73299bb8b461abf8b889fec65ebe44c47ac808c45912eb964e01",
+      "collection": "reused",
+      "worker_cpu_seconds": 0,
+      "setup_seconds": 0.12370027403812855
+    },
+    {
+      "phase": "selective",
+      "elapsed_seconds": 5.071527533989865,
+      "controller_cpu_seconds": 1.1509010000000002,
+      "log": "workers-1-selective.log",
+      "concurrency": 1,
+      "budget": {
+        "cpus": 1,
+        "memory_bytes": 536870912,
+        "processes": 128,
+        "scratch_bytes": 67108864
+      },
+      "counts": {
+        "executed": 8,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 120,
+        "selected": 128,
+        "unsupported": 0
+      },
+      "groups": 128,
+      "fresh_groups": 8,
+      "reused_groups": 120,
+      "inventory_digest": "5578146e66ac73299bb8b461abf8b889fec65ebe44c47ac808c45912eb964e01",
+      "collection": "executed",
+      "worker_cpu_seconds": 2.3674009999999996,
+      "setup_seconds": 0.5334826560574584
+    },
+    {
+      "phase": "cold",
+      "elapsed_seconds": 20.899306437000632,
+      "controller_cpu_seconds": 13.434075000000002,
+      "log": "workers-4-cold.log",
+      "concurrency": 4,
+      "budget": {
+        "cpus": 4,
+        "memory_bytes": 2147483648,
+        "processes": 512,
+        "scratch_bytes": 268435456
+      },
+      "counts": {
+        "executed": 128,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 0,
+        "selected": 128,
+        "unsupported": 0
+      },
+      "groups": 128,
+      "fresh_groups": 128,
+      "reused_groups": 0,
+      "inventory_digest": "5578146e66ac73299bb8b461abf8b889fec65ebe44c47ac808c45912eb964e01",
+      "collection": "executed",
+      "worker_cpu_seconds": 32.456701999999986,
+      "setup_seconds": 0.9324094430194236
+    },
+    {
+      "phase": "warm",
+      "elapsed_seconds": 0.2641256370116025,
+      "controller_cpu_seconds": 0.24288199999999804,
+      "log": "workers-4-warm.log",
+      "concurrency": 4,
+      "budget": {
+        "cpus": 4,
+        "memory_bytes": 2147483648,
+        "processes": 512,
+        "scratch_bytes": 268435456
+      },
+      "counts": {
+        "executed": 0,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 128,
+        "selected": 128,
+        "unsupported": 0
+      },
+      "groups": 128,
+      "fresh_groups": 0,
+      "reused_groups": 128,
+      "inventory_digest": "5578146e66ac73299bb8b461abf8b889fec65ebe44c47ac808c45912eb964e01",
+      "collection": "reused",
+      "worker_cpu_seconds": 0,
+      "setup_seconds": 0.12560200603911653
+    },
+    {
+      "phase": "selective",
+      "elapsed_seconds": 2.3173065229784697,
+      "controller_cpu_seconds": 1.1741449999999993,
+      "log": "workers-4-selective.log",
+      "concurrency": 4,
+      "budget": {
+        "cpus": 4,
+        "memory_bytes": 2147483648,
+        "processes": 512,
+        "scratch_bytes": 268435456
+      },
+      "counts": {
+        "executed": 8,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 120,
+        "selected": 128,
+        "unsupported": 0
+      },
+      "groups": 128,
+      "fresh_groups": 8,
+      "reused_groups": 120,
+      "inventory_digest": "5578146e66ac73299bb8b461abf8b889fec65ebe44c47ac808c45912eb964e01",
+      "collection": "executed",
+      "worker_cpu_seconds": 2.43208,
+      "setup_seconds": 0.5512416629935615
+    }
+  ],
+  "method": "One newly generated fixture; two ordinary independent suites with temporary metadata, then forced-cold/warm/one-resource mutation at explicit worker budgets. No universal speedup claim. Runtime image removed; logs and synthetic source retained locally."
+}

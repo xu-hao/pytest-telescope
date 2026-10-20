@@ -1,5 +1,9 @@
 # Reproducible benchmark
 
+The original seven-case measurements below describe version 0.1.0a2. The
+[128-case scoped execution measurement](#scoped-execution-at-128-cases) qualifies
+version 0.1.0a3 with independent suites, local metadata and explicit worker budgets.
+
 ## Workload
 
 The `examples/analytics` project contains **seven actual cases**. Six original cases
@@ -129,3 +133,134 @@ The [structured measurements](https://github.com/xu-hao/pytest-telescope/blob/ma
 contain every trial, runtime identity, installed runner digest, case outcomes, collection
 work, and medians. Raw command logs and copied projects remain local and are not release
 artifacts. These per-case a2 results replace the earlier file/group measurements.
+
+## Scoped execution at 128 cases
+
+Version 0.1.0a3 was measured on 2026-10-19 using a newly generated synthetic project:
+128 parametrized cases in 16 modules, two independent pytest suites and two static local
+distributions. Each case loads its package through a real metadata entry point, performs
+deterministic computation and reads its own declared JSON resource. Metadata is projected
+without building or installing application source into the runtime. The ordinary baseline
+runs the two suites separately with temporary generated metadata.
+
+```sh
+python benchmarks/scaling.py --output /tmp/telescope-scaling --cases 128 --parallel 4
+```
+
+Each worker has one CPU, 512 MiB memory, 128 processes and 64 MiB private scratch.
+The one-worker aggregate envelope equals those dimensions. The four-worker envelope is
+four CPUs, 2 GiB memory, 512 processes and 256 MiB scratch. Concurrency comes from these
+explicit budgets, not the host CPU count. Every fresh case still starts its own pytest
+session and container. Cold phases force all cases to execute. Each selective phase
+uses previously unseen content in one case's JSON input; reverting to already proven
+content can correctly reuse an older successful cache record.
+
+This single complete trial used the installed 0.1.0a3 wheel, host Python 3.12.3 and
+pytest 9.1.1. Times are seconds. Ordinary execution of both suites took **1.129 s**
+(1.048 s host process CPU). Runtime preparation took **0.914 s** separately and benefited
+from existing Docker layers.
+
+| Worker budget | Phase | External elapsed | Host process CPU | Worker CPU | Fresh / reused cases |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | Cold | 99.985 | 14.234 | 32.446 | 128 / 0 |
+| 1 | Warm | 0.414 | 0.378 | 0.000 | 0 / 128 |
+| 1 | One resource changed | 2.167 | 0.616 | 0.727 | 1 / 127 |
+| 4 | Cold | 34.724 | 14.501 | 33.530 | 128 / 0 |
+| 4 | Warm | 0.414 | 0.378 | 0.000 | 0 / 128 |
+| 4 | One resource changed | 2.117 | 0.617 | 0.721 | 1 / 127 |
+
+All phases passed exact case identity, suite/file membership, complete-inventory, resource
+envelope and outcome checks. Selective phases reran exactly the changed resource's case.
+Warm phases reused collection and all cases with zero current worker CPU. Collection
+refreshed after resource changes without discarding unrelated case successes. The
+benchmark removes its own runtime image and retains command logs, generated source and
+per-phase timing receipts locally.
+
+Parallelism reduced cold elapsed time in this fixture, but both cold modes were much
+slower than ordinary suite execution. Fresh container/session startup and lifecycle work
+dominate these small cases. This was one trial on a shared development host with other
+qualification activity during part of the trial, not an exclusive-host or repeated
+statistical study. The columns exclude Docker daemon CPU and do not establish universal
+speedups, linear scaling, or performance for a different workload. The
+[structured scoped measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/scoped-linux-docker.json)
+retain exact budgets, counts, inventory digests and timings.
+
+## Comparing case and batch on the same scopes
+
+The scaling harness can generate a second layout with eight cases per module sharing
+exactly the same declared inputs and one JSON resource. Compare execution modes with
+that same layout and worker budget:
+
+```sh
+python benchmarks/scaling.py --output /tmp/telescope-shared-case --cases 128 --parallel 4 --scope-layout shared-module --execution-mode case
+python benchmarks/scaling.py --output /tmp/telescope-shared-batch --cases 128 --parallel 4 --scope-layout shared-module --execution-mode batch
+```
+
+Each command creates its own new project and evidence directory. Both modes execute 128
+cases in 16 modules across two suites. Case mode uses 128 singleton groups; batch mode
+uses 16 groups of eight members. Batch grouping preserves those exact scopes: it does
+not combine unequal declarations to make a larger group. Cold, warm and selective phases
+run under both the one-worker and four-worker resource envelopes described above.
+
+A shared-module resource mutation has **eight consumers in both modes**. Case mode
+reruns eight singleton groups; batch mode reruns one atomic eight-member group. The
+other 120 cases remain reusable. The earlier per-case resource layout has one consumer
+and therefore reports 1 fresh / 127 reused after a mutation. Comparing those two
+selective phases as if they represented identical work would be misleading.
+
+Batch mode reduces fresh sessions and permits module/class/session fixtures, mutable
+Python state and scratch to live across its members. Case mode recreates that state
+for every case. The modes therefore offer different isolation and fixture lifetimes,
+even with identical file scopes. Group-level worker CPU must be counted once; batch
+member timing is intentionally unavailable. Warm reuse and atomic group counts must
+also reconcile before timings are accepted. See the [batching contract](batching.md)
+for the lifecycle boundary. The earlier per-case measurements remain a separate
+workload receipt.
+
+
+### Shared-module measurements
+
+Measured on 2026-10-20 with the same installed 0.1.0a3 wheel, host Python 3.11.15 and
+pytest 8.3.5; workers used the pinned Python 3.12/pytest 9.1.1 runtime. Each mode ran once
+on its own newly generated equivalent project, sequentially on a shared development host.
+This is a comparison of execution profiles, not a same-interpreter startup microbenchmark.
+The outer coordinator reserved five CPUs, 4 GiB memory and 2 GiB scratch to cover up to
+four Docker workers plus controller headroom; Docker worker limits remain explicit as
+above. Daemon CPU is not included in the reported process/worker CPU measurements.
+
+Ordinary execution took **1.079 s** for the case fixture and **1.029 s** for the batch
+fixture. Separate runtime preparation took **0.756 s** and **0.339 s**, respectively,
+with cached Docker layers. Neither preparation measurement predicts a first download.
+
+| Profile | Worker budget | Phase | External elapsed | Host process CPU | Worker CPU | Fresh / reused cases | Fresh / reused groups |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| case | 1 | Cold | 66.768 | 13.158 | 30.643 | 128 / 0 | 128 / 0 |
+| case | 1 | Warm | 0.264 | 0.242 | 0.000 | 0 / 128 | 0 / 128 |
+| case | 1 | One resource changed | 5.072 | 1.151 | 2.367 | 8 / 120 | 8 / 120 |
+| case | 4 | Cold | 20.899 | 13.434 | 32.457 | 128 / 0 | 128 / 0 |
+| case | 4 | Warm | 0.264 | 0.243 | 0.000 | 0 / 128 | 0 / 128 |
+| case | 4 | One resource changed | 2.317 | 1.174 | 2.432 | 8 / 120 | 8 / 120 |
+| batch | 1 | Cold | 11.783 | 2.039 | 5.476 | 128 / 0 | 16 / 0 |
+| batch | 1 | Warm | 0.264 | 0.221 | 0.000 | 0 / 128 | 0 / 16 |
+| batch | 1 | One resource changed | 1.767 | 0.432 | 0.756 | 8 / 120 | 1 / 15 |
+| batch | 4 | Cold | 6.024 | 2.053 | 5.662 | 128 / 0 | 16 / 0 |
+| batch | 4 | Warm | 0.264 | 0.226 | 0.000 | 0 / 128 | 0 / 16 |
+| batch | 4 | One resource changed | 1.967 | 0.443 | 0.754 | 8 / 120 | 1 / 15 |
+
+All twelve phases passed exact case identities, complete effective inventories, atomic
+group membership, outcome counts and admitted-budget checks. Warm phases reused both
+collection and results with no current worker CPU. The single changed resource reran
+exactly eight consumers in either profile, leaving 120 cached cases.
+
+Batching reduced the number of fresh sessions from 128 to 16 and lowered cold elapsed
+time in this workload. Cold batch execution still took substantially longer than ordinary
+pytest. With only one group fresh in the selective batch phase, a four-worker budget had
+no useful group parallelism and was slightly slower than one worker in this trial. This
+is one measurement per condition, without confidence intervals or exclusive host use;
+it supports no universal speedup or linear scaling claim. It also does not justify
+broadening a case's declarations merely to create batches.
+
+The structured [case measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/shared-module-case-linux-docker.json)
+and [batch measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/shared-module-batch-linux-docker.json)
+retain exact budgets, group counts and timing receipts. Raw logs and generated fixtures
+are retained locally; the harness removed its exact owned runtime images.
