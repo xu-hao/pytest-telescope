@@ -255,6 +255,11 @@ assert sys.prefix == '/opt/telescope/python'
 assert importlib.metadata.version('pytest') == '8.3.5'
 assert importlib.metadata.version('pytest-telescope') == '0.1.0a4'
 assert Path('/project/data.txt').read_text() == 'declared-value'
+try: Path('/dev/ordinary-file').write_bytes(b'no scratch outside quota')
+except OSError as exc: assert exc.errno == errno.EROFS
+else: raise AssertionError('writable non-scratch device mount')
+with open('/dev/null','wb') as stream: assert stream.write(b'device I/O') == 10
+with open('/dev/urandom','rb') as stream: assert len(stream.read(16)) == 16
 for missing in ['/project/undeclared.txt', HOST_SECRET, '/etc/passwd', '/bin/sh', HOST_INSTALLATION]:
     assert not os.path.exists(missing), missing
     try: os.stat(missing)
@@ -285,7 +290,7 @@ else: raise AssertionError('executable scratch')
 binary.unlink()
 import pytest
 assert pytest.main(['-q','-p','no:cacheprovider','--basetemp=/tmp/pytest','/project/test_sample.py']) == 0
-print('CAPSULE_RESULT ' + json.dumps(dict(version=list(sys.version_info[:3]), executable=sys.executable, prefix=sys.prefix, source_visible=True, missing_native_denied=True, native_extensions=True, isolated_child=True, child_statuses=True, readonly=True, network_none=True, noexec=True, pytest_cases=2)))
+print('CAPSULE_RESULT ' + json.dumps(dict(version=list(sys.version_info[:3]), executable=sys.executable, prefix=sys.prefix, source_visible=True, missing_native_denied=True, native_extensions=True, isolated_child=True, child_statuses=True, readonly=True, network_none=True, noexec=True, dev_directory_readonly=True, devices_usable=True, pytest_cases=2)))
 """
 
 
@@ -350,6 +355,8 @@ def unit(config, token):
         "--dev",
         "/dev",
         "--remount-ro",
+        "/dev",
+        "--remount-ro",
         "/",
         "--chdir",
         "/project",
@@ -373,6 +380,26 @@ def unit(config, token):
         "-c",
         payload,
     ]
+    # A bounded negative control observes the old --dev composition before
+    # qualification of the corrected readonly device-directory mount.
+    previous = list(argv)
+    index = previous.index("--remount-ro")
+    assert previous[index + 1] == "/dev"
+    del previous[index : index + 2]
+    previous[-1] = """import json
+from pathlib import Path
+try:
+    Path('/dev/ordinary-file').write_bytes(b'bounded native control')
+except OSError as exc:
+    result = dict(writable=False, errno=exc.errno)
+else:
+    result = dict(writable=True, errno=None)
+print(json.dumps(result))
+"""
+    negative = subprocess.run(previous, text=True, capture_output=True, timeout=10)
+    assert negative.returncode == 0, (negative.returncode, negative.stderr)
+    dev_before = json.loads(negative.stdout)
+    assert set(dev_before) == {"writable", "errno"} and type(dev_before["writable"]) is bool
     result = subprocess.run(argv, text=True, capture_output=True, timeout=40)
     after = helper.group_values(own)
     print(
@@ -386,6 +413,7 @@ def unit(config, token):
                 after=after,
                 pool=parent,
                 aggregate=aggregate,
+                original_dev_mount=dev_before,
             )
         ),
         flush=True,
