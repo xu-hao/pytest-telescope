@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  TELESCOPE_WHEEL_SHA256: REPLACE_REVIEWED_WHEEL_SHA256
+  TELESCOPE_WHEEL_SHA256: 823ceca74ac60ef22b739e08edd63e8a2dc49b2f51957ebb4496dbb969de4ab8
   SOURCE_DATE_EPOCH: '1704067200'
   PYTHONDONTWRITEBYTECODE: '1'
 
@@ -51,7 +51,8 @@ jobs:
             -p "User=$(id -u)" -p "Group=$(id -g)" -p CPUQuota=100% -p MemoryMax=2147483648 \
             -p MemorySwapMax=0 -p TasksMax=64 -p RuntimeMaxSec=180 -p TimeoutStopSec=5 \
             -p KillMode=control-group -p "WorkingDirectory=$GITHUB_WORKSPACE" \
-            --setenv="GITHUB_SHA=$GITHUB_SHA" --setenv="TELESCOPE_WHEEL_SHA256=$TELESCOPE_WHEEL_SHA256" \
+            --setenv="GITHUB_SHA=$GITHUB_SHA" --setenv="GITHUB_RUN_ID=$GITHUB_RUN_ID" \
+            --setenv="GITHUB_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT" --setenv="TELESCOPE_WHEEL_SHA256=$TELESCOPE_WHEEL_SHA256" \
             "$RUNNER_TEMP/telescope54-controller/bin/python" -I -B scripts/probe_python_capsules.py \
             --prepare --interpreter /usr/bin/python3.12 --wheels "$RUNNER_TEMP/telescope54-artifact/wheels" \
             --output "$RUNNER_TEMP/telescope54-distro" --archive "$RUNNER_TEMP/telescope54-artifact/distro.zip"
@@ -60,18 +61,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unit="telescope54prepare$GITHUB_RUN_ID.service"
-          sudo systemctl stop "$unit"
-          state=$(systemctl show "$unit" -p ActiveState --value)
-          test "$state" = inactive || test "$state" = failed
-          group=$(systemctl show "$unit" -p ControlGroup --value)
-          if [[ -n "$group" && -e "/sys/fs/cgroup$group/pids.current" ]]; then
-            test "$(cat "/sys/fs/cgroup$group/pids.current")" = 0
-          fi
-          printf 'Exact preparation service terminal: %s; group: %s\n' "$state" "$group"
+          python - "$RUNNER_TEMP/telescope54-artifact/distro.preparation.json" <<'PYDONE'
+          import json, os, pathlib, subprocess, sys
+          unit = 'telescope54prepare' + os.environ['GITHUB_RUN_ID'] + '.service'
+          expected = pathlib.Path('/sys/fs/cgroup/system.slice') / unit
+          marker = pathlib.Path(sys.argv[1])
+          if marker.exists():
+              recorded = json.loads(marker.read_text())
+              assert recorded['cgroup'] == str(expected)
+              print(json.dumps(recorded))
+          def state():
+              result = subprocess.run(['systemctl','show',unit,'-p','LoadState','-p','ActiveState','-p','ControlGroup'], capture_output=True, text=True, timeout=10)
+              value = dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+              assert set(value) == {'LoadState','ActiveState','ControlGroup'}, (result.returncode, result.stderr)
+              assert result.returncode == 0 or value['LoadState'] == 'not-found'
+              assert value['ControlGroup'] in ('', str(expected).removeprefix('/sys/fs/cgroup'))
+              return value
+          observed = state()
+          if observed['ActiveState'] not in ('inactive','failed'):
+              subprocess.run(['sudo','systemctl','stop',unit],check=True,timeout=15)
+              observed = state()
+          assert observed['LoadState'] in ('loaded','not-found') and observed['ActiveState'] in ('inactive','failed'), observed
+          try: expected.stat()
+          except FileNotFoundError: cleanup = dict(removed=True)
+          else:
+              assert (expected/'pids.current').read_text().strip() == '0'
+              cleanup = dict(pids_current=0)
+          print(json.dumps(dict(unit=unit, state=observed, cgroup=str(expected), cleanup=cleanup)))
+          PYDONE
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: python-capsule-${{ github.sha }}
+          name: python-capsule-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/telescope54-artifact
           if-no-files-found: error
           compression-level: 0
@@ -90,7 +110,7 @@ jobs:
           python-version: '3.12.9'
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: python-capsule-${{ github.sha }}
+          name: python-capsule-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/telescope54-artifact
       - name: Install exact transferred candidate
         shell: bash
@@ -282,7 +302,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: python-capsule-results-${{ github.sha }}
+          name: python-capsule-results-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/telescope54-native/report.json
             ${{ runner.temp }}/telescope54-native.cleanup.json

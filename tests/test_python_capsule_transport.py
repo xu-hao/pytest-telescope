@@ -101,6 +101,11 @@ def test_transport_roundtrip_preserves_exact_payload_and_identity(tmp_path, tran
         else:
             assert stat.S_IMODE(value.st_mode) == record["mode"]
             assert path.read_bytes() == (original.payload.root / name).read_bytes()
+    for name in ["", *original.payload.directories]:
+        before = (original.payload.root / name).lstat()
+        after = (restored.payload.root / name).lstat()
+        assert stat.S_IMODE(before.st_mode) == stat.S_IMODE(after.st_mode)
+        assert before.st_mtime_ns == after.st_mtime_ns
     restored.payload.verify()
     with zipfile.ZipFile(archive) as source:
         # Identical bytes share one blob even when mode and timestamp differ.

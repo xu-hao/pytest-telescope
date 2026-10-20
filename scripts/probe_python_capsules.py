@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import zipfile
@@ -38,6 +39,8 @@ def json_bytes(value):
 def bindings():
     return dict(
         head=os.environ["GITHUB_SHA"],
+        run_id=os.environ["GITHUB_RUN_ID"],
+        run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
         workflow_sha256=digest(WORKFLOW.read_bytes()),
         script_sha256=digest(SCRIPT.read_bytes()),
         runner=runner_identity(),
@@ -107,11 +110,19 @@ def validate_manifest(value):
     return total
 
 
-def export(result, archive):
+def export(result, archive, *, preparation_resources=None):
     result.payload.verify()
     manifest = result.payload.manifest()
     validate_manifest(manifest)
+    directory_metadata = {}
+    for name in ["", *manifest["directories"]]:
+        value = (result.payload.root / name).lstat()
+        assert stat.S_ISDIR(value.st_mode)
+        directory_metadata[name] = dict(
+            mode=stat.S_IMODE(value.st_mode), mtime_ns=value.st_mtime_ns
+        )
     metadata = dict(
+        directory_metadata=directory_metadata,
         schema=1,
         bindings=bindings(),
         manifest=manifest,
@@ -144,6 +155,7 @@ def export(result, archive):
         bytes=result.payload.bytes_used,
         entries=len(manifest["files"]) + len(manifest["directories"]),
         timings=result.timings,
+        preparation_resources=preparation_resources,
     )
     archive.with_suffix(".json").write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt
@@ -177,14 +189,25 @@ def restore(archive, destination):
             "wheel_hashes",
             "timings",
             "bytes",
+            "directory_metadata",
         }
         assert metadata["schema"] == 1 and metadata["bindings"] == bindings()
         manifest = metadata["manifest"]
         total = validate_manifest(manifest)
+        directories = metadata["directory_metadata"]
+        assert type(directories) is dict and set(directories) == set(manifest["directories"]) | {""}
+        for value in directories.values():
+            assert type(value) is dict and set(value) == {"mode", "mtime_ns"}
+            assert type(value["mode"]) is int and 0 <= value["mode"] <= 0o777
+            assert type(value["mtime_ns"]) is int and 0 <= value["mtime_ns"] < 2**63
         expected = {
             "files/" + rec["sha256"] for rec in manifest["files"].values() if rec["kind"] == "file"
         }
         assert set(names) == expected | {"manifest.json"}
+        for record in manifest["files"].values():
+            if record["kind"] == "file":
+                info = source.getinfo("files/" + record["sha256"])
+                assert info.file_size == record["size"] and info.file_size <= MAX_BYTES
         payload = capsule.Payload(destination)
         # No links exist until all regular files/directories have been created.
         for name, record in manifest["files"].items():
@@ -197,11 +220,10 @@ def restore(archive, destination):
         for name, record in manifest["files"].items():
             if record["kind"] == "symlink":
                 payload.symlink("/" + name, record["target"])
-        for name in payload.directories:
+        for name, value in directories.items():
             directory = payload.root / name
-            directory.chmod(0o755)
-            os.utime(directory, ns=(0, 0))
-        os.utime(payload.root, ns=(0, 0))
+            directory.chmod(value["mode"])
+            os.utime(directory, ns=(value["mtime_ns"], value["mtime_ns"]))
         assert payload.manifest() == manifest and payload.bytes_used == total == metadata["bytes"]
         payload.verify()
     result = python_capsule.PythonCapsule(
@@ -307,9 +329,16 @@ def unit(config, token):
         "--new-session",
         "--cap-drop",
         "ALL",
-        "--ro-bind",
-        item["root"],
+        "--tmpfs",
         "/",
+    ]
+    # A fresh root supplies mountpoints without altering or broadening the closure.
+    for entry in item["mounts"]:
+        if entry["kind"] == "symlink":
+            argv += ["--symlink", entry["target"], "/" + entry["name"]]
+        else:
+            argv += ["--ro-bind", str(Path(item["root"]) / entry["name"]), "/" + entry["name"]]
+    argv += [
         "--ro-bind",
         config["view"],
         "/project",
@@ -320,6 +349,8 @@ def unit(config, token):
         "/proc",
         "--dev",
         "/dev",
+        "--remount-ro",
+        "/",
         "--chdir",
         "/project",
         "--clearenv",
@@ -407,7 +438,20 @@ def controller(config):
                 timings=result.timings,
             )
         config["capsules"] = {
-            token: dict(root=str(result.payload.root), executable=result.executable)
+            token: dict(
+                root=str(result.payload.root),
+                executable=result.executable,
+                mounts=[
+                    dict(
+                        name=path.name,
+                        kind="symlink",
+                        target=result.payload.records[path.name]["target"],
+                    )
+                    if path.is_symlink()
+                    else dict(name=path.name, kind="readonly")
+                    for path in sorted(result.payload.root.iterdir())
+                ],
+            )
             for token, result in capsules.items()
         }
         view = root / "view"
@@ -482,6 +526,51 @@ def controller(config):
 
 def launch(args):
     helper = resources()
+    # Probe in the invoking admission context before any external service. This
+    # launcher-only prerequisite gives no host /usr mount to either test payload.
+    preflight = subprocess.run(
+        [
+            str(args.bwrap),
+            "--unshare-all",
+            "--unshare-user",
+            "--disable-userns",
+            "--die-with-parent",
+            "--new-session",
+            "--cap-drop",
+            "ALL",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--symlink",
+            "usr/lib",
+            "/lib",
+            "--symlink",
+            "usr/lib64",
+            "/lib64",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--chdir",
+            "/",
+            "--",
+            "/usr/bin/true",
+        ],
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
+    print(
+        json.dumps(
+            dict(
+                entry_preflight=dict(
+                    exit_code=preflight.returncode, stdout=preflight.stdout, stderr=preflight.stderr
+                )
+            )
+        ),
+        flush=True,
+    )
+    assert preflight.returncode == 0
     # Same reviewed ownership classification; distinct exact prefix from prior probes.
     run_id = "native54" + args.run_id
     helper.ownership_preflight(run_id)
@@ -539,7 +628,7 @@ def launch(args):
             "KillMode=control-group",
         ]:
             argv += ["-p", value]
-        for name in ["GITHUB_SHA", "TELESCOPE_WHEEL_SHA256"]:
+        for name in ["GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "TELESCOPE_WHEEL_SHA256"]:
             argv += ["--setenv=" + name + "=" + os.environ[name]]
         argv += [sys.executable, "-I", "-B", str(SCRIPT), "--controller", "--config", str(cfg)]
         result = subprocess.run(argv, timeout=260)
@@ -564,10 +653,42 @@ def main():
     parser.add_argument("--run-id")
     args = parser.parse_args()
     if args.prepare:
+        membership = Path("/proc/self/cgroup").read_text()
+        own = Path("/sys/fs/cgroup") / next(
+            row.split(":", 2)[2].lstrip("/")
+            for row in membership.splitlines()
+            if row.startswith("0::")
+        )
+        assert (
+            str(own)
+            == "/sys/fs/cgroup/system.slice/telescope54prepare"
+            + os.environ["GITHUB_RUN_ID"]
+            + ".service"
+        )
+        observed = resources().group_values(own)
+        assert observed["cpu.max"] == "100000 100000" and observed["memory.max"] == "2147483648"
+        assert observed["memory.swap.max"] == "0" and observed["pids.max"] == "64"
+        preparation_resources = dict(
+            cgroup=str(own),
+            observed=observed,
+            bindings=bindings(),
+            storage=dict(
+                payload_bytes=MAX_BYTES,
+                archive_bytes=MAX_ARCHIVE,
+                entries=MAX_ENTRIES,
+                aggregate_disk_quota_enforced=False,
+            ),
+        )
+        args.archive.with_suffix(".preparation.json").write_text(
+            json.dumps(preparation_resources, indent=2) + "\n"
+        )
         result = python_capsule.prepare(
             args.output, args.interpreter, sorted(args.wheels.glob("*.whl"))
         )
-        print(json.dumps(export(result, args.archive)), flush=True)
+        print(
+            json.dumps(export(result, args.archive, preparation_resources=preparation_resources)),
+            flush=True,
+        )
     elif args.cleanup:
         resources().cleanup(json.loads(args.config.read_text()))
     elif args.unit:
