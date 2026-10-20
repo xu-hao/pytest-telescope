@@ -90,7 +90,7 @@ def normalize(spec, profile=None, required=None):
 
 def provenance(profile):
     implementation = hashlib.sha256()
-    for name in ("runtime.py", "runtime_profiles.py"):
+    for name in ("runtime.py", "runtime_profiles.py", "python_source.py"):
         implementation.update(name.encode())
         implementation.update(Path(__file__).with_name(name).read_bytes())
     definition = dict(schema=1, profile=profile, preparation=implementation.hexdigest())

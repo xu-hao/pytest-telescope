@@ -499,6 +499,7 @@ def test_identity_tracks_filesystem_configuration_and_daemon_policy(tmp_path, mo
         "policy": runtime.POLICY,
         "profile": "python-v1",
         "provenance": runtime.runtime_profiles.provenance("python-v1"),
+        "source_slot": runtime.python_source.SLOT_ID,
     }
     runtime._durable(state / "runtime.json", metadata)
     inspected = {
@@ -511,6 +512,7 @@ def test_identity_tracks_filesystem_configuration_and_daemon_policy(tmp_path, mo
                 runtime.LABEL + "project": runtime._project(tmp_path),
                 runtime.LABEL + "profile": metadata["profile"],
                 runtime.LABEL + "provenance": metadata["provenance"],
+                runtime.LABEL + "source-slot": runtime.python_source.SLOT_ID,
             },
             "Env": ["FIXED=1"],
         },

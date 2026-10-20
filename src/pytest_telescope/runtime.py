@@ -15,7 +15,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import runtime_profiles
+from . import python_source, runtime_profiles
 from .model import DeclarationError, InfrastructureError, UnsupportedCapability, fingerprint
 from .result import validate_batch, validate_collection, validate_result
 
@@ -25,7 +25,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BASE = "python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1"
-POLICY = "docker-nonroot-ro-none-v3"
+POLICY = "docker-nonroot-ro-none-v4"
 DEFAULT_REQUIREMENTS = (
     "pytest==9.1.1\niniconfig==2.3.0\npackaging==25.0\npluggy==1.6.0\npygments==2.19.2\n"
 )
@@ -516,6 +516,8 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                     "RUN python -m pip check\n"
                     "COPY worker.py /opt/telescope/worker.py\n"
                     "RUN chmod 0444 /opt/telescope/worker.py\n"
+                    + python_source.dockerfile()
+                    + f'LABEL {LABEL}source-slot="{python_source.SLOT_ID}"\n'
                     f'LABEL {LABEL}policy="{POLICY}" {LABEL}recipe="{recipe}" '
                     f'{LABEL}project="{project}" {LABEL}profile="{profile}" '
                     f'{LABEL}provenance="{provenance}"\n'
@@ -597,6 +599,7 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                         if (
                             labels.get(LABEL + "profile") != profile
                             or labels.get(LABEL + "provenance") != provenance
+                            or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
                         ):
                             raise CleanupError("runtime profile image identity mismatch")
                         if image not in images:
@@ -618,6 +621,7 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
             "policy": POLICY,
             "profile": profile,
             "provenance": provenance,
+            "source_slot": python_source.SLOT_ID,
         }
         _durable(state / "runtime.json", metadata)
         return metadata
@@ -640,6 +644,7 @@ def identity(root, *, runtime_profile=None):
             or metadata["policy"] != POLICY
             or metadata["profile"] != profile
             or metadata["provenance"] != provenance
+            or metadata["source_slot"] != python_source.SLOT_ID
         ):
             raise InfrastructureError("runtime is stale; run the runtime command again")
         inspected = _image_info(metadata["image"], _project(root), metadata["recipe"])
@@ -647,6 +652,7 @@ def identity(root, *, runtime_profile=None):
         if (
             labels.get(LABEL + "profile") != profile
             or labels.get(LABEL + "provenance") != provenance
+            or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
         ):
             raise InfrastructureError("prepared runtime profile does not match requested identity")
         if (
@@ -767,6 +773,7 @@ def execute(
     suite_cwd=".",
     suite="default",
     metadata_directory=None,
+    python_settings=None,
     limits=None,
     cancellation=None,
     selection_disabled=False,
@@ -794,6 +801,15 @@ def execute(
         raise InfrastructureError("worker invocation is not owned by this controller")
     if any(key.startswith("TELESCOPE_") for key in environment):
         raise DeclarationError("environment must not override worker protocol")
+    settings = (
+        {"profile": "default", "source_roots": []} if python_settings is None else python_settings
+    )
+    metadata_present = False
+    if metadata_directory is not None:
+        metadata_directory = Path(metadata_directory).resolve()
+        if metadata_directory.parent != directory or metadata_directory.name != "metadata":
+            raise InfrastructureError("metadata requires an owned worker directory")
+        metadata_present = next(metadata_directory.iterdir(), None) is not None
     control = directory / "control"
     control.mkdir(exist_ok=True)
     for filename, text in {
@@ -827,6 +843,14 @@ def execute(
                 "suite_root": suite_root,
                 "suite": suite,
                 "metadata": metadata_directory is not None,
+                "python_paths": python_source.projection(settings, False)
+                .decode("utf-8")
+                .splitlines(),
+                "source_projection": hashlib.sha256(
+                    python_source.projection(settings, metadata_present)
+                ).hexdigest()
+                if settings["profile"] == python_source.ISOLATED
+                else None,
                 "selection_disabled": selection_disabled,
                 "allow_unknown_selectors": allow_unknown_selectors,
             }
@@ -880,6 +904,16 @@ def execute(
         if metadata_directory.parent != directory or metadata_directory.name != "metadata":
             raise InfrastructureError("metadata requires an owned worker directory")
         cmd += ["--mount", f"type=bind,src={metadata_directory},dst=/metadata,readonly"]
+    projection = python_source.materialize(control, settings, metadata_present)
+    if projection is not None:
+        if projection.parent != control or projection.name != "source-view.pth":
+            raise InfrastructureError("source projection requires its exact owned control file")
+        if _read(projection, python_source.MAX_BYTES) != python_source.projection(
+            settings, metadata_present
+        ):
+            raise InfrastructureError("source projection bytes do not match the declared view")
+        os.utime(projection, ns=(0, 0), follow_symlinks=False)
+        cmd += ["--mount", f"type=bind,src={projection},dst={python_source.SLOT},readonly"]
     for filename in ("hosts", "hostname", "resolv.conf"):
         cmd += ["--mount", f"type=bind,src={control / filename},dst=/etc/{filename},readonly"]
     for key, value in sorted(environment.items()):

@@ -340,6 +340,7 @@ Marker reference <specification>
 Execution contract <execution-contract>
 Optional batches <batching>
 Pinned local Git runtime <git-runtime>
+Isolated Python source <isolated-source>
 Scoped execution extension <scoped-execution>
 Run result reference <result-schema>
 Benchmark <benchmark>
