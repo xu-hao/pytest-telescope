@@ -14,6 +14,21 @@ import pytest
 MAX_INVENTORY = 67_108_864
 
 
+def reap_completed_children():
+    # PID1 adopts orphaned children. Reap only those already exited after all teardown.
+    # Both bounds prevent a concurrently forking live child from extending this phase.
+    reap_deadline = time.monotonic() + 0.05
+    for _ in range(4096):
+        if time.monotonic() >= reap_deadline:
+            break
+        try:
+            child, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        if child == 0:
+            break
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -389,6 +404,7 @@ def main():
             pytest.mark.telescope = original_marker
     if declaration_error:
         exit_code = 4
+    reap_completed_children()
     leaked = [name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()]
     usage = resource.getrusage(resource.RUSAGE_SELF)
     children = resource.getrusage(resource.RUSAGE_CHILDREN)
