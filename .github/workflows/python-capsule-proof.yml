@@ -1,0 +1,292 @@
+name: Installed Python capsule native proof
+
+on:
+  push:
+    branches: [proof/54-python-capsules]
+
+permissions:
+  contents: read
+
+env:
+  TELESCOPE_WHEEL_SHA256: REPLACE_REVIEWED_WHEEL_SHA256
+  SOURCE_DATE_EPOCH: '1704067200'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  prepare-distro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.9'
+      - name: Build exact candidate and pinned clean wheel inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/telescope54-build"
+          "$RUNNER_TEMP/telescope54-build/bin/python" -m pip install build==1.2.2.post1 hatchling==1.27.0
+          "$RUNNER_TEMP/telescope54-build/bin/python" -m build --no-isolation --wheel --outdir "$RUNNER_TEMP/telescope54-artifact/wheels"
+          wheel="$RUNNER_TEMP/telescope54-artifact/wheels/pytest_telescope-0.1.0a4-py3-none-any.whl"
+          printf '%s  %s\n' "$TELESCOPE_WHEEL_SHA256" "$wheel" | sha256sum --check --strict
+          "$RUNNER_TEMP/telescope54-build/bin/python" -m pip download --only-binary=:all: --no-deps --dest "$RUNNER_TEMP/telescope54-artifact/wheels" pytest==8.3.5 packaging==24.2 pluggy==1.5.0 iniconfig==2.0.0
+          python -m venv "$RUNNER_TEMP/telescope54-controller"
+          "$RUNNER_TEMP/telescope54-controller/bin/python" -m pip install --no-index --no-deps "$RUNNER_TEMP"/telescope54-artifact/wheels/*.whl
+          "$RUNNER_TEMP/telescope54-controller/bin/python" -m pip check
+          "$RUNNER_TEMP/telescope54-controller/bin/python" -m pip freeze
+          sha256sum "$RUNNER_TEMP"/telescope54-artifact/wheels/*.whl
+          git rev-parse HEAD
+          sha256sum scripts/probe_python_capsules.py .github/workflows/python-capsule-proof.yml
+      - name: Assemble system CPython closure under explicit preparation limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          cat /etc/os-release
+          /usr/bin/python3.12 -I -S -c 'import sys; print(sys.version)'
+          sudo systemd-run --wait --pipe --unit="telescope54prepare$GITHUB_RUN_ID.service" \
+            -p "User=$(id -u)" -p "Group=$(id -g)" -p CPUQuota=100% -p MemoryMax=2147483648 \
+            -p MemorySwapMax=0 -p TasksMax=64 -p RuntimeMaxSec=180 -p TimeoutStopSec=5 \
+            -p KillMode=control-group -p "WorkingDirectory=$GITHUB_WORKSPACE" \
+            --setenv="GITHUB_SHA=$GITHUB_SHA" --setenv="TELESCOPE_WHEEL_SHA256=$TELESCOPE_WHEEL_SHA256" \
+            "$RUNNER_TEMP/telescope54-controller/bin/python" -I -B scripts/probe_python_capsules.py \
+            --prepare --interpreter /usr/bin/python3.12 --wheels "$RUNNER_TEMP/telescope54-artifact/wheels" \
+            --output "$RUNNER_TEMP/telescope54-distro" --archive "$RUNNER_TEMP/telescope54-artifact/distro.zip"
+      - name: Verify preparation unit has no remaining processes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          unit="telescope54prepare$GITHUB_RUN_ID.service"
+          sudo systemctl stop "$unit"
+          state=$(systemctl show "$unit" -p ActiveState --value)
+          test "$state" = inactive || test "$state" = failed
+          group=$(systemctl show "$unit" -p ControlGroup --value)
+          if [[ -n "$group" && -e "/sys/fs/cgroup$group/pids.current" ]]; then
+            test "$(cat "/sys/fs/cgroup$group/pids.current")" = 0
+          fi
+          printf 'Exact preparation service terminal: %s; group: %s\n' "$state" "$group"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-capsule-${{ github.sha }}
+          path: ${{ runner.temp }}/telescope54-artifact
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  native-execution:
+    needs: prepare-distro
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.9'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-capsule-${{ github.sha }}
+          path: ${{ runner.temp }}/telescope54-artifact
+      - name: Install exact transferred candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel="$RUNNER_TEMP/telescope54-artifact/wheels/pytest_telescope-0.1.0a4-py3-none-any.whl"
+          printf '%s  %s\n' "$TELESCOPE_WHEEL_SHA256" "$wheel" | sha256sum --check --strict
+          python -m venv "$RUNNER_TEMP/telescope54-controller"
+          "$RUNNER_TEMP/telescope54-controller/bin/python" -m pip install --no-index --no-deps "$RUNNER_TEMP"/telescope54-artifact/wheels/*.whl
+          "$RUNNER_TEMP/telescope54-controller/bin/python" -m pip check
+          printf 'Original distro3.12 installation is absent from this Ubuntu22 host:\n'
+          test ! -e /usr/bin/python3.12
+          test ! -e /usr/lib/python3.12
+      - name: Prepare pinned Bubblewrap and ephemeral user manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          sudo apt-get update -q
+          sudo apt-get install -y gcc meson ninja-build pkg-config libcap-dev libselinux1-dev
+          bwrap_commit=8e51677abd7e3338e4952370bf7d902e37d8cbb6
+          bwrap_archive="$RUNNER_TEMP/telescope-bubblewrap.tar.gz"
+          curl --fail --location --max-time 60 --output "$bwrap_archive" "https://codeload.github.com/containers/bubblewrap/tar.gz/$bwrap_commit"
+          printf '6cbf3efe1cbfd8ac1c174f28fa44db1d776f33d43f55292aed5db17ca4a10d22  %s\n' "$bwrap_archive" | sha256sum --check --strict
+          tar -xzf "$bwrap_archive" -C "$RUNNER_TEMP"
+          meson setup "$RUNNER_TEMP/telescope-bubblewrap-build" "$RUNNER_TEMP/bubblewrap-$bwrap_commit" \
+            --prefix="$RUNNER_TEMP/telescope-bubblewrap" --buildtype=release \
+            -Dtests=false -Dman=disabled -Dbash_completion=disabled -Dzsh_completion=disabled -Dselinux=enabled
+          meson compile -C "$RUNNER_TEMP/telescope-bubblewrap-build" -j 2
+          meson install -C "$RUNNER_TEMP/telescope-bubblewrap-build"
+          test ! -u "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          test ! -g "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          printf 'Upstream bubblewrap v0.9.0 commit: %s\n' "$bwrap_commit"
+          sha256sum "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          stat -c 'bubblewrap mode: %a' "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap"
+          dpkg-query -W gcc meson ninja-build libcap-dev libselinux1-dev
+          printf 'Hosted ubuntu-22.04 is deprecated; retirement scheduled 2027-04-17. This is current-run provenance, not a portability guarantee.\n'
+          printf 'One-time package/environment/scratch preparation: %s seconds\n' "$((SECONDS-started))"
+          uname -a
+          cat /etc/os-release
+          "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --version
+          for profile in /etc/apparmor.d/*bwrap*; do
+            if [[ -f "$profile" ]]; then
+              printf '\nInstalled bubblewrap profile: %s\n' "$profile"
+              cat "$profile"
+            fi
+          done
+          sudo cat /sys/kernel/security/apparmor/profiles | awk '/bwrap/'
+          runner_uid=$(id -u)
+          manager_unit="user@$runner_uid.service"
+          dropin_dir="/run/systemd/system/$manager_unit.d"
+          dropin="$dropin_dir/54-telescope-native-proof.conf"
+          test ! -e "$dropin"
+          test ! -L "$dropin"
+          manager_path="/sys/fs/cgroup/user.slice/user-$runner_uid.slice/$manager_unit"
+          capture_manager_tree() {
+            printf 'Manager hierarchy observation: %s\n' "$1"
+            for group in "/sys/fs/cgroup/user.slice/user-$runner_uid.slice" "$manager_path"; do
+              for field in cgroup.controllers cgroup.subtree_control cgroup.type cgroup.procs cgroup.events; do
+                printf 'Bounded field (at most 4096 bytes): %s/%s\n' "$group" "$field"
+                if timeout 2s head -c 4096 "$group/$field"; then
+                  printf '\nField read exit: 0\n'
+                else
+                  printf '\nField read unavailable, exit: %s\n' "$?"
+                fi
+              done
+            done
+          }
+          old_group=$(systemctl show "$manager_unit" -p ControlGroup --value)
+          [[ -z "$old_group" || "/sys/fs/cgroup$old_group" == "$manager_path" ]]
+          capture_manager_tree before-stop
+          sudo timeout 30s systemctl stop "$manager_unit"
+          stopped_state=$(systemctl show "$manager_unit" -p ActiveState --value)
+          printf 'Stopped manager state: %s\n' "$stopped_state"
+          test "$stopped_state" = inactive
+          capture_manager_tree after-stop-before-delegation
+          python - "$manager_path" <<'PYCG'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          try:
+              path.stat()
+          except FileNotFoundError:
+              print("Original manager cgroup absent before delegation")
+          else:
+              events = dict(line.split() for line in (path / "cgroup.events").read_text().splitlines())
+              assert events["populated"] == "0", events
+              assert not (path / "cgroup.procs").read_text().strip()
+              print("Original manager cgroup present and unpopulated before delegation")
+          PYCG
+          printf '[Service]\nDelegate=cpu memory pids\n' > "$RUNNER_TEMP/telescope54-user-manager.conf"
+          printf '%s\n' "$dropin" > "$RUNNER_TEMP/telescope54-delegation-owned"
+          sudo install -d -m 0755 "$dropin_dir"
+          sudo install -m 0644 "$RUNNER_TEMP/telescope54-user-manager.conf" "$dropin"
+          sudo systemctl daemon-reload
+          setup_start=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          if sudo loginctl enable-linger "$(id -un)" && sudo systemctl start "$manager_unit"; then
+            :
+          else
+            start_status=$?
+            set +e
+            printf 'Owned manager clean start failed: exit=%s\n' "$start_status"
+            timeout 10s systemctl show "$manager_unit" -p LoadState -p ActiveState -p SubState -p Result \
+              -p ExecMainPID -p ExecMainCode -p ExecMainStatus -p ControlPID -p ControlGroup -p Delegate -p DelegateControllers
+            printf 'Manager show exit: %s\n' "$?"
+            timeout 10s systemctl status "$manager_unit" --full --no-pager
+            printf 'Manager status exit: %s\n' "$?"
+            sudo timeout 10s journalctl --unit "$manager_unit" --since "$setup_start" --lines 80 --no-pager -o short-iso
+            printf 'Exact-unit journal exit: %s\n' "$?"
+            failed_pid=$(timeout 10s systemctl show "$manager_unit" --property=ExecMainPID --value)
+            pid_query_status=$?
+            printf 'Failed child PID query exit: %s; value: %s\n' "$pid_query_status" "$failed_pid"
+            if [[ "$pid_query_status" == 0 && "$failed_pid" =~ ^[1-9][0-9]*$ ]]; then
+              sudo timeout 10s journalctl "_PID=$failed_pid" --since "$setup_start" --lines 80 --no-pager -o short-iso
+              printf 'Exact-child journal exit: %s\n' "$?"
+            else
+              printf 'Exact-child journal unavailable: no valid positive failed PID.\n'
+            fi
+            for group in /sys/fs/cgroup/user.slice "/sys/fs/cgroup/user.slice/user-$runner_uid.slice" "/sys/fs/cgroup/user.slice/user-$runner_uid.slice/$manager_unit"; do
+              for field in cgroup.controllers cgroup.subtree_control cpu.max memory.max pids.max; do
+                printf 'Owned-manager ancestor field: %s/%s\n' "$group" "$field"
+                timeout 2s cat "$group/$field"
+                printf 'Field read exit: %s\n' "$?"
+              done
+            done
+            capture_manager_tree after-failed-clean-start
+            exit "$start_status"
+          fi
+          capture_manager_tree after-clean-start
+          systemctl show "$manager_unit" -p Delegate -p DelegateControllers -p ControlGroup -p ActiveState
+          delegated=$(systemctl show "$manager_unit" -p DelegateControllers --value)
+          for controller in cpu memory pids; do
+            [[ " $delegated " == *" $controller "* ]]
+          done
+          manager_cgroup=$(systemctl show "$manager_unit" -p ControlGroup --value)
+          test "$manager_cgroup" = "/user.slice/user-$runner_uid.slice/$manager_unit"
+          read -r available < "/sys/fs/cgroup$manager_cgroup/cgroup.controllers"
+          printf 'Actual user-manager controllers: %s\n' "$available"
+          for controller in cpu memory pids; do
+            [[ " $available " == *" $controller "* ]]
+          done
+          systemd --version
+      - name: Execute both installed production closures in bounded empty namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          systemctl --user is-active default.target
+          "$RUNNER_TEMP/telescope54-controller/bin/python" -I -B scripts/probe_python_capsules.py \
+            --output "$RUNNER_TEMP/telescope54-native" --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" \
+            --archive "$RUNNER_TEMP/telescope54-artifact/distro.zip" --wheels "$RUNNER_TEMP/telescope54-artifact/wheels" \
+            --interpreter "$(command -v python)" --run-id "$GITHUB_RUN_ID"
+      - name: Retain exact native findings
+        if: always()
+        shell: bash
+        run: |
+          for record in "$RUNNER_TEMP/telescope54-native/report.json" "$RUNNER_TEMP/telescope54-native.cleanup.json"; do
+            if [[ -f "$record" ]]; then cat "$record"; fi
+          done
+      - name: Verify only proof-owned service and cgroup cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          if [[ -f "$RUNNER_TEMP/telescope54-native.launch.json" ]]; then
+            "$RUNNER_TEMP/telescope54-controller/bin/python" -I -B scripts/probe_python_capsules.py \
+              --cleanup --config "$RUNNER_TEMP/telescope54-native.launch.json"
+          fi
+      - name: Remove only owned ephemeral delegation configuration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="$RUNNER_TEMP/telescope54-delegation-owned"
+          if [[ -f "$marker" ]]; then
+            expected="/run/systemd/system/user@$(id -u).service.d/54-telescope-native-proof.conf"
+            test "$(cat "$marker")" = "$expected"
+            if sudo test -e "$expected"; then
+              sudo cmp "$RUNNER_TEMP/telescope54-user-manager.conf" "$expected"
+              sudo rm -- "$expected"
+            fi
+            sudo rmdir --ignore-fail-on-non-empty "$(dirname "$expected")"
+            sudo systemctl daemon-reload
+            test ! -e "$expected"
+            printf 'Owned runtime-only delegation drop-in removed; ephemeral manager is not restarted during cleanup.\n'
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: python-capsule-results-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/telescope54-native/report.json
+            ${{ runner.temp }}/telescope54-native.cleanup.json
+            ${{ runner.temp }}/telescope54-native.launch.json
+            ${{ runner.temp }}/telescope54-artifact/distro.json
+          if-no-files-found: warn
+          retention-days: 14
