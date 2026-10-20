@@ -54,6 +54,12 @@ bounded fresh-attempt retry and cancellation/drain rules apply, with no new nest
 retry owner. A cancelled/failed attempt supplies no reusable partial success. Cleanup
 may terminate an already failed owned container; that does not turn it into success.
 
+An exhausted retryable worker descendant/output incident makes that execution
+noncacheable. If its owned Docker cleanup succeeds, an independently successful
+collection can still publish its inventory. A terminal `CleanupError` or cancellation
+blocks publication of every newly staged record, including inventory. These are
+separate outcomes; worker refusal alone does not imply failed container cleanup.
+
 Supervisor faults use one bounded internal `TELESCOPE_INFRASTRUCTURE` frame with
 exact fields `kind` and `nonce`. The kind is one of `descendant`, `output` or
 `protocol`, and the nonce must match the invocation. Duplicate, conflicting or
