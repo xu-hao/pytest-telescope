@@ -1,7 +1,8 @@
 """Static scope preview; actual case enumeration belongs to isolated collection."""
 
 from . import python_source, runtime_profiles
-from .execution import execution_mode
+from .execution import backend_profile, controller_envelope, envelope
+from .execution import execution_mode as choose_mode
 from .model import DeclarationError, InfrastructureError, load, render_json
 
 PlanError = DeclarationError
@@ -16,6 +17,10 @@ def make_plan(
     required_capabilities=None,
     python_profile=None,
     source_roots=None,
+    backend=None,
+    execution_mode=None,
+    budget=None,
+    controller_resources=None,
 ):
     manifest = load(
         root,
@@ -26,20 +31,36 @@ def make_plan(
     )
     selection = runtime_profiles.normalize(manifest.runtime, runtime_profile, required_capabilities)
     runtime_profiles.validate_environment(selection, manifest.env)
+    required = any(manifest.scoped_files.values())
+    resources = envelope(manifest.execution, budget, require_fit=required)
+    controller = controller_envelope(manifest.execution, controller_resources)
+    mode = choose_mode(manifest.execution, execution_mode)
     result = {
+        "backend": backend_profile(manifest.execution, backend),
+        "resources": {
+            "scoped": {
+                "required": required,
+                "validated": False,
+                "configured": {"worker": resources.worker, "budget": resources.budget},
+                "concurrency": None,
+                "enforced": None,
+            },
+            "controller": {"configured": controller, "enforced": None},
+            "ordinary": {"enforcement": "inherited-host", "slot_limit": 1, "peak_sessions": 0},
+        },
         "runtime": selection,
         "python": python_source.envelope(manifest.suites),
         "mode": "plan-only",
         "execution": {
-            "mode": execution_mode(manifest.execution),
-            "profile": execution_mode(manifest.execution) + "-v1",
+            "mode": mode,
+            "profile": mode + "-v1",
         },
-        "case_inventory": "requires isolated pytest collection",
+        "case_inventory": "requires real ordinary/scoped pytest collection",
         "inventory": manifest.inventory,
         "suites": [{**suite.identity(), "inventory": suite.inventory} for suite in manifest.suites],
         "distributions": sorted(manifest.distributions),
-        "discovery_scope": "broad-potential" if manifest.broad_inputs else "declared-union",
-        "inputs": manifest.units[0].inputs,
+        "discovery_scope": "declared-union" if required else "ordinary",
+        "inputs": sorted({name for unit in manifest.units for name in unit.inputs}),
         "declarations": [
             {
                 "file": row["file"],

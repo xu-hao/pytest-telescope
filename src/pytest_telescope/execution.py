@@ -17,6 +17,7 @@ from .model import (
 )
 
 DEFAULT_WORKER = dict(cpus=1, memory_bytes=536870912, processes=128, scratch_bytes=67108864)
+DEFAULT_CONTROLLER = dict(cpus=1, memory_bytes=2147483648, processes=64, scratch_bytes=1073741824)
 MAX_SUITES = 64
 MAX_WORKERS = 32
 
@@ -28,8 +29,8 @@ class Envelope:
     concurrency: int
 
 
-def envelope(config, override=None):
-    config = mapping(config, "execution", {"worker", "budget", "mode"})
+def envelope(config, override=None, *, require_fit=True):
+    config = mapping(config, "execution", {"worker", "budget", "mode", "backend", "controller"})
     execution_mode(config)
 
     def dimensions(value, label):
@@ -47,6 +48,8 @@ def envelope(config, override=None):
             or value["scratch_bytes"] > 2**50
         ):
             raise DeclarationError(label + " exceeds supported resource dimensions")
+        if value["memory_bytes"] % 4096 or value["scratch_bytes"] % 4096:
+            raise DeclarationError(label + " memory and scratch require 4096-byte multiples")
         return dict(value)
 
     worker = dimensions(config.get("worker", DEFAULT_WORKER), "execution.worker")
@@ -54,9 +57,21 @@ def envelope(config, override=None):
         override if override is not None else config.get("budget", worker), "execution.budget"
     )
     count = min(MAX_WORKERS, *(budget[key] // worker[key] for key in worker))
-    if count < 1:
+    if count < 1 and require_fit:
         raise DeclarationError("aggregate budget cannot fit one worker in every dimension")
     return Envelope(worker, budget, count)
+
+
+def backend_profile(config, override=None):
+    profile = config.get("backend", "bubblewrap-v1") if override is None else override
+    if type(profile) is not str or profile != "bubblewrap-v1":
+        raise UnsupportedCapability("backend:profile", "unknown execution backend or version")
+    return dict(name="bubblewrap", profile=profile, identity=None)
+
+
+def controller_envelope(config, override=None):
+    selected = config.get("controller", DEFAULT_CONTROLLER) if override is None else override
+    return envelope({"worker": selected}).worker
 
 
 def execution_mode(config, override=None):

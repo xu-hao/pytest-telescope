@@ -70,6 +70,8 @@ class Manifest:
     distributions: dict = field(default_factory=dict)
     execution: dict = field(default_factory=dict)
     runtime: dict = field(default_factory=dict)
+    ordinary_files: dict[str, list[str]] = field(default_factory=dict)
+    scoped_files: dict[str, list[str]] = field(default_factory=dict)
 
     @cached_property
     def registry_by_id(self):
@@ -388,8 +390,8 @@ def load(
                 ) from exc
         suite.structural_files = sorted(names)
     execution = spec.get("execution", {})
-    envelope(execution)
-    distributions = load_distributions(root, spec.get("distributions", {}), expanded)
+    envelope(execution, require_fit=False)
+    distributions = {}
 
     def declaration(item, label):
         item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions"})
@@ -431,9 +433,16 @@ def load(
             active.remove(name)
         return resolved[name]
 
-    for name in bundles:
-        bundle(name)
-    defaults = declaration(spec.get("defaults", {}), "defaults")
+    # Validate configuration syntax without resolving unused file declarations.
+    from .markers import validate_kwargs
+
+    try:
+        validate_kwargs(spec.get("defaults", {}))
+        for value in bundles.values():
+            mapping(value, "bundle", {"inputs", "bundles", "absent", "distributions"})
+            validate_kwargs(value)
+    except MarkerError as exc:
+        raise DeclarationError(str(exc)) from exc
     inventory = set()
     for suite in configured_suites:
         members = set()
@@ -477,10 +486,7 @@ def load(
     registry, declarations, hashes = [], {}, {"pyproject.toml": hashlib.sha256(raw).hexdigest()}
     for suite in configured_suites:
         hashes[suite.config] = hashlib.sha256(suite.raw).hexdigest()
-    for distribution in distributions.values():
-        hashes.update(distribution.source_hashes)
     total_bytes = total_nodes = 0
-    broad_possible = False
     for filename in sorted(inventory):
         content, _ = regular_bytes(root, filename, 4 * 1024 * 1024)
         total_bytes += len(content)
@@ -495,38 +501,74 @@ def load(
             raise DeclarationError("test declaration syntax exceeds total node/marker limits")
         hashes[filename] = hashlib.sha256(content).hexdigest()
         registry.extend(found)
-        if not any(
-            row["kind"] == "scope"
-            and not row["owner"]
-            and {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
-            for row in found
-        ):
-            broad_possible = True
-        for row in found:
-            declarations[row["id"]] = declaration(row["kwargs"], row["id"])
-    broad = project_paths(root, excluded=excluded, budget=budget) if broad_possible else []
+    scope_fields = {"inputs", "bundles", "distributions"}
+    scoped_files, ordinary_files = {}, {}
+    scoped_names = {row["file"] for row in registry if scope_fields.intersection(row["kwargs"])}
+    module_scoped = {
+        row["file"]
+        for row in registry
+        if row["kind"] == "scope" and not row["owner"] and scope_fields.intersection(row["kwargs"])
+    }
+    for suite in configured_suites:
+        scoped_files[suite.name] = [name for name in suite.inventory if name in scoped_names]
+        ordinary_files[suite.name] = [name for name in suite.inventory if name not in module_scoped]
+
+    if scoped_names:
+        # Only referenced metadata is a project input. Unused configuration is inert.
+        metadata_names, seen_bundles = set(), set()
+
+        def references(item, depth=0, chain=()):
+            if depth > 32:
+                raise DeclarationError("bundle nesting exceeds 32 levels")
+            metadata_names.update(sequence(item.get("distributions", []), "distributions"))
+            for name in sequence(item.get("bundles", []), "bundle references"):
+                if name not in bundles:
+                    raise DeclarationError("unknown dependency bundle")
+                if name in chain:
+                    raise DeclarationError("dependency bundle cycle")
+                if name not in seen_bundles:
+                    references(bundles[name], depth + 1, (*chain, name))
+                    seen_bundles.add(name)
+
+        references(spec.get("defaults", {}))
+        for row in registry:
+            if row["file"] in scoped_names:
+                references(row["kwargs"])
+        configured_metadata = mapping(spec.get("distributions", {}), "distributions")
+        if len(configured_metadata) > 256:
+            raise DeclarationError("declare at most 256 local distributions")
+        if metadata_names - configured_metadata.keys():
+            raise DeclarationError("unknown local distribution")
+        distributions = load_distributions(
+            root, {name: configured_metadata[name] for name in sorted(metadata_names)}, expanded
+        )
+        for distribution in distributions.values():
+            hashes.update(distribution.source_hashes)
+        defaults = declaration(spec.get("defaults", {}), "defaults")
+    else:
+        defaults = Unit(
+            "defaults",
+            [],
+            [],
+            sorted(
+                expanded(
+                    spec.get("defaults", {}).get("absent", []), "defaults absence", missing=True
+                )
+            ),
+            False,
+        )
+    for row in registry:
+        declarations[row["id"]] = declaration(row["kwargs"], row["id"])
+    broad = []
     collections = []
     for suite in configured_suites:
-        suite_rows = [row for row in registry if row["file"] in suite.inventory]
-        suite_broad = any(
-            not any(
-                row["kind"] == "scope"
-                and not row["owner"]
-                and {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
-                for row in suite_rows
-                if row["file"] == filename
-            )
-            for filename in suite.inventory
-        )
-        inputs = (
-            set(broad if suite_broad else [])
-            | set(suite.inventory)
-            | {"pyproject.toml", suite.config}
-            | set(defaults.inputs)
-        )
+        files = scoped_files[suite.name]
+        if not files:
+            collections.append(Unit(suite.name, [], [], [], False))
+            continue
+        suite_rows = [row for row in registry if row["file"] in files]
+        inputs = set(files) | {"pyproject.toml", suite.config} | set(defaults.inputs)
         absent, metadata, cache = set(defaults.absent), set(defaults.distributions), defaults.cache
-        if suite_broad:
-            metadata.update(distributions)
         for row in suite_rows:
             unit = declarations[row["id"]]
             inputs.update(unit.inputs)
@@ -536,7 +578,7 @@ def load(
         for name in metadata:
             inputs.update(distributions[name].inputs)
         collection = Unit(
-            suite.name, suite.inventory, sorted(inputs), sorted(absent), cache, sorted(metadata)
+            suite.name, files, sorted(inputs), sorted(absent), cache, sorted(metadata)
         )
         validate_scope(root, collection)
         from .python_source import validate_view
@@ -574,6 +616,8 @@ def load(
         distributions,
         execution,
         mapping(spec.get("runtime", {}), "runtime", {"profile", "requires"}),
+        ordinary_files,
+        scoped_files,
     )
 
 
@@ -607,8 +651,8 @@ def case_unit(manifest, item, suite=None):
         {"inputs", "bundles", "distributions"}.intersection(registry[origin]["kwargs"])
         for origin in origins
     )
-    if not narrow and not manifest.broad_inputs:
-        raise DeclarationError("collected item invalidates the module's declared narrow scope")
+    if not narrow:
+        raise DeclarationError("ordinary cases do not have a scoped input view")
     inputs = set(manifest.defaults.inputs) | {item["file"], "pyproject.toml"}
     if suite is not None:
         inputs.add(suite.config)
@@ -621,11 +665,9 @@ def case_unit(manifest, item, suite=None):
         absent.update(declaration.absent)
         metadata.update(declaration.distributions)
         cache = cache and declaration.cache
-    if not narrow:
-        metadata.update(manifest.distributions)
     for name in metadata:
         inputs.update(manifest.distributions[name].inputs)
-    effective_inputs = sorted(inputs) if narrow else manifest.broad_inputs
+    effective_inputs = sorted(inputs)
     unit = Unit(
         item["case_id"],
         [item["file"]],

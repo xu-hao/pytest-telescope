@@ -51,7 +51,7 @@ def suite_directories(snapshot, suite):
 @contextlib.contextmanager
 def lock(path, timeout):
     if fcntl is None:
-        raise InfrastructureError("execution requires Linux with file locking and Docker")
+        raise InfrastructureError("execution requires Linux with file locking")
     with path.open("a+b") as stream:
         deadline = time.monotonic() + timeout
         while True:
@@ -429,14 +429,16 @@ def run(
     required_capabilities=None,
     python_profile=None,
     source_roots=None,
+    backend=None,
+    controller_resources=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
     from . import python_source
     from .batching import group_jobs, project_result
+    from .execution import backend_profile, controller_envelope, envelope
     from .execution import effective_arguments as suite_arguments
-    from .execution import envelope
     from .execution import execution_mode as choose_mode
     from .model import Unit
     from .project_metadata import materialize_metadata, metadata_records
@@ -445,7 +447,7 @@ def run(
     if not math.isfinite(timeout) or not 0.1 <= timeout <= 3600:
         raise DeclarationError("timeout must be between 0.1 and 3600 seconds")
     if fcntl is None or os.name != "posix":
-        raise InfrastructureError("execution requires Linux with file locking and Docker")
+        raise InfrastructureError("execution requires Linux with file locking")
     state = (
         Path(cache_dir).resolve() if cache_dir else Path(root).resolve() / ".pytest-telescope/cache"
     )
@@ -459,9 +461,29 @@ def run(
     )
     selection = runtime_profiles.normalize(manifest.runtime, runtime_profile, required_capabilities)
     runtime_profiles.validate_environment(selection, manifest.env)
-    resources = envelope(manifest.execution, budget)
+    required = any(manifest.scoped_files.values())
+    resources = envelope(manifest.execution, budget, require_fit=required)
     mode = choose_mode(manifest.execution, execution_mode)
     profile = mode + "-v1"
+    backend_selection = backend_profile(manifest.execution, backend)
+    controller_limits = controller_envelope(manifest.execution, controller_resources)
+    if not required:
+        from .ordinary import run as run_ordinary
+
+        return run_ordinary(
+            manifest,
+            arguments,
+            timeout,
+            mode=mode,
+            resources=resources,
+            controller=controller_limits,
+            runtime_selection=selection,
+            backend=backend_selection,
+        )
+    if runtime.BACKEND != backend_selection["profile"]:
+        raise UnsupportedCapability(
+            "backend:profile", "requested backend does not match the runtime implementation"
+        )
     chosen_suites = set(suites) if suites is not None else {suite.name for suite in manifest.suites}
     if not chosen_suites or chosen_suites - {suite.name for suite in manifest.suites}:
         raise DeclarationError("suite selection must name configured suites")
@@ -1097,20 +1119,52 @@ def split_arguments(arguments):
 
 
 def error_result(error):
-    """Versioned refusal envelope when no complete inventory can be established."""
-    result = {
-        "schema": 2,
-        "kind": "refusal",
-        "inventory_complete": False,
-        "inventory_digest": None,
-        "status": "unsupported"
-        if isinstance(error, UnsupportedCapability)
+    from .ordinary import COUNT_KEYS
+
+    unsupported = isinstance(error, UnsupportedCapability)
+    result = dict(
+        schema=3,
+        kind="refusal",
+        status="unsupported"
+        if unsupported
         else "declaration_error"
         if isinstance(error, DeclarationError)
         else "infrastructure_error",
-        "error": str(error),
-    }
-    if isinstance(error, UnsupportedCapability):
+        inventory_complete=False,
+        inventory_digest=None,
+        routing_complete=False,
+        grouping_complete=False,
+        suites=[],
+        execution=None,
+        backend=None,
+        runtime=None,
+        python=None,
+        resources=None,
+        counts=dict.fromkeys(COUNT_KEYS, 0),
+        route_counts={
+            route: dict.fromkeys(COUNT_KEYS, 0) for route in ("ordinary", "scoped", "unresolved")
+        },
+        cases=dict.fromkeys(("collected", "passed", "failed", "skipped"), 0),
+        case_outcomes=dict.fromkeys(
+            ("fresh_passed", "cached_passed", "fresh_skipped", "cached_skipped"), 0
+        ),
+        units=[],
+        groups=[],
+        collection=dict(
+            outcome="not-started",
+            collected=0,
+            worker_seconds=None,
+            cpu_seconds=None,
+            failures=[],
+            suites=[],
+        ),
+        elapsed_seconds=None,
+        setup_seconds=None,
+        worker_cpu_seconds=None,
+        known_scoped_cpu_seconds=0,
+        error=str(error),
+    )
+    if unsupported:
         result["capability"] = error.capability
     return result
 
@@ -1131,11 +1185,15 @@ def main(argv=None):
     for command_parser in (preparation, planning, execution):
         command_parser.add_argument("--runtime-profile")
     for command_parser in (planning, execution):
+        command_parser.add_argument("--backend")
         command_parser.add_argument("--python-profile")
         command_parser.add_argument("--source-root", action="append", dest="source_roots")
         command_parser.add_argument(
             "--require-capability", action="append", dest="required_capabilities"
         )
+    for command_parser in (preparation, planning, execution):
+        for dimension in ("cpus", "memory-bytes", "processes", "scratch-bytes"):
+            command_parser.add_argument("--controller-" + dimension, type=int)
     execution.add_argument("--force", action="store_true")
     execution.add_argument("--no-cache", action="store_true")
     execution.add_argument("--explain", action="store_true")
@@ -1148,7 +1206,19 @@ def main(argv=None):
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
     try:
         options = parser.parse_args(argv)
+        dimensions = ("cpus", "memory_bytes", "processes", "scratch_bytes")
+        controller_resources = {name: getattr(options, "controller_" + name) for name in dimensions}
+        controller_resources = (
+            controller_resources
+            if any(value is not None for value in controller_resources.values())
+            else None
+        )
         if options.command == "runtime":
+            if controller_resources is not None:
+                raise UnsupportedCapability(
+                    "backend:profile",
+                    "runtime preparation does not yet support this backend envelope",
+                )
             result = runtime.build_runtime(
                 Path.cwd(), options.requirements, runtime_profile=options.runtime_profile
             )
@@ -1161,6 +1231,8 @@ def main(argv=None):
                 required_capabilities=options.required_capabilities,
                 python_profile=options.python_profile,
                 source_roots=options.source_roots,
+                backend=options.backend,
+                controller_resources=controller_resources,
             )
         else:
             arguments = (
@@ -1184,10 +1256,14 @@ def main(argv=None):
                 required_capabilities=options.required_capabilities,
                 python_profile=options.python_profile,
                 source_roots=options.source_roots,
+                backend=options.backend,
+                controller_resources=controller_resources,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
             return 3
+        if result.get("status") in {"declaration_error", "unsupported"}:
+            return 4
         return (
             5
             if result.get("status") == "no_tests"

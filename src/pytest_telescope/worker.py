@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 MAX_INVENTORY = 67_108_864
+PROJECT_ROOT = Path("/project")
 
 
 def reap_completed_children():
@@ -38,7 +39,7 @@ def identity(value):
 
 
 def project_file(filename):
-    path = Path(os.path.abspath(Path("/project") / filename)).relative_to(Path("/project"))
+    path = Path(os.path.abspath(PROJECT_ROOT / filename)).relative_to(PROJECT_ROOT)
     text = path.as_posix()
     if (
         not text
@@ -51,16 +52,20 @@ def project_file(filename):
     return text
 
 
-def main():
+def main(request=None, *, ordinary=False):
+    global PROJECT_ROOT
     started = time.monotonic()
-    request_path = os.environ.pop("TELESCOPE_REQUEST")
-    if request_path != "/telescope-request.json":
-        raise ValueError("invalid request location")
-    with open(request_path, "rb") as stream:
-        encoded = stream.read(MAX_INVENTORY + 1)
-    if len(encoded) > MAX_INVENTORY:
-        raise ValueError("request limit exceeded")
-    request = json.loads(encoded)
+    if ordinary:
+        PROJECT_ROOT = Path(request["project_root"]).resolve()
+    else:
+        request_path = os.environ.pop("TELESCOPE_REQUEST")
+        if request_path != "/telescope-request.json":
+            raise ValueError("invalid request location")
+        with open(request_path, "rb") as stream:
+            encoded = stream.read(MAX_INVENTORY + 1)
+        if len(encoded) > MAX_INVENTORY:
+            raise ValueError("request limit exceeded")
+        request = json.loads(encoded)
     if request["source_projection"] is not None:
         with open(
             "/usr/local/lib/python3.12/site-packages/zz_telescope_source_view.pth", "rb"
@@ -102,11 +107,14 @@ def main():
 
     def canonical_nodeid(value):
         filename, separator, suffix = value.partition("::")
-        path = (Path("/project") / suite_root / filename).resolve()
+        path = (PROJECT_ROOT / suite_root / filename).resolve()
         return project_file(path) + (separator + suffix if separator else "")
 
     mode = request["mode"]
-    if mode not in ("collection", "execution", "batch"):
+    if (
+        mode not in ("collection", "execution", "batch", "ordinary")
+        or (mode == "ordinary") != ordinary
+    ):
         raise ValueError("invalid request mode")
     cases, finished, selected_ids, failures = {}, set(), [], []
     origins, positions_cache, source_calls, required_origins = {}, {}, {}, {}
@@ -201,15 +209,25 @@ def main():
         def __init__(self):
             self.captured = {}
             self.selection = None
+            self.actual_selection = None
             self.session = None
             self.checkpoint = False
             self.bytes = 1024
 
         @pytest.hookimpl(tryfirst=True)
         def pytest_configure(self, config):
-            if any(
-                getattr(plugin, "__name__", "").split(".")[0] == "xdist"
-                for _, plugin in config.pluginmanager.list_name_plugin()
+            if (
+                ordinary
+                and (
+                    config.getoption("numprocesses", default=None) not in (None, 0)
+                    or config.getoption("dist", default="no") != "no"
+                )
+            ) or (
+                not ordinary
+                and any(
+                    getattr(plugin, "__name__", "").split(".")[0] == "xdist"
+                    for _, plugin in config.pluginmanager.list_name_plugin()
+                )
             ):
                 invalid("nested distributed scheduling is unsupported")
             config.addinivalue_line(
@@ -307,7 +325,7 @@ def main():
             self.unchanged(session)
             if collection_failed:
                 return
-            if mode == "collection":
+            if mode == "collection" or ordinary:
                 selectors = request["selectors"]
                 if type(selectors) is not list or any(
                     type(value) is not str for value in selectors
@@ -343,6 +361,17 @@ def main():
                 chosen = [item for item in items if case_identity(item.nodeid) in wanted]
                 if [case_identity(item.nodeid) for item in chosen] != requested:
                     invalid("execution membership or order differs from discovery")
+            self.actual_selection = tuple(chosen)
+            if ordinary:
+                chosen = [
+                    item
+                    for item in chosen
+                    if not any(
+                        {"inputs", "bundles", "distributions"}.intersection(source["kwargs"])
+                        for source in registry
+                        if source["id"] in self.captured[item.nodeid][1]["origins"]
+                    )
+                ]
             chosen_set = set(chosen)
             deselected = [item for item in items if item not in chosen_set]
             items[:] = chosen
@@ -357,6 +386,39 @@ def main():
             self.session = session
             self.unchanged(session)
             self.checkpoint = not collection_failed and self.selection is not None
+            if ordinary and self.checkpoint:
+                chosen = {item.nodeid for item in self.actual_selection}
+                current = {
+                    row["case_id"]: {**row, "selected": nodeid in chosen}
+                    for nodeid, (_, row) in self.captured.items()
+                }
+                expected = request["expected_items"]
+                compared_files = set(request["expected_files"])
+                observed = {
+                    key: row for key, row in current.items() if row["file"] in compared_files
+                }
+                expected_rows = {
+                    row["case_id"]: {key: value for key, value in row.items() if key != "order"}
+                    for row in expected
+                }
+                if observed != expected_rows:
+                    invalid("ordinary and scoped collection membership or declarations disagree")
+                for filename in compared_files:
+                    actual_order = [
+                        case_identity(item.nodeid)
+                        for item in self.actual_selection
+                        if project_file(item.path) == filename
+                    ]
+                    expected_order = [
+                        row["case_id"]
+                        for row in sorted(
+                            expected,
+                            key=lambda row: row["order"] if row["order"] is not None else 100_001,
+                        )
+                        if row["file"] == filename and row["selected"]
+                    ]
+                    if actual_order != expected_order:
+                        invalid("ordinary and scoped selection order disagree")
             if mode != "collection" and self.checkpoint:
                 selected_ids[:] = [case_identity(item.nodeid) for item in session.items]
 
@@ -420,8 +482,15 @@ def main():
             pytest.mark.telescope = original_marker
     if declaration_error:
         exit_code = 4
-    reap_completed_children()
-    leaked = [name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()]
+    if not ordinary:
+        reap_completed_children()
+    # Ordinary pytest has no host-wide process namespace claim. Restricted execution
+    # retains its strict scan until the namespace supervisor owns final validation.
+    leaked = (
+        False
+        if ordinary
+        else [name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()]
+    )
     usage = resource.getrusage(resource.RUSAGE_SELF)
     children = resource.getrusage(resource.RUSAGE_CHILDREN)
     common = {
@@ -429,7 +498,9 @@ def main():
         "exit_code": exit_code,
         "leaked_descendants": bool(leaked),
         "worker_seconds": time.monotonic() - started,
-        "cpu_seconds": usage.ru_utime + usage.ru_stime + children.ru_utime + children.ru_stime,
+        "cpu_seconds": None
+        if ordinary
+        else usage.ru_utime + usage.ru_stime + children.ru_utime + children.ru_stime,
         "failures": failures,
     }
     if mode == "collection":
@@ -477,6 +548,27 @@ def main():
             ],
         )
         result["complete"] = result["complete"] and selected_ids == requested
+    if ordinary:
+        selected = {
+            item.nodeid: order for order, item in enumerate(observer.actual_selection or ())
+        }
+        result.update(
+            protocol=1,
+            kind="ordinary",
+            inventory_complete=observer.checkpoint
+            and not declaration_error
+            and not collection_failed,
+            items=[
+                {**row, "selected": nodeid in selected, "order": selected.get(nodeid)}
+                for nodeid, (_, row) in sorted(observer.captured.items())
+            ]
+            if observer.actual_selection is not None
+            else [],
+            case_results=[
+                dict(case_id=case, outcome=cases.get(case, "not-run"), complete=case in finished)
+                for case in selected_ids
+            ],
+        )
     print("TELESCOPE_RESULT " + canonical(result), flush=True)
     return exit_code
 

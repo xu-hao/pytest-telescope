@@ -15,8 +15,8 @@ from .model import (
     regular_bytes,
 )
 
-DEFAULT = "python-v1"
-GIT = "git-local-v1"
+DEFAULT = "python-v2"
+GIT = "git-local-v2"
 MANIFEST = json.loads(Path(__file__).with_name("git_local_v1.json").read_bytes())
 ENVIRONMENT = {
     "GIT_EXEC_PATH": "/opt/telescope/git/bin",
