@@ -104,6 +104,7 @@ def preparation(tmp_path, monkeypatch):
                 "Labels": {
                     runtime.LABEL + "profile": "git-local-v1",
                     runtime.LABEL + "provenance": profiles.provenance(profiles.GIT),
+                    runtime.LABEL + "source-slot": runtime.python_source.SLOT_ID,
                 }
             },
         }

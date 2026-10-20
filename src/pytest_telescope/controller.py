@@ -427,10 +427,13 @@ def run(
     structural_files=None,
     runtime_profile=None,
     required_capabilities=None,
+    python_profile=None,
+    source_roots=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+    from . import python_source
     from .batching import group_jobs, project_result
     from .execution import effective_arguments as suite_arguments
     from .execution import envelope
@@ -446,7 +449,14 @@ def run(
     state = (
         Path(cache_dir).resolve() if cache_dir else Path(root).resolve() / ".pytest-telescope/cache"
     )
-    manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
+    manifest = load(
+        root,
+        cache_dir=state,
+        suite_names=suites,
+        structural_files=structural_files,
+        python_profile=python_profile,
+        source_roots=source_roots,
+    )
     selection = runtime_profiles.normalize(manifest.runtime, runtime_profile, required_capabilities)
     runtime_profiles.validate_environment(selection, manifest.env)
     resources = envelope(manifest.execution, budget)
@@ -496,6 +506,7 @@ def run(
     results, groups = [], []
     published = False
     grouping_complete = False
+    python_validated = False
 
     def summary(setup):
         if mode == "batch":
@@ -506,6 +517,7 @@ def run(
         report["kind"] = "run"
         report["execution"] = dict(mode=mode, profile=profile)
         report["runtime"] = dict(selection)
+        report["python"] = python_source.envelope(manifest.suites, validated=python_validated)
         report["groups"] = groups
         report["grouping_complete"] = grouping_complete
         report["worker_cpu_seconds"] = collection["cpu_seconds"] + sum(
@@ -594,6 +606,11 @@ def run(
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
+                    for suite, unit in configured:
+                        python_source.validate_view(
+                            suite.python, [name for name in unit.inputs if name in record_map]
+                        )
+                    python_validated = True
                     pool_is_broad = pool_unit.inputs == manifest.broad_inputs
                     frozen_scope_hashes = {}
                     metadata_hashes = {}
@@ -633,6 +650,9 @@ def run(
                                 "inputs": [record_map[name] for name in collection_unit.inputs],
                                 "absent": collection_unit.absent,
                                 "metadata": metadata_identity(collection_unit.distributions),
+                                "python_projection": python_source.key(
+                                    suite.python, bool(collection_unit.distributions)
+                                ),
                                 "files": suite.inventory,
                                 "registry": registry,
                             }
@@ -702,6 +722,7 @@ def run(
                                             suite_cwd=suite.cwd,
                                             suite=suite.name,
                                             metadata_directory=metadata,
+                                            python_settings=suite.python,
                                             limits=resources.worker,
                                             selection_disabled=selection_disabled,
                                             allow_unknown_selectors=True,
@@ -812,6 +833,9 @@ def run(
                                         "inputs": frozen_scope_hashes[file_scope],
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
+                                        "python_projection": python_source.key(
+                                            suite.python, bool(unit.distributions)
+                                        ),
                                         "cache": unit.cache,
                                     }
                                 )
@@ -943,6 +967,7 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        python_settings=suite.python,
                                         limits=resources.worker,
                                         cancellation=cancellation,
                                         request=request,
@@ -1106,6 +1131,8 @@ def main(argv=None):
     for command_parser in (preparation, planning, execution):
         command_parser.add_argument("--runtime-profile")
     for command_parser in (planning, execution):
+        command_parser.add_argument("--python-profile")
+        command_parser.add_argument("--source-root", action="append", dest="source_roots")
         command_parser.add_argument(
             "--require-capability", action="append", dest="required_capabilities"
         )
@@ -1132,6 +1159,8 @@ def main(argv=None):
                 Path.cwd(),
                 runtime_profile=options.runtime_profile,
                 required_capabilities=options.required_capabilities,
+                python_profile=options.python_profile,
+                source_roots=options.source_roots,
             )
         else:
             arguments = (
@@ -1153,6 +1182,8 @@ def main(argv=None):
                 execution_mode=options.execution_mode,
                 runtime_profile=options.runtime_profile,
                 required_capabilities=options.required_capabilities,
+                python_profile=options.python_profile,
+                source_roots=options.source_roots,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
