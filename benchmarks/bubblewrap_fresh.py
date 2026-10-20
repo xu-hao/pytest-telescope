@@ -90,6 +90,7 @@ def copy_runtime(destination):
         raise RuntimeError("native runtime closure could not be established")
 
     def copy_native(source):
+        source = Path(os.path.normpath(source))
         target = destination / str(source).lstrip("/")
         if target.exists() or target.is_symlink():
             return
@@ -102,7 +103,8 @@ def copy_runtime(destination):
         if source.is_symlink():
             target.symlink_to(os.readlink(source))
             shutil.copystat(source, target, follow_symlinks=False)
-            copy_native(source.resolve(strict=True))
+            link = Path(os.readlink(source))
+            copy_native(link if link.is_absolute() else source.parent / link)
         else:
             shutil.copy2(source, target)
 
