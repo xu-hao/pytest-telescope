@@ -272,9 +272,10 @@ def test_local_git_operations_fault_repair_isolation_and_warm_reuse(prepared, mo
     def no_fresh_work(*args, **kwargs):
         pytest.fail("warm reuse launched or prepared a worker")
 
-    monkeypatch.setattr(runtime, "execute", no_fresh_work)
-    monkeypatch.setattr(runtime, "build_runtime", no_fresh_work)
-    warm = passed(root, execution_mode=mode, required_capabilities=["git-local", "git-local"])
+    with monkeypatch.context() as warm_guard:
+        warm_guard.setattr(runtime, "execute", no_fresh_work)
+        warm_guard.setattr(runtime, "build_runtime", no_fresh_work)
+        warm = passed(root, execution_mode=mode, required_capabilities=["git-local", "git-local"])
     assert warm["counts"]["reused"] == 2 and warm["counts"]["executed"] == 0
     assert warm["collection"]["outcome"] == "reused"
     assert warm["runtime"] == cold["runtime"]
@@ -283,6 +284,18 @@ def test_local_git_operations_fault_repair_isolation_and_warm_reuse(prepared, mo
         with pytest.raises(UnsupportedCapability) as failure:
             controller.run(root, runtime_profile="python-v1", required_capabilities=[])
         assert failure.value.capability == "runtime:capability"
+    uncached = passed(root, execution_mode=mode, no_cache=True)
+    assert uncached["counts"]["executed"] == 2 and uncached["counts"]["reused"] == 0
+    assert all(not group["cache_eligible"] for group in uncached["groups"])
+    put(
+        root,
+        "tests/test_example.py",
+        GIT_CASES.replace('inputs=["input.txt"]', 'inputs=["input.txt"], cache=False'),
+    )
+    for _ in range(2):
+        disabled = passed(root, execution_mode=mode)
+        assert disabled["counts"]["executed"] == 2 and disabled["counts"]["reused"] == 0
+        assert all(not group["cache_eligible"] for group in disabled["groups"])
 
 
 def test_profile_requirements_and_execution_modes_bind_reuse(prepared):
@@ -361,3 +374,29 @@ def test_cli_preparation_profile_override_reaches_public_builder(tmp_path, monke
     assert controller.main(["runtime", "--runtime-profile", "git-local-v1"]) == 0
     assert received == [(tmp_path, None, "git-local-v1")]
     assert json.loads(capsys.readouterr().out) == {"profile": "git-local-v1"}
+
+
+@pytest.mark.parametrize("mode", ["case", "batch"])
+def test_unhandled_local_git_failure_is_a_test_failure_without_engine_replay(prepared, mode):
+    root, prepare = prepared
+    configure(root, profile="git-local-v1", requires=["git-local"])
+    put(
+        root,
+        "tests/test_example.py",
+        """
+import subprocess
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_missing_origin(tmp_path):
+    subprocess.run(["git", "init", "-b", "main", str(tmp_path)], check=True, capture_output=True, timeout=10)
+    subprocess.run(["git", "-C", str(tmp_path), "fetch", "origin"], check=True, capture_output=True, timeout=10)
+""",
+    )
+    prepare("git-local-v1")
+    for _ in range(2):
+        result = controller.run(root, execution_mode=mode)
+        assert result["status"] == "failed"
+        assert result["counts"]["failed"] == result["cases"]["failed"] == 1
+        assert result["counts"]["reused"] == result["counts"]["infrastructure_error"] == 0
+        assert result["groups"][0]["attempts"] == 1
+        assert result["groups"][0]["cache_eligible"] is False
