@@ -305,3 +305,8 @@ Completed adopted worker children are reaped after all pytest teardown with nonb
 Every process still present afterward, including any live descendant or unconsumed
 zombie after the bound, makes the invocation ineligible. The engine never waits for
 ongoing child work or kills a child to turn an incomplete run into reusable success.
+
+The [worker lifecycle correction](worker-lifecycle.md) specifies continuous PID 1
+orphan reaping for the next unpublished 0.1.0a4 candidate. It preserves test-owned
+child statuses and makes final supervisor completion part of evidence eligibility;
+its mechanism proof is separate from production qualification.
