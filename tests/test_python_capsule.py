@@ -137,15 +137,18 @@ def test_prepared_venv_contains_only_explicit_wheel_site_and_no_host_startup(ass
         "capsule_sample-1.0.dist-info/METADATA",
         "capsule_sample-1.0.dist-info/WHEEL",
         "capsule_sample-1.0.dist-info/RECORD",
+        "zz_telescope_source_view.pth",
     }
     assert (
         result.payload.root / prefix / "capsule_sample/__init__.py"
     ).read_bytes() == b"VALUE = 17\n"
+    projection_slot = prefix + "zz_telescope_source_view.pth"
+    assert (result.payload.root / projection_slot).read_bytes() == b""
     for name in records:
         path = PurePosixPath(name)
         assert not any(part == "dist-packages" for part in path.parts)
         assert "site-packages" not in path.parts or name.startswith(prefix)
-        assert path.suffix != ".pth"
+        assert path.suffix != ".pth" or name == projection_slot
         assert path.name not in ("sitecustomize.py", "usercustomize.py")
         assert "host_only_capsule_package" not in name
         assert "user_only_capsule_package" not in name
