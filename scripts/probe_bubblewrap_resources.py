@@ -107,6 +107,121 @@ def systemctl(*args):
     return call(["systemctl", "--user", *args]).stdout.strip()
 
 
+def observe_cgroups(role):
+    def read(path):
+        try:
+            with path.open() as stream:
+                value = stream.read(8193)
+            if len(value) > 8192:
+                return dict(unavailable="bounded-read-limit")
+            return dict(value=value.strip())
+        except OSError as exc:
+            return dict(unavailable=type(exc).__name__, errno=exc.errno)
+
+    membership = Path("/proc/self/cgroup").read_text()
+    own = Path("/sys/fs/cgroup") / next(
+        line.split(":", 2)[2].lstrip("/")
+        for line in membership.splitlines()
+        if line.startswith("0::")
+    )
+    groups = []
+    current = own
+    for _ in range(8):
+        try:
+            current.stat()
+            presence = dict(present=True)
+        except OSError as exc:
+            presence = dict(unavailable=type(exc).__name__, errno=exc.errno)
+        groups.append(
+            dict(
+                path=str(current),
+                presence=presence,
+                files={
+                    name: read(current / name)
+                    for name in [
+                        "cgroup.controllers",
+                        "cgroup.subtree_control",
+                        "cpu.max",
+                        "cpu.stat",
+                        "memory.max",
+                        "memory.swap.max",
+                        "pids.max",
+                        "pids.current",
+                    ]
+                },
+            )
+        )
+        if current.name.startswith("user@") and current.name.endswith(".service"):
+            break
+        if current == Path("/sys/fs/cgroup"):
+            break
+        current = current.parent
+    managers = []
+    for argv in [
+        [
+            "systemctl",
+            "--user",
+            "show",
+            own.name,
+            "--property=Delegate,DelegateControllers,ControlGroup",
+        ],
+        [
+            "systemctl",
+            "show",
+            f"user@{os.getuid()}.service",
+            "--property=Delegate,DelegateControllers,ControlGroup",
+        ],
+    ]:
+        try:
+            result = subprocess.run(argv, text=True, capture_output=True, timeout=5)
+            properties = dict(
+                line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+            )
+            managers.append(
+                dict(
+                    command=argv,
+                    properties={
+                        name: dict(value=properties[name])
+                        if name in properties
+                        else dict(unavailable="not-returned")
+                        for name in ["Delegate", "DelegateControllers", "ControlGroup"]
+                    },
+                    exit_code=result.returncode,
+                    stdout=result.stdout[:8192],
+                    stderr=result.stderr[:8192],
+                )
+            )
+        except subprocess.TimeoutExpired:
+            managers.append(dict(command=argv, unavailable="timeout"))
+    namespaces = {}
+    for name in ["user", "mnt", "cgroup", "pid", "net"]:
+        try:
+            namespaces[name] = dict(value=os.readlink("/proc/self/ns/" + name))
+        except OSError as exc:
+            namespaces[name] = dict(unavailable=type(exc).__name__, errno=exc.errno)
+    mounts = [
+        line
+        for line in Path("/proc/self/mountinfo").read_text().splitlines()
+        if " - cgroup" in line
+    ]
+    print(
+        json.dumps(
+            dict(
+                cgroup_observation=dict(
+                    role=role,
+                    uid=os.getuid(),
+                    membership=membership[:8192],
+                    groups=groups,
+                    managers=managers,
+                    namespaces=namespaces,
+                    mounts=mounts[:8],
+                )
+            )
+        ),
+        flush=True,
+    )
+
+
 def group_values(path):
     return {
         name: (path / name).read_text().strip()
@@ -138,6 +253,7 @@ def load_helper():
 
 
 def unit(config, token):
+    observe_cgroups("worker-" + token)
     helper = load_helper()
     own = Path("/sys/fs/cgroup") / next(
         x.split(":", 2)[2].lstrip("/")
@@ -155,6 +271,8 @@ def unit(config, token):
     aggregate = group_values(own.parent.parent)
     assert aggregate["cpu.max"] == "200000 100000" and aggregate["memory.max"] == "2147483648"
     assert aggregate["pids.max"] == "320"
+    if config.get("cgroup_diagnostic"):
+        return
     root = Path(config["output"])
     (root / f"ready-{token}").write_text("ready")
     deadline = time.monotonic() + 10
@@ -204,19 +322,22 @@ def controller(config):
     helper = load_helper()
     root = Path(config["output"])
     root.mkdir()
-    runtime = root / "runtime"
-    preparation = helper.copy_runtime(runtime)
-    config["runtime"] = str(runtime)
-    secret = root / "undeclared.txt"
-    secret.write_text("synthetic omitted source")
-    config["secret"] = str(secret)
-    for token in ["A", "B"]:
-        view = root / f"view-{token}"
-        view.mkdir()
-        (view / "data.txt").write_text(token)
-        (view / "data.txt").chmod(0o444)
-        os.utime(view / "data.txt", (0, 0))
-        os.utime(view, (0, 0))
+    observe_cgroups("controller")
+    preparation = None
+    if not config.get("cgroup_diagnostic"):
+        runtime = root / "runtime"
+        preparation = helper.copy_runtime(runtime)
+        config["runtime"] = str(runtime)
+        secret = root / "undeclared.txt"
+        secret.write_text("synthetic omitted source")
+        config["secret"] = str(secret)
+        for token in ["A", "B"]:
+            view = root / f"view-{token}"
+            view.mkdir()
+            (view / "data.txt").write_text(token)
+            (view / "data.txt").chmod(0o444)
+            os.utime(view / "data.txt", (0, 0))
+            os.utime(view, (0, 0))
     config["worker_cgroup"] = "/sys/fs/cgroup" + systemctl(
         "show", config["worker_slice"], "-p", "ControlGroup", "--value"
     )
@@ -283,7 +404,10 @@ def controller(config):
             row = dict(unit=name, exit_code=process.returncode, stdout=stdout, stderr=stderr)
             report["units"].append(row)
         assert all(row["exit_code"] == 0 for row in report["units"]), report["units"]
-        rows = [json.loads(row["stdout"]) for row in report["units"]]
+        if config.get("cgroup_diagnostic"):
+            report["status"] = "diagnostic-complete"
+            return
+        rows = [json.loads(row["stdout"].splitlines()[-1]) for row in report["units"]]
         a, b = (row["observed"] for row in rows)
         assert max(a["started"], b["started"]) < min(a["finished"], b["finished"])
         assert {a["token"], b["token"]} == {"A", "B"}
@@ -439,6 +563,7 @@ def launch(args):
         output=str(args.output),
         bwrap=str(args.bwrap),
         worker_slice=prefix + "-workers.slice",
+        cgroup_diagnostic=args.cgroup_diagnostic,
     )
     directory = Path(os.environ["XDG_RUNTIME_DIR"]) / "systemd/user"
     ownership_preflight(args.run_id)
@@ -529,6 +654,7 @@ def main():
     parser.add_argument("--controller", action="store_true")
     parser.add_argument("--cleanup", action="store_true")
     parser.add_argument("--diagnostic-only", action="store_true")
+    parser.add_argument("--cgroup-diagnostic", action="store_true")
     args = parser.parse_args()
     if args.diagnostic_only:
         ownership_preflight(args.run_id)
