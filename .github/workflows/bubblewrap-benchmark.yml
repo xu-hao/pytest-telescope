@@ -1,0 +1,64 @@
+name: Fresh bubblewrap prototype benchmark
+
+on:
+  push:
+    branches: [benchmark/53-fresh-bubblewrap]
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-comparison:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.9'
+      - name: Prepare pinned benchmark environment and owned scratch
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          sudo apt-get update -q
+          sudo apt-get install -y bubblewrap
+          python -m venv "$RUNNER_TEMP/telescope-benchmark-venv"
+          "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -m pip install pytest==8.3.5 packaging==24.2 pluggy==1.5.0 iniconfig==2.0.0
+          "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -m pip check
+          mkdir "$RUNNER_TEMP/telescope-benchmark-scratch"
+          sudo mount -t tmpfs -o size=128m,nr_inodes=32768,noexec,nosuid,nodev,uid=$(id -u),gid=$(id -g) tmpfs "$RUNNER_TEMP/telescope-benchmark-scratch"
+          printf 'One-time package/environment/scratch preparation: %s seconds\n' "$((SECONDS-started))"
+          uname -a
+          cat /etc/os-release
+          bwrap --version
+      - name: Run bounded fresh plain-versus-bubblewrap prototype
+        shell: bash
+        run: |
+          set -euo pipefail
+          affinity=$(python -c 'import os; print(",".join(map(str, sorted(os.sched_getaffinity(0))[:2])))')
+          sudo systemd-run --wait --pipe --collect \
+            --unit="telescope-benchmark-${GITHUB_RUN_ID}" \
+            --property="User=$(id -un)" --property="WorkingDirectory=$GITHUB_WORKSPACE" \
+            --property=CPUQuota=200% --property=MemoryMax=2147483648 --property=TasksMax=128 \
+            /usr/bin/taskset --cpu-list "$affinity" \
+            "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" benchmarks/bubblewrap_fresh.py \
+            --output "$RUNNER_TEMP/telescope-benchmark-result" \
+            --scratch "$RUNNER_TEMP/telescope-benchmark-scratch" --samples 8
+      - name: Retain structured result in complete job log
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/telescope-benchmark-result/report.json" ]]; then
+            cat "$RUNNER_TEMP/telescope-benchmark-result/report.json"
+          fi
+      - name: Stop only this benchmark unit and unmount owned scratch
+        if: always()
+        shell: bash
+        run: |
+          sudo systemctl stop "telescope-benchmark-${GITHUB_RUN_ID}.service" || true
+          if mountpoint -q "$RUNNER_TEMP/telescope-benchmark-scratch"; then
+            sudo umount "$RUNNER_TEMP/telescope-benchmark-scratch"
+          fi
