@@ -224,3 +224,48 @@ explicit-message commits, not remote-network helpers or executable hooks. Set au
 committer dates and identity explicitly when tests rely on stable commit IDs. Selecting
 Git does not change resource limits, noexec scratch, case/batch fixture lifetime, or the
 meaning of `cache=False`.
+
+## Declared source in isolated Python children
+
+The opt-in [isolated-source profile](isolated-source.md) lets the pinned Python
+interpreter discover declared source and selected static metadata when a test launches
+`python -I`. It does not install the application. Add an ordered lookup root:
+
+```toml
+[tool.pytest_telescope.python]
+profile = "isolated-source-v1"
+source_roots = ["src"]
+```
+
+For `src/example_core.py` containing `value = 7`, a narrow test can use:
+
+```python
+import subprocess
+import sys
+import pytest
+
+
+@pytest.mark.telescope(inputs=["src/example_core.py"])
+def test_isolated_child():
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", "import example_core; assert example_core.value == 7"],
+        capture_output=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0
+```
+
+The root controls import lookup; the marker grants the file. Undeclared neighboring
+modules remain absent. Selected `distributions` metadata is discoverable by children,
+but an entry point can load only source in that same view. Empty source roots support
+metadata-only children. Namespace package portions and same-named modules follow the
+declared root order, so suite-specific complete replacements can keep independent roots.
+
+Without the table the profile is `default`, which accepts no roots and preserves existing
+behavior. `--python-profile` and repeated `--source-root`, or the corresponding Python
+API fields, override an invocation without editing configuration. See the
+[lookup interfaces and result identity](result-schema.md#isolated-child-source-lookup).
+System/runtime modules keep earlier lookup precedence. `-S` disables site initialization
+and has no source-discovery guarantee. Visible source-root startup hooks and installed
+metadata directories refuse before any worker; arbitrary source-root `.pth` files stay
+inert. Read-only source, noexec scratch, limits and case/batch scope boundaries are unchanged.

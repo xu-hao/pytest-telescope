@@ -289,7 +289,15 @@ def _with_first(first, rest):
     yield from rest
 
 
-def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
+def load(
+    root,
+    *,
+    cache_dir=None,
+    suite_names=None,
+    structural_files=None,
+    python_profile=None,
+    source_roots=None,
+):
     from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
@@ -324,6 +332,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             "distributions",
             "execution",
             "runtime",
+            "python",
         },
     )
     bundles = mapping(spec.get("bundles", {}), "bundles")
@@ -345,7 +354,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     from .execution import suites as parse_suites
     from .project_metadata import load_distributions
 
-    configured_suites = parse_suites(root, spec, suite_names)
+    configured_suites = parse_suites(root, spec, suite_names, python_profile, source_roots)
     overrides = mapping({} if structural_files is None else structural_files, "structural_files")
     if set(overrides) - {suite.name for suite in configured_suites}:
         raise DeclarationError("structural_files keys must name selected configured suites")
@@ -530,6 +539,9 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             suite.name, suite.inventory, sorted(inputs), sorted(absent), cache, sorted(metadata)
         )
         validate_scope(root, collection)
+        from .python_source import validate_view
+
+        validate_view(suite.python, collection.inputs)
         collections.append(collection)
     env = sequence(spec.get("env", []), "env")
     forbidden = {

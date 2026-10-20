@@ -80,6 +80,35 @@ A refusal does not claim a validated runtime identity. A missing, stale, corrupt
 different prepared profile is an infrastructure failure; `run` never prepares it
 implicitly or accepts a wider installed image as a substitute.
 
+### Isolated child source lookup
+
+The [isolated-source contract](isolated-source.md) adds `python_profile=None` and
+`source_roots=None` to `controller.run` and `plan.make_plan`. CLI `plan` and `run` accept
+`--python-profile` and repeated `--source-root`. These are lookup settings, separate from
+the immutable runtime profile and case/batch execution mode. They grant no source files.
+
+Project settings live in `[tool.pytest_telescope.python]`. A suite's `python` table
+completely replaces them and must contain both `profile` and `source_roots`. Caller
+fields replace the corresponding effective field after inheritance across selected
+suites. Omitted caller fields preserve inherited settings; API `source_roots=[]`
+explicitly clears roots. Supplying roots alone does not enable the isolated profile.
+Roots preserve order, are unique, and have a 64-directory bound. Invalid paths or
+incomplete configuration raise `DeclarationError`; unknown profiles use
+`python:profile`, and unsupported visible startup layouts use `python:source-layout`.
+
+The result's separate `python` object contains exactly one `suites` list in selected
+suite order. Every row has `suite`, `profile`, ordered `source_roots`, and `identity`.
+Identity is null in static plans and before validated projection preparation; afterward
+it is an opaque SHA-256 digest of the versioned mechanism and that suite's effective
+settings. It does not assert equal source or metadata between individual views: actual
+projection bytes and each selected scope also bind case/group keys. The three-field
+`runtime` object and `execution.profile` retain their existing meanings.
+
+Static plan suite entries also expose `python={profile, source_roots}` as part of their
+configuration identity, including for default suites. An enabled lookup profile does
+not claim that every configured root exists inside every narrow worker view. Python
+ignores roots absent from that view; they do not acquire files from another case.
+
 ## Complete and incomplete run inventories
 
 A run result has `schema: 2` and `kind: "run"`. These fields distinguish it from a refusal.
