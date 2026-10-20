@@ -102,6 +102,14 @@ infrastructure failure and leaves no accepted new runtime state. Existing valid 
 must not be replaced by partial preparation. Existing per-project image quota and
 preparation lock/journal recovery remain authoritative.
 
+Explicit preparation also follows the shared
+[known-policy upgrade path](execution-contract.md#explicit-rebuilds-after-runtime-upgrades).
+At the retention limit, verified historical project-owned images can be inspected for
+cleanup using their published label format; they do not need Git-profile labels that
+their release never wrote. This grants no execution authority under the new policy.
+The selected runtime stays protected, and unknown ownership/policy or unconfirmed
+removal stops preparation without a broader recipe or blind cleanup retry.
+
 Preparation runs `docker build` in the daemon, outside the four-dimensional case-worker
 envelope. The caller must reserve build CPU/memory capacity and daemon image/build-cache
 disk separately; a host coordinator process limit does not enclose Docker builders.
