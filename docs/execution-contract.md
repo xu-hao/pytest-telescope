@@ -98,6 +98,13 @@ scheduling permit; no restricted worker permit is held then. At concurrency one,
 retained ordinary process can block scoped discovery. A separately bounded scoped
 controller may retain its explicitly admitted headroom.
 
+Ordinary-session lifecycle supervision is required and remains **UNQUALIFIED**. A dedicated
+host subreaper/pidfd supervisor must preserve test-owned child statuses, detect detached
+live descendants, refuse completion and clean up only its owned descendants within
+bounded cleanup. It must not change the caller's child ownership or scan host-wide
+`/proc`. This supervision does not claim scoped quotas or require a user manager for
+all-ordinary projects. Real production controls must pass before qualification is claimed.
+
 Per-case execution begins a new sandbox with only that case's effective scope, before conftest/test imports. It collects its containing file, verifies the actual item/declaration inventory against the discovery record, and executes exactly the selected item in case mode. Batch execution instead validates the complete containing-module inventory and the requested ordered subset before executing that equal-scope group. A narrow execution missing a shared collection dependency fails with bounded collection evidence; it does not borrow another case's inputs. Common import/parametrization dependencies belong in shared declarations. The fresh worker's collection must agree even when a data-dependent item generator produces different nodes under a narrow scope.
 
 ## Inventory, selection and reuse

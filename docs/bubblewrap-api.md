@@ -411,6 +411,14 @@ Worker collection/group attempts remain at most2, with fresh scratch and complet
 between attempts. Ordinary sessions are attempted once because replay can duplicate effects.
 No nested retries multiply a bound. Exhaustion returns typed infrastructure evidence.
 
+Ordinary sessions require a dedicated host subreaper/pidfd supervisor; this mechanism
+remains **UNQUALIFIED** until real production controls pass. It must preserve test-owned
+child statuses, detect and refuse detached live descendants, and perform bounded cleanup
+of only its owned descendants. It must not change caller child ownership, scan host-wide
+`/proc`, claim scoped resource quotas, or introduce a user-manager prerequisite for
+all-ordinary projects. The host caller and ordinary sessions retain inherited-host
+resource accounting and remain outside the scoped controller/worker slice.
+
 Port the reviewed pending pid1-reaper-v1 supervisor and behavioral controls into the Bwrap
 PID namespace; do NOT retain main's end-only reap. It owns only pytest plus adopted children,
 reaps continuously with4096calls/50ms drain turns, preserves direct Popen/waitpid statuses,
