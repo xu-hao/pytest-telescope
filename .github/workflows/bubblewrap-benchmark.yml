@@ -40,6 +40,7 @@ jobs:
               cat "$profile"
             fi
           done
+          sudo cat /sys/kernel/security/apparmor/profiles | awk '/bwrap/'
       - name: Run bounded fresh plain-versus-bubblewrap prototype
         shell: bash
         run: |
