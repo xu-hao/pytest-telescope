@@ -48,7 +48,9 @@ requirements union and requested-profile validation, and owns at most two retrya
 inspection attempts (including the backend platform probe). Typed unsupported mismatches
 are immediate. Inspection never prepares, downloads, recovers, collects, accesses the
 case cache or writes project/state files. Missing/stale/corrupt prepared state is an
-infrastructure failure. The opaque identity supplies no execution, cache or cleanup
+infrastructure failure. Malformed inspection JSON, missing/non-table ownership labels
+and invalid platform encoding also refuse with bounded typed infrastructure evidence;
+inspection never removes a foreign or unlabeled image. The opaque identity supplies no execution, cache or cleanup
 authority; callers must not reconstruct it or multiply its bounded retries. Preparation
 likewise permits at most two backend platform probes before any build.
 

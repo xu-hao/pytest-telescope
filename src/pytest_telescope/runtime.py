@@ -392,14 +392,24 @@ def worker_source():
 def _image_info(image, project, recipe=None):
     if type(image) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
         raise InfrastructureError("runtime did not return an immutable image ID")
-    info = json.loads(command(["docker", "image", "inspect", image]))[0]
-    labels = info["Config"]["Labels"]
+    try:
+        response = json.loads(command(["docker", "image", "inspect", image]))
+    except (ValueError, UnicodeError) as exc:
+        raise InfrastructureError("runtime image inspection returned invalid JSON") from exc
+    if type(response) is not list or len(response) != 1 or type(response[0]) is not dict:
+        raise InfrastructureError("runtime image inspection requires one image object")
+    info = response[0]
+    config = info.get("Config")
+    if type(config) is not dict or type(config.get("Labels")) is not dict:
+        raise InfrastructureError("runtime image inspection requires explicit ownership labels")
+    labels = config["Labels"]
     if (
-        info["Id"] != image
+        info.get("Id") != image
         or labels.get(LABEL + "project") != project
         or labels.get(LABEL + "policy") != POLICY
         or (recipe is not None and labels.get(LABEL + "recipe") != recipe)
         or type(info.get("Size")) is not int
+        or info["Size"] < 0
     ):
         raise InfrastructureError("runtime image ownership or identity mismatch")
     return info

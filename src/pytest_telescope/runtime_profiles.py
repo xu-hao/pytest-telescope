@@ -103,13 +103,18 @@ def provenance(profile):
 
 def validate_backend(selection, command):
     if selection["profile"] == GIT:
-        actual = (
-            command(
-                ["docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"], timeout=10
+        try:
+            actual = (
+                command(
+                    ["docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"], timeout=10
+                )
+                .decode()
+                .strip()
             )
-            .decode()
-            .strip()
-        )
+        except UnicodeError as exc:
+            raise InfrastructureError(
+                "Docker platform inspection returned invalid encoding"
+            ) from exc
         if actual != MANIFEST["platform"]:
             raise UnsupportedCapability(
                 "runtime:platform", "Git profile requires a linux/amd64 Docker server"
