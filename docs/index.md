@@ -317,7 +317,10 @@ consumer, often through defaults or a bundle.
 Optional [batch mode](batching.md) shares session/module/class fixtures among selected
 cases with exactly equal input scopes in one suite/module. Use `run --execution-mode batch`
 only when that fixture lifetime suits the tests. A batch has one fresh worker and one
-atomic cached result; differing input scopes are never combined. The tutorial above uses
+atomic cached result; differing input scopes are never combined. The
+[worker supervisor](worker-lifecycle.md) reaps completed adopted children throughout
+each session without taking exit statuses from test-owned subprocesses. Any child
+still running after teardown prevents reuse. The tutorial above uses
 the default per-case mode and keeps its fresh/reused counts.
 
 Filesystem isolation does not prove arbitrary Python deterministic. Clocks, randomness,

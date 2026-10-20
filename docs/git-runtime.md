@@ -129,7 +129,10 @@ only declared input content to scratch when they need tracked writable files.
 Workers retain nonroot execution, dropped capabilities, network none, IPC none,
 read-only root/project mounts and private nosuid/nodev/noexec scratch. A Git profile
 never changes CPU, memory, process or scratch budgets. Git subprocesses count within
-the worker limits; parallel groups still fit the explicit aggregate envelope. Default
+the worker limits; parallel groups still fit the explicit aggregate envelope. The shared
+[PID 1 supervisor](worker-lifecycle.md) reaps completed adopted children throughout
+long sessions without changing Git maintenance settings or test-owned child statuses.
+Default
 worker limits remain one CPU, 512 MiB, 128 processes and 64 MiB scratch. A larger local
 repository needs an explicitly larger admitted scratch/memory envelope, not fallback.
 

@@ -133,6 +133,8 @@ identities; a suite setting identity does not claim its individual views are equ
 Worker CPU/memory/process/scratch quotas, read-only source/root, noexec scratch,
 network-none, nonroot execution and descendant cleanup remain unchanged. Child
 processes use the same container limits and must finish before evidence is eligible.
+The shared [PID 1 supervisor](worker-lifecycle.md) continuously reaps completed adopted
+children; direct Python children retain ordinary subprocess exit and signal statuses.
 Use the existing two-attempt infrastructure retry with a fresh worker and owned path
 projection; no extra nested retry or import fallback. Invalid configuration/unsupported
 layout is terminal. Projection write/mount/backend failures are infrastructure incidents;

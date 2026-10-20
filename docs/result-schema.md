@@ -193,7 +193,11 @@ Case `attempts` repeats its group count: summing case attempts does not count wo
 Every batch-mode case row, including unselected and unresolved members, has
 `worker_seconds` and `cpu_seconds` set to `null`, because shared fixture
 costs cannot be attributed honestly to individual members. Case mode retains singleton
-measurements. `worker_cpu_seconds` counts each group once plus collection.
+measurements. `worker_cpu_seconds` counts each group once plus collection. Each fresh worker
+sample is the [supervisor](worker-lifecycle.md) CPU plus its final kernel child
+aggregate after lifecycle validation. Descendants already waited for by pytest
+are included in that aggregate and are not added a second time. No result field
+or public schema changes for the supervisor.
 
 A reused group reuses every member together, preserving passed/skipped statuses. Any
 missing, corrupt, partial or unsuccessful group evidence reruns its entire selected

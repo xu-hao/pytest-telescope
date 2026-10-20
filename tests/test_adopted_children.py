@@ -26,6 +26,7 @@ import os, pathlib, time
 
 def adopted_child(live):
     marker = pathlib.Path('/tmp/owned-adopted-child')
+    completed = pathlib.Path('/tmp/owned-adopted-completed')
     child = os.fork()
     if child == 0:
         grandchild = os.fork()
@@ -37,6 +38,7 @@ def adopted_child(live):
                 started = time.process_time()
                 while time.process_time() - started < 0.03:
                     pass
+                completed.write_text('complete')
             os._exit(0)
         marker.write_text(str(grandchild))
         os._exit(0)
@@ -44,11 +46,14 @@ def adopted_child(live):
     grandchild = int(marker.read_text())
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
-        state = pathlib.Path('/proc/' + str(grandchild) + '/stat').read_text().split()[2]
-        if live or state == 'Z':
+        try:
+            state = pathlib.Path('/proc/' + str(grandchild) + '/stat').read_text().split()[2]
+        except FileNotFoundError:
+            state = None
+        if live or (completed.exists() and state in (None, 'Z')):
             break
         time.sleep(0.002)
-    assert live or state == 'Z'
+    assert live or (completed.read_text() == 'complete' and state in (None, 'Z'))
 """
 
 

@@ -1,8 +1,7 @@
 # Worker process lifecycle
 
-This contract specifies the next 0.1.0a4 worker correction. Its restricted mechanism
-proof is complete; production integration and installed-distribution qualification
-remain required before publication. The [execution contract](execution-contract.md)
+This is the 0.1.0a4 worker lifecycle contract. Release qualification requires the
+complete guarded installed-distribution gate. The [execution contract](execution-contract.md)
 continues to govern source visibility, isolation, result eligibility and cleanup.
 
 ## Process ownership
@@ -89,7 +88,7 @@ format, as do published v2/v3 images. They gain no current execution authority. 
 rebuild retains current-image protection, bounded preparation/inspection retries,
 registry quota checks and terminal ambiguous-removal refusal.
 
-## Mechanism evidence and qualification boundary
+## Mechanism evidence and behavioral qualification
 
 A synthetic completed-orphan workload exhausted the old fixed limit after 126
 iterations: 126 state-Z children had PPID 1, and creation failed with errno 11. Final

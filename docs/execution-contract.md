@@ -163,7 +163,8 @@ storage.
 ### Explicit rebuilds after runtime upgrades
 
 After upgrading pytest-telescope, run `python -m pytest_telescope runtime` explicitly
-when the prepared runtime no longer matches the current recipe or policy. `run` and
+when the prepared runtime no longer matches the current recipe, lifecycle implementation
+or policy. `run` and
 runtime inspection do not rebuild it implicitly. A historical image never becomes
 eligible for current execution merely because its ownership can be verified.
 
@@ -300,13 +301,16 @@ only resources owned by that invocation. The pytest adapter may load other host 
 before routing to the controller; use `python -m pytest_telescope` to avoid host
 pytest/plugin startup entirely.
 
-Completed adopted worker children are reaped after all pytest teardown with nonblocking
-`waitpid`, bounded to 4096 calls and 50 ms. Child CPU accounting is read after reaping.
-Every process still present afterward, including any live descendant or unconsumed
-zombie after the bound, makes the invocation ineligible. The engine never waits for
-ongoing child work or kills a child to turn an incomplete run into reusable success.
+The in-image [worker supervisor](worker-lifecycle.md) runs as PID 1 in collection,
+case and batch containers. It continuously reaps completed adopted children while
+pytest runs, with each nonblocking drain bounded to 4096 calls and 50 ms. The
+supervisor and pytest worker both count against the existing 128-process limit.
+Ordinary test-owned children keep their original parent and normal `Popen`/`waitpid`
+statuses; pytest does not receive an engine-installed background reaper.
 
-The [worker lifecycle correction](worker-lifecycle.md) specifies continuous PID 1
-orphan reaping for the next unpublished 0.1.0a4 candidate. It preserves test-owned
-child statuses and makes final supervisor completion part of evidence eligibility;
-its mechanism proof is separate from production qualification.
+Evidence remains provisional until all pytest teardown, worker exit, final bounded
+reaping and a process scan have completed. Every remaining descendant, including an
+unconsumed zombie after the bound, makes the invocation ineligible. The engine never
+waits for ongoing child work or kills a child to turn an incomplete run into reusable
+success. CPU is the supervisor's own usage plus its final reaped-child aggregate,
+counted once. Complete outer cleanup still precedes cache publication.
