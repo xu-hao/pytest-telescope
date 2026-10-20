@@ -93,10 +93,10 @@ def assembled(tmp_path_factory):
     return dict(root=root, source=source, marker=marker, raw=raw, results=results)
 
 
-def lexical_target(records, name):
+def lexical_target(records, name, *, directories=()):
     """Resolve only recorded runtime links, never a staging link against the host."""
     visited = set()
-    while records[name]["kind"] == "symlink":
+    while name not in directories and records[name]["kind"] == "symlink":
         assert name not in visited, "runtime symlink cycle"
         visited.add(name)
         target = records[name]["target"]
@@ -104,7 +104,7 @@ def lexical_target(records, name):
             target if target.startswith("/") else str(PurePosixPath("/" + name).parent / target)
         )
         name = os.path.normpath(absolute).removeprefix("/")
-        assert name in records, f"runtime symlink target is not frozen: {name}"
+        assert name in records or name in directories, f"runtime symlink target is not frozen: {name}"
     return name
 
 
@@ -177,7 +177,7 @@ def test_copied_stdlib_preserves_bytes_modes_and_nanosecond_timestamps(assembled
     assert any(Path(name).name.startswith("libc.so") for name in records)
     for name, record in records.items():
         if record["kind"] == "symlink":
-            lexical_target(records, name)
+            lexical_target(records, name, directories=result.payload.manifest()["directories"])
 
 
 def test_unsupported_interpreter_query_or_layout_is_typed(tmp_path):
