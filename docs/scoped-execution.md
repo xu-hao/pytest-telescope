@@ -299,3 +299,7 @@ the integrated candidate is still pending; these focused results do not replace 
 establish release qualification. See [development](development.md) for the full gate and
 [benchmark methodology](benchmark.md#comparing-case-and-batch-on-the-same-scopes) for the
 separate performance comparison.
+
+The separately proposed [pinned local Git profile](git-runtime.md) defines a narrow
+additional tool capability. It does not change the published alpha3 runtime or qualify
+Bash, executable scratch, browsers or services.

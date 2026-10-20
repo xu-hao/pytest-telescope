@@ -359,8 +359,8 @@ def test_second(): assert version("example-batch") in ("1.0", "2.0")
     assert run(project)["counts"]["executed"] == 2
     original = runtime.identity
 
-    def identity(root):
-        value = original(root)
+    def identity(root, **kwargs):
+        value = original(root, **kwargs)
         return value | {"execution": value["execution"] | {"synthetic_identity_revision": 1}}
 
     monkeypatch.setattr(runtime, "identity", identity)

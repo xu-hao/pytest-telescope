@@ -14,7 +14,7 @@ have explicit rules.
 
 ## Install
 
-This tutorial uses **0.1.0a3**. Version 0.1.0a1 used file/group declarations and does not
+This tutorial uses **0.1.0a4**. Version 0.1.0a1 used file/group declarations and does not
 support this marker interface. You need Linux, Python 3.11+, and permission to build and
 run Linux containers using a local Docker daemon's Unix socket. Runtime preparation
 needs network access; test workers have no network.
@@ -24,7 +24,7 @@ mkdir telescope-demo
 cd telescope-demo
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a3
+python -m pip install pytest-telescope==0.1.0a4
 mkdir -p app data tests
 ```
 
@@ -339,6 +339,7 @@ Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
 Optional batches <batching>
+Pinned local Git runtime <git-runtime>
 Scoped execution extension <scoped-execution>
 Run result reference <result-schema>
 Benchmark <benchmark>

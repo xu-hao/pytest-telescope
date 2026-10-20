@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "profile": "git-local-v1",
+  "platform": "linux/amd64",
+  "base": "python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1",
+  "debian_package": "git",
+  "debian_version": "1:2.47.3-0+deb13u1",
+  "archive": {
+    "url": "https://deb.debian.org/debian/pool/main/g/git/git_2.47.3-0+deb13u1_amd64.deb",
+    "size": 8861572,
+    "sha256": "3e35662fd5c46add561703e54031a1d8ad9df45811927689f0a51122b13be722"
+  },
+  "source": "https://sources.debian.org/src/git/1%3A2.47.3-0%2Bdeb13u1/",
+  "base_packages": {
+    "libc6": "2.41-12+deb13u4",
+    "libpcre2-8-0": "10.46-1~deb13u3",
+    "zlib1g": "1:1.3.dfsg+really1.3.1-1+b1"
+  },
+  "native_files_sha256": {
+    "/opt/telescope/git/bin/git": "356db14e102d68a1a37d8a1ac577dfd678d45d46e92f468bef8b7154e7bfdc60",
+    "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": "c8438e4fde1934e61c88311633f00949ff645d5c04cdb8671fa3d78164d2f307",
+    "/usr/lib/x86_64-linux-gnu/libc.so.6": "9792e3cbb541c8f44c7acf5f14f4022ea62998ecc787d326bed4d8b6547dfd92",
+    "/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.14.0": "92e9b4167f9bbc237ca8f5526d82ee99ec9f8dbd0270ef1dd0ab24e2217f48e3",
+    "/usr/lib/x86_64-linux-gnu/libz.so.1.3.1": "85590dd58edf5445e18bc7193e5ebc01ac5841f1ae187e97705a662e90c6421e"
+  },
+  "aliases": [
+    "git-upload-pack",
+    "git-receive-pack",
+    "git-upload-archive"
+  ],
+  "projection": "one native executable, hardlinked local transport aliases, copyright record and empty templates; no package maintainer scripts or optional helpers"
+}

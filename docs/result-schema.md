@@ -1,6 +1,6 @@
 # Run results and explicit refusals
 
-This reference describes the 0.1.0a3 schema. Start with the practical
+This reference describes the 0.1.0a4 schema. Start with the practical
 [quickstart](index.md). The [scoped execution contract](scoped-execution.md)
 defines metadata, suite and resource boundaries.
 
@@ -47,6 +47,38 @@ The Python API raises `DeclarationError` for invalid declarations and
 run are accounted in its result where possible. `controller.error_result(error)` converts a
 typed declaration, capability or infrastructure exception into the refusal envelope below.
 Consumers should dispatch on the explicit status and capability, without parsing messages.
+
+### Runtime profiles
+
+The [pinned local Git contract](git-runtime.md) adds `runtime_profile=None` and
+`required_capabilities=None` keyword arguments to `controller.run` and `plan.make_plan`.
+`runtime.build_runtime(root, requirements=None, *, runtime_profile=None)` prepares the
+configured profile or explicit override. CLI `runtime`, `plan` and `run` accept
+`--runtime-profile`; `plan` and `run` also accept repeated `--require-capability`.
+`runtime.inspect_runtime(root, *, runtime_profile=None, required_capabilities=None)`
+returns exactly the same three-field runtime envelope as a successful run. It validates
+prepared identity without preparation, recovery, collection, cache access or state writes,
+and owns at most two retryable inspection attempts. It supplies identity only, not
+execution or cache authority.
+
+These interfaces are separate from `execution_mode` and do not change configuration files.
+
+The default runtime profile is `python-v1`. `git-local-v1` adds pinned local Git for
+the qualified Linux/amd64 Docker server platform. Configured `runtime.requires` and
+caller requirements form a sorted unique union; each supplied list is bounded to 16
+strings. A caller cannot remove a configured requirement. Unknown profile versions
+refuse with `runtime:profile`; unknown or unmet requirements use `runtime:capability`.
+Those compatibility checks precede backend and cache access. Git platform qualification
+checks the actual Docker server and refuses unsupported platforms with `runtime:platform`.
+Static planning does not contact Docker and cannot establish platform or prepared-image validity.
+
+Plan and run results add a separate `runtime` object with exactly `profile`,
+`required_capabilities`, and `identity`. Identity is `null` before backend validation
+(always in a static plan); afterward it is an opaque lowercase SHA-256 digest of the
+validated runtime identity. `execution.profile` still means `case-v1` or `batch-v1`.
+A refusal does not claim a validated runtime identity. A missing, stale, corrupted or
+different prepared profile is an infrastructure failure; `run` never prepares it
+implicitly or accepts a wider installed image as a substitute.
 
 ## Complete and incomplete run inventories
 

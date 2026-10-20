@@ -101,7 +101,10 @@ def backend(root, monkeypatch, behavior, *, count=3, fail_outer=False):
     monkeypatch.setattr(
         controller.runtime,
         "identity",
-        lambda root: {"image": "synthetic", "execution": {"fixture": True}},
+        lambda root, *, runtime_profile=None: {
+            "image": "synthetic",
+            "execution": {"fixture": True},
+        },
     )
     monkeypatch.setattr(controller.runtime, "invocation", invocation)
     monkeypatch.setattr(controller.runtime, "execute", execute)
