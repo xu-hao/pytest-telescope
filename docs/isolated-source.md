@@ -19,7 +19,10 @@ are an ordered list, not a set: their order controls ordinary Python import prec
 At most 64 unique roots are accepted, each a canonical project-relative existing
 ordinary directory, including `.`. Absolute paths, empty strings, traversal, repeated
 separators, control characters, symlinks and symlink ancestors refuse before backend
-startup. A root is an import lookup location, never an input declaration. Per-case
+startup. A root with trailing Unicode whitespace or any line separator is typed
+unsupported `python:source-layout`: Python path-file trimming and protocol line parsing
+must never silently redirect lookup to a different directory. Internal ordinary spaces
+remain supported. A root is an import lookup location, never an input declaration. Per-case
 literal declarations, defaults and bundles still determine every readable source file.
 A root absent from a particular frozen view adds no files or synthetic application
 content; Python ignores that nonexistent search path.
@@ -80,7 +83,10 @@ widens the source or metadata mounts.
 
 Source roots cannot provide implicit startup hooks or additional installed metadata.
 Visible root-level `sitecustomize`/`usercustomize` modules or package directories,
-`.dist-info`/`.egg-info` entries and legacy `.egg-link` entries are unsupported. Validate
+`.dist-info`/`.egg-info` entries and legacy `.egg-link` entries are unsupported,
+including case variants. `EGG-INFO` (also case-insensitive) under a source root whose
+basename ends in `.egg` is likewise unsupported; this follows actual CPython metadata
+discovery rather than a case-sensitive approximation. Validate
 all proposed collection and execution views before starting workers; no hook may run
 before refusal. This avoids running application startup code merely by starting Python
 and prevents source paths from exposing unselected distribution records. Arbitrary
