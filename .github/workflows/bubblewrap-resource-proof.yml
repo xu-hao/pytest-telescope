@@ -68,7 +68,29 @@ jobs:
           sudo install -m 0644 "$RUNNER_TEMP/telescope52-user-manager.conf" "$dropin"
           sudo systemctl daemon-reload
           sudo loginctl enable-linger "$(id -un)"
-          sudo systemctl restart "$manager_unit"
+          setup_start=$(date --iso-8601=seconds)
+          if sudo systemctl restart "$manager_unit"; then
+            :
+          else
+            restart_status=$?
+            set +e
+            printf 'Owned manager restart failed: exit=%s\n' "$restart_status"
+            timeout 10s systemctl show "$manager_unit" -p LoadState -p ActiveState -p SubState -p Result \
+              -p ExecMainCode -p ExecMainStatus -p ControlPID -p ControlGroup -p Delegate -p DelegateControllers
+            printf 'Manager show exit: %s\n' "$?"
+            timeout 10s systemctl status "$manager_unit" --full --no-pager
+            printf 'Manager status exit: %s\n' "$?"
+            sudo timeout 10s journalctl --unit "$manager_unit" --since "$setup_start" --lines 80 --no-pager -o short-iso
+            printf 'Exact-unit journal exit: %s\n' "$?"
+            for group in /sys/fs/cgroup/user.slice "/sys/fs/cgroup/user.slice/user-$runner_uid.slice" "/sys/fs/cgroup/user.slice/user-$runner_uid.slice/$manager_unit"; do
+              for field in cgroup.controllers cgroup.subtree_control cpu.max memory.max pids.max; do
+                printf 'Owned-manager ancestor field: %s/%s\n' "$group" "$field"
+                timeout 2s cat "$group/$field"
+                printf 'Field read exit: %s\n' "$?"
+              done
+            done
+            exit "$restart_status"
+          fi
           systemctl show "$manager_unit" -p Delegate -p DelegateControllers -p ControlGroup -p ActiveState
           delegated=$(systemctl show "$manager_unit" -p DelegateControllers --value)
           for controller in cpu memory pids; do
@@ -82,7 +104,7 @@ jobs:
             [[ " $available " == *" $controller "* ]]
           done
           systemd --version
-      - name: Run bounded ordinary-user resource proof
+      - name: Observe cgroup delegation without workloads
         shell: bash
         run: |
           set -euo pipefail
@@ -91,7 +113,7 @@ jobs:
           systemctl --user is-active default.target
           "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -B scripts/probe_bubblewrap_resources.py \
             --output "$RUNNER_TEMP/telescope-resource-proof" \
-            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --run-id "$GITHUB_RUN_ID"
+            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --run-id "$GITHUB_RUN_ID" --cgroup-diagnostic
       - name: Retain narrow namespace failure audit
         if: failure()
         shell: bash
