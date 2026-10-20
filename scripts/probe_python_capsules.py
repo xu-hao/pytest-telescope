@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -294,6 +295,49 @@ print('CAPSULE_RESULT ' + json.dumps(dict(version=list(sys.version_info[:3]), ex
 """
 
 
+def process_observation(group):
+    """Read only this already-validated owned unit; never scan host processes."""
+
+    def read(path, limit=16384):
+        try:
+            with path.open("rb") as stream:
+                raw = stream.read(limit + 1)
+            if len(raw) > limit:
+                return dict(unavailable="bounded-read-limit")
+            return dict(value=raw.decode("ascii"))
+        except (OSError, UnicodeError) as exc:
+            return dict(unavailable=type(exc).__name__, errno=getattr(exc, "errno", None))
+
+    fields = {
+        name: read(group / name)
+        for name in ("pids.current", "cgroup.procs", "cgroup.threads", "cgroup.events")
+    }
+    rows = []
+    if "value" in fields["cgroup.procs"]:
+        members = fields["cgroup.procs"]["value"].split()
+        assert len(members) <= 128 and all(value.isdecimal() for value in members)
+        for value in members:
+            raw = read(Path("/proc") / value / "stat", 4096)
+            row = dict(pid=int(value))
+            if "value" in raw:
+                # Ignore comm entirely: only numeric ownership and one state code.
+                tail = raw["value"].rsplit(")", 1)[-1].split()
+                if len(tail) >= 20 and tail[1].isdecimal() and tail[19].isdecimal():
+                    row.update(state=tail[0], ppid=int(tail[1]), start_ticks=int(tail[19]))
+                else:
+                    row["unavailable"] = "malformed-stat"
+            else:
+                row.update(raw)
+            rows.append(row)
+    return dict(
+        self_pid=os.getpid(),
+        monotonic=time.monotonic(),
+        cgroup=str(group),
+        fields=fields,
+        processes=rows,
+    )
+
+
 def unit(config, token):
     helper = resources()
     own = Path("/sys/fs/cgroup") / next(
@@ -302,6 +346,10 @@ def unit(config, token):
         if row.startswith("0::")
     )
     before = helper.group_values(own)
+    print(
+        json.dumps(dict(before_namespace=process_observation(own), before_limits=before)),
+        flush=True,
+    )
     assert before["cpu.max"] == "50000 100000" and before["memory.max"] == "536870912"
     assert before["memory.swap.max"] == "0" and before["pids.max"] == "128"
     assert own.parent == Path(config["worker_cgroup"])
@@ -400,6 +448,21 @@ print(json.dumps(result))
     assert negative.returncode == 0, (negative.returncode, negative.stderr)
     dev_before = json.loads(negative.stdout)
     negative_pids_current = int((own / "pids.current").read_text())
+    print(
+        json.dumps(
+            dict(
+                negative_namespace=dict(
+                    exit_code=negative.returncode,
+                    stdout=negative.stdout,
+                    stderr=negative.stderr,
+                    original_dev_mount=dev_before,
+                    pids_current=negative_pids_current,
+                    observation=process_observation(own),
+                )
+            )
+        ),
+        flush=True,
+    )
     assert negative_pids_current == 1
     assert set(dev_before) == {"writable", "errno"} and type(dev_before["writable"]) is bool
     result = subprocess.run(argv, text=True, capture_output=True, timeout=40)
