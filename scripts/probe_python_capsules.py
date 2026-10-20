@@ -399,6 +399,8 @@ print(json.dumps(result))
     negative = subprocess.run(previous, text=True, capture_output=True, timeout=10)
     assert negative.returncode == 0, (negative.returncode, negative.stderr)
     dev_before = json.loads(negative.stdout)
+    negative_pids_current = int((own / "pids.current").read_text())
+    assert negative_pids_current == 1
     assert set(dev_before) == {"writable", "errno"} and type(dev_before["writable"]) is bool
     result = subprocess.run(argv, text=True, capture_output=True, timeout=40)
     after = helper.group_values(own)
@@ -414,6 +416,7 @@ print(json.dumps(result))
                 pool=parent,
                 aggregate=aggregate,
                 original_dev_mount=dev_before,
+                negative_pids_current=negative_pids_current,
             )
         ),
         flush=True,
