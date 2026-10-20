@@ -234,6 +234,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=8)
+    parser.add_argument("--diagnostic-only", action="store_true")
     args = parser.parse_args()
     if not 4 <= args.samples <= 20:
         parser.error("samples must be between4 and20")
@@ -291,6 +292,16 @@ def main():
             "The32-case path uses32 fresh sessions and snapshots; its fixture lifetime differs from one ordinary or sandbox batch session.",
         ],
     }
+    if args.diagnostic_only:
+        report["diagnostic_only"] = True
+        report["unit_security"] = {
+            "apparmor": Path("/proc/self/attr/current").read_text().strip(),
+            "process": {
+                line.split(":", 1)[0]: line.split(":", 1)[1].strip()
+                for line in Path("/proc/self/status").read_text().splitlines()
+                if line.startswith(("NoNewPrivs:", "Seccomp:", "Seccomp_filters:", "Cap"))
+            },
+        }
     source = args.output / "source"
     (source / "tests").mkdir(parents=True)
     data = b"0123456789abcdef" * 2048
@@ -353,6 +364,9 @@ print(json.dumps({'read':True,'stat':True,'native':True,'subprocess':True,'reado
             scratch,
         )
         (source / "data.txt").write_bytes(data)
+        if args.diagnostic_only:
+            report["status"] = "passed-preflight-only"
+            return
         for workload, selector, count in [
             ("single", "tests/test_work.py::test_single", 1),
             ("batch", "tests/test_work.py::test_batch", 32),

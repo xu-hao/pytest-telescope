@@ -34,6 +34,12 @@ jobs:
           uname -a
           cat /etc/os-release
           bwrap --version
+          for profile in /etc/apparmor.d/*bwrap*; do
+            if [[ -f "$profile" ]]; then
+              printf '\nInstalled bubblewrap profile: %s\n' "$profile"
+              cat "$profile"
+            fi
+          done
       - name: Run bounded fresh plain-versus-bubblewrap prototype
         shell: bash
         run: |
@@ -46,7 +52,13 @@ jobs:
             /usr/bin/taskset --cpu-list "$affinity" \
             "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" benchmarks/bubblewrap_fresh.py \
             --output "$RUNNER_TEMP/telescope-benchmark-result" \
-            --scratch "$RUNNER_TEMP/telescope-benchmark-scratch" --samples 8
+            --scratch "$RUNNER_TEMP/telescope-benchmark-scratch" --samples 8 --diagnostic-only
+      - name: Retain narrow namespace failure audit
+        if: failure()
+        shell: bash
+        run: |
+          sudo journalctl -k --since '-5 minutes' --no-pager -o cat |
+            awk '/apparmor=/ && /comm="bwrap"/ {if (++count <= 50) print}'
       - name: Retain structured result in complete job log
         if: always()
         shell: bash
