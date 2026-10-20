@@ -2,6 +2,9 @@
 
 ## Status
 
+The proposed [ordinary/Bubblewrap routing contract](bubblewrap.md) records accepted
+next-backend rules; it is not yet implemented or qualified.
+
 Version 0.1.0a3 implements this per-case marker contract with Linux Docker
 enforcement and lifecycle recovery, plus the [scoped execution extension](scoped-execution.md)
 and versioned [result schema](result-schema.md). Version 0.1.0a2 introduced per-case markers;

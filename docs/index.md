@@ -338,6 +338,7 @@ available in version 0.1.0a2.
 Quickstart <self>
 Marker reference <specification>
 Execution contract <execution-contract>
+Ordinary and Bubblewrap proposal <bubblewrap>
 Optional batches <batching>
 Pinned local Git runtime <git-runtime>
 Isolated Python source <isolated-source>
