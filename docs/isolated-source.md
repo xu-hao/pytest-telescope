@@ -81,6 +81,15 @@ the prepared slot; missing or mismatched slots refuse boundedly rather than gues
 another interpreter directory. The generated mount has no application code and never
 widens the source or metadata mounts.
 
+An older prepared image without the current slot must be rebuilt explicitly; neither
+`run` nor runtime inspection repairs it. The
+[known-policy upgrade path](execution-contract.md#explicit-rebuilds-after-runtime-upgrades)
+allows bounded cleanup of registered historical project-owned images using the labels
+published with their release, while preserving the selected image during replacement.
+Historical cleanup eligibility never substitutes for validating the current execution
+policy and source slot. Unknown/foreign records or unconfirmed removal remain terminal
+incidents with accepted state preserved, rather than triggering a wider cleanup.
+
 Source roots cannot provide implicit startup hooks or additional installed metadata.
 Visible root-level `sitecustomize`/`usercustomize` modules or package directories,
 `.dist-info`/`.egg-info` entries and legacy `.egg-link` entries are unsupported,
