@@ -54,6 +54,13 @@ bounded fresh-attempt retry and cancellation/drain rules apply, with no new nest
 retry owner. A cancelled/failed attempt supplies no reusable partial success. Cleanup
 may terminate an already failed owned container; that does not turn it into success.
 
+Supervisor faults use one bounded internal `TELESCOPE_INFRASTRUCTURE` frame with
+exact fields `kind` and `nonce`. The kind is one of `descendant`, `output` or
+`protocol`, and the nonce must match the invocation. Duplicate, conflicting or
+malformed frames remain generic infrastructure failure; they cannot supply test
+results or successful cache evidence. This internal diagnostic framing adds no
+public result fields and shares the invocation's output bound.
+
 ## CPU, timing and identity
 
 The authoritative CPU sample is PID 1 `RUSAGE_SELF` plus its final
@@ -106,8 +113,15 @@ capture initially tried to serialize bytes. A later embedded-script edit had an
 indentation error; embedded proof sources are now compiled before preparation. Those
 failures are not production verdicts.
 
-This mechanism evidence does not qualify the production controller, cache or runtime
-builder. Integration must add behavioral controls for both runtime profiles and all
-collection/case/batch paths, image/runner identity and explicit upgrade, malformed and
-oversized IPC, bounded retry/exhaustion, cancellation, live descendants, atomic cache
-commit, and installed-package behavior. Existing isolation regressions remain required.
+Mechanism evidence alone does not qualify the production controller, cache or runtime
+builder. Installed-distribution behavioral controls cover both runtime profiles, long
+collection/case/batch sessions, direct child exit and signal statuses, session fixture
+teardown, worker-free warm reuse, live descendants and actual sibling cancellation.
+A clean collection can retain its separate inventory when later execution fails;
+failed execution supplies no reusable case or group evidence. Terminal outer cleanup
+failure prevents all newly staged cache publication.
+
+Qualification also requires image/runner identity and explicit upgrade, malformed and
+oversized IPC, bounded retry/exhaustion, atomic cache commit, supported host/worker
+corners and the existing isolation regressions. Targeted internal draft results remain
+separate from the complete guarded installed-distribution release verdict.

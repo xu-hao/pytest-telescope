@@ -189,7 +189,7 @@ def live_orphan():
 
 @pytest.mark.parametrize("mode", ["case", "batch"])
 @pytest.mark.parametrize("phase", ["collection", "teardown"])
-def test_live_adopted_child_refuses_all_new_cache_evidence(project, mode, phase):
+def test_live_adopted_child_refuses_execution_cache_evidence(project, mode, phase):
     root, _ = project
     source = "WITH_GIT = False\n" + ORPHAN + LIVE
     if phase == "collection":
@@ -209,9 +209,15 @@ def test_second(): pass
     assert result["status"] == "infrastructure_error", result
     assert result["counts"]["reused"] == 0
     assert not any(group["cache_eligible"] for group in result["groups"])
+    cache = root / ".pytest-telescope/cache"
+    assert not list(cache.glob("*.json"))
     if phase == "teardown":
         assert all(group["attempts"] == 2 for group in result["groups"])
-    assert not list((root / ".pytest-telescope/cache").rglob("*.json"))
+        # A separate, clean collection remains valid inventory evidence.
+        assert result["collection"]["outcome"] == "executed"
+        assert len(list((cache / "inventory").glob("*.json"))) == 1
+    else:
+        assert not list(cache.rglob("*.json"))
     assert_no_owned_workers(root)
 
 
