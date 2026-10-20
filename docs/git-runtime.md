@@ -162,7 +162,11 @@ remote/set-url, push/fetch/clone, merge and ancestor checks, revision/status que
 worktree add/remove. Four deliberate faults (missing origin, index lock, ref lock and
 FETCH_HEAD directory) returned nonzero; removing each owned fault restored the operation.
 Both workers denied project writes, lacked the undeclared source file, refused direct
-execution of a native binary copied into scratch, and lacked external network access.
+execution of a native binary copied into scratch, and had inspected Docker network mode
+`none`, loopback-only interfaces and no default route. A controlled bridge-mode worker
+had a non-loopback interface and a default route, distinguishing the network control
+from an unreachable test endpoint. The TEST-NET connection failure is only an ancillary
+observation, not the isolation evidence.
 The default base contained no Git. Exact owned containers and the proof image were
 removed and absence verified. An earlier proof-launch failure from a mode 0600 control
 script was retained separately; setting the control script explicitly 0444 corrected

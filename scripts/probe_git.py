@@ -70,6 +70,9 @@ native=pathlib.Path('/tmp/generated-git');shutil.copyfile(shutil.which('git'),na
 try:subprocess.run([str(native),'--version'],check=True,timeout=10,capture_output=True)
 except PermissionError:pass
 else:raise AssertionError('scratch allowed native execution')
+interfaces=sorted(path.name for path in pathlib.Path('/sys/class/net').iterdir())
+default_route=any(line.split()[1]=='00000000' for line in pathlib.Path('/proc/net/route').read_text().splitlines()[1:])
+assert interfaces==['lo'] and not default_route
 with socket.socket() as sock:
     sock.settimeout(1)
     assert sock.connect_ex(('192.0.2.1',9)) != 0
@@ -82,7 +85,7 @@ for line in output.splitlines():
         path=pathlib.Path(name).resolve()
         closure[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
 closure[shutil.which('git')]=hashlib.sha256(pathlib.Path(shutil.which('git')).read_bytes()).hexdigest()
-print(json.dumps({'local_operations':'passed','owned_faults_and_recovery':4,'source_readonly':True,'undeclared_absent':True,'scratch_noexec':True,'external_network_denied':True,'initial_commit':initial,'topic_commit':topic,'closure':closure},sort_keys=True))
+print(json.dumps({'local_operations':'passed','owned_faults_and_recovery':4,'source_readonly':True,'undeclared_absent':True,'scratch_noexec':True,'loopback_only':interfaces==['lo'],'default_route_absent':not default_route,'test_endpoint_unreachable':True,'initial_commit':initial,'topic_commit':topic,'closure':closure},sort_keys=True))
 """
 
 
@@ -138,11 +141,10 @@ def main():
         assert info["Config"]["Labels"]["org.pytest-telescope.proof"] == "issue-29"
         rows = []
         for _ in range(2):
-            completed = command(
+            command(
                 [
                     "docker",
-                    "run",
-                    "--rm",
+                    "create",
                     "--name",
                     name,
                     "--pull=never",
@@ -166,7 +168,15 @@ def main():
                 ],
                 timeout=90,
             )
-            rows.append(json.loads(completed.stdout))
+            network = json.loads(command(["docker", "inspect", name]).stdout)[0]["HostConfig"][
+                "NetworkMode"
+            ]
+            assert network == "none"
+            completed = command(["docker", "start", "--attach", name], timeout=90)
+            row = json.loads(completed.stdout)
+            row["inspected_network_mode"] = network
+            rows.append(row)
+            command(["docker", "rm", name])
         assert rows[0] == rows[1]
         default = command(
             [
@@ -189,8 +199,40 @@ def main():
                 "import shutil;assert shutil.which('git') is None;print('default Git absent')",
             ]
         )
+        command(
+            [
+                "docker",
+                "create",
+                "--name",
+                name,
+                "--network=bridge",
+                "--read-only",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges",
+                "--cpus=1",
+                "--memory=268435456",
+                "--memory-swap=268435456",
+                "--pids-limit=32",
+                "--entrypoint=python",
+                BASE,
+                "-c",
+                "import pathlib,json;names=sorted(p.name for p in pathlib.Path('/sys/class/net').iterdir());route=any(x.split()[1]=='00000000' for x in pathlib.Path('/proc/net/route').read_text().splitlines()[1:]);print(json.dumps(dict(loopback_only=names==['lo'],default_route_absent=not route)))",
+            ]
+        )
+        bridge_mode = json.loads(command(["docker", "inspect", name]).stdout)[0]["HostConfig"][
+            "NetworkMode"
+        ]
+        negative = json.loads(command(["docker", "start", "--attach", name]).stdout)
+        assert bridge_mode == "bridge" and negative == dict(
+            loopback_only=False, default_route_absent=False
+        )
+        command(["docker", "rm", name])
         receipt = dict(
-            image=image, image_bytes=info["Size"], repeats=rows, default=default.stdout.strip()
+            image=image,
+            image_bytes=info["Size"],
+            repeats=rows,
+            default=default.stdout.strip(),
+            network_negative_control=dict(inspected_network_mode=bridge_mode, **negative),
         )
         (directory / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print(json.dumps(receipt, indent=2))
