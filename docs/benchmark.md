@@ -214,5 +214,53 @@ for every case. The modes therefore offer different isolation and fixture lifeti
 even with identical file scopes. Group-level worker CPU must be counted once; batch
 member timing is intentionally unavailable. Warm reuse and atomic group counts must
 also reconcile before timings are accepted. See the [batching contract](batching.md)
-for the lifecycle boundary. No timing result for this comparison is claimed here yet;
-the earlier per-case measurements remain a separate workload receipt.
+for the lifecycle boundary. The earlier per-case measurements remain a separate
+workload receipt.
+
+
+### Shared-module measurements
+
+Measured on 2026-10-20 with the same installed 0.1.0a3 wheel, host Python 3.11.15 and
+pytest 8.3.5; workers used the pinned Python 3.12/pytest 9.1.1 runtime. Each mode ran once
+on its own newly generated equivalent project, sequentially on a shared development host.
+This is a comparison of execution profiles, not a same-interpreter startup microbenchmark.
+The outer coordinator reserved five CPUs, 4 GiB memory and 2 GiB scratch to cover up to
+four Docker workers plus controller headroom; Docker worker limits remain explicit as
+above. Daemon CPU is not included in the reported process/worker CPU measurements.
+
+Ordinary execution took **1.079 s** for the case fixture and **1.029 s** for the batch
+fixture. Separate runtime preparation took **0.756 s** and **0.339 s**, respectively,
+with cached Docker layers. Neither preparation measurement predicts a first download.
+
+| Profile | Worker budget | Phase | External elapsed | Host process CPU | Worker CPU | Fresh / reused cases | Fresh / reused groups |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| case | 1 | Cold | 66.768 | 13.158 | 30.643 | 128 / 0 | 128 / 0 |
+| case | 1 | Warm | 0.264 | 0.242 | 0.000 | 0 / 128 | 0 / 128 |
+| case | 1 | One resource changed | 5.072 | 1.151 | 2.367 | 8 / 120 | 8 / 120 |
+| case | 4 | Cold | 20.899 | 13.434 | 32.457 | 128 / 0 | 128 / 0 |
+| case | 4 | Warm | 0.264 | 0.243 | 0.000 | 0 / 128 | 0 / 128 |
+| case | 4 | One resource changed | 2.317 | 1.174 | 2.432 | 8 / 120 | 8 / 120 |
+| batch | 1 | Cold | 11.783 | 2.039 | 5.476 | 128 / 0 | 16 / 0 |
+| batch | 1 | Warm | 0.264 | 0.221 | 0.000 | 0 / 128 | 0 / 16 |
+| batch | 1 | One resource changed | 1.767 | 0.432 | 0.756 | 8 / 120 | 1 / 15 |
+| batch | 4 | Cold | 6.024 | 2.053 | 5.662 | 128 / 0 | 16 / 0 |
+| batch | 4 | Warm | 0.264 | 0.226 | 0.000 | 0 / 128 | 0 / 16 |
+| batch | 4 | One resource changed | 1.967 | 0.443 | 0.754 | 8 / 120 | 1 / 15 |
+
+All twelve phases passed exact case identities, complete effective inventories, atomic
+group membership, outcome counts and admitted-budget checks. Warm phases reused both
+collection and results with no current worker CPU. The single changed resource reran
+exactly eight consumers in either profile, leaving 120 cached cases.
+
+Batching reduced the number of fresh sessions from 128 to 16 and lowered cold elapsed
+time in this workload. Cold batch execution still took substantially longer than ordinary
+pytest. With only one group fresh in the selective batch phase, a four-worker budget had
+no useful group parallelism and was slightly slower than one worker in this trial. This
+is one measurement per condition, without confidence intervals or exclusive host use;
+it supports no universal speedup or linear scaling claim. It also does not justify
+broadening a case's declarations merely to create batches.
+
+The structured [case measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/shared-module-case-linux-docker.json)
+and [batch measurements](https://github.com/xu-hao/pytest-telescope/blob/main/benchmarks/results/shared-module-batch-linux-docker.json)
+retain exact budgets, group counts and timing receipts. Raw logs and generated fixtures
+are retained locally; the harness removed its exact owned runtime images.
