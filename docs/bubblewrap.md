@@ -1,8 +1,9 @@
 # Ordinary execution and Bubblewrap scopes
 
 This is the accepted routing and fixture contract for the proposed Linux backend.
-The backend, runtime preparation, resource mechanism, result schema and complete gate
-are still under investigation. The existing implementation has not adopted these rules.
+The bounded resource mechanism passed the native proof described below. Runtime
+preparation, lifecycle integration, result schema and the complete backend gate remain
+unqualified. The [exact API/runtime proposal](bubblewrap-api.md) defines the next review seam. The existing implementation has not adopted these rules.
 The separate fresh prototype benchmark does not qualify a production backend.
 
 ## Ordinary is the default route
@@ -102,9 +103,13 @@ controller/setup memory/CPU/process use and frozen-pool/scratch headroom; comple
 evidence includes both. Scheduler counts or RLIMIT_AS alone cannot substitute for quotas.
 All setup, supervisor, test and descendant processes count toward worker ceilings.
 
-The initial feasibility candidate uses ordinary-user systemd units with private user/mount
-namespaces, cgroup-v2 limits and quota-bound noexec/nosuid/nodev tmpfs. It is unqualified
-until actual effective controllers, numeric limits, mount flags and negative controls pass.
+The bounded feasibility proof uses ordinary-user systemd units with private user/mount
+namespaces, cgroup-v2 limits and quota-bound noexec/nosuid/nodev tmpfs.
+[Run 39503556501](https://github.com/xu-hao/pytest-telescope/actions/runs/39503556501),
+source `ee1e35f5b2f52d8f95679d7dd4f1e8649e20be16`, passed numeric controller, worker,
+pool and aggregate limits; two concurrent declared views; CPU throttling; owned memory
+and PID exhaustion; scratch byte/inode/noexec controls; and exact empty/removed cleanup.
+This qualifies that resource mechanism only, not complete runtime/lifecycle/backend behavior.
 Administrator provisioning must delegate CPU, memory and process controllers to the
 standard user manager before normal unprivileged launch. A boolean `Delegate=yes` alone
 is insufficient: the measured Ubuntu 22.04/systemd 249 default delegates only `memory pids`,
@@ -112,8 +117,12 @@ leaving `cpu.max` unavailable despite requested CPUQuota settings. Check the eff
 `DelegateControllers` and actual cgroup controllers. The proposed ephemeral CI setup uses
 an instance-specific runtime-only `user@<uid>.service` drop-in with
 `Delegate=cpu memory pids`; no system-wide template or security-policy change is needed.
-This prerequisite correction does not yet qualify the full resource mechanism. Normal
-production launch must not use a privileged helper or silently provision its own host.
+The successful ephemeral setup stopped its exact user-manager instance before applying
+the instance-specific delegation change and verified an absent or empty prior cgroup.
+That administrator provisioning sequence is not a normal launch operation. Production
+launch must not use a privileged helper or silently provision its own host. Its namespace
+preflight must first succeed in the invoking admission context, before any external user
+service is launched; a denied entry context cannot be bypassed through the user manager.
 Unsupported prerequisites refuse; neither global security-policy changes nor a broader
 execution path are an alternative. Source and runtime remain read-only and networking
 remains disabled before scoped project imports.

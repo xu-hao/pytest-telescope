@@ -1,0 +1,1460 @@
+{
+  "status": "proposed synthetic interface examples, not execution receipts",
+  "schema2_before": {
+    "kind": "projection-only",
+    "unmarked": {
+      "schema": 2,
+      "execution": {
+        "mode": "case",
+        "profile": "case-v1"
+      },
+      "outcome": "reused",
+      "implicit_scope": "whole supported project snapshot"
+    }
+  },
+  "schema3_after": {
+    "all_ordinary": {
+      "schema": 3,
+      "kind": "run",
+      "status": "passed",
+      "inventory_complete": true,
+      "inventory_digest": "da3682b595cbc1ce4ca9ba0b371461ce0f61144dc3552e080ec53ba25fa15f9e",
+      "routing_complete": true,
+      "grouping_complete": true,
+      "suites": [
+        {
+          "name": "default",
+          "files": [
+            "tests/test_a.py",
+            "tests/test_b.py"
+          ]
+        }
+      ],
+      "execution": {
+        "mode": "case",
+        "profile": "case-v1"
+      },
+      "backend": {
+        "name": "bubblewrap",
+        "profile": "bubblewrap-v1",
+        "identity": null
+      },
+      "runtime": {
+        "profile": "python-v2",
+        "required_capabilities": [],
+        "identity": null
+      },
+      "python": {
+        "suites": [
+          {
+            "suite": "default",
+            "profile": "default",
+            "source_roots": [],
+            "identity": null
+          }
+        ]
+      },
+      "resources": {
+        "scoped": {
+          "required": false,
+          "validated": false,
+          "configured": {
+            "worker": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            },
+            "budget": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            }
+          },
+          "concurrency": null,
+          "enforced": null
+        },
+        "controller": {
+          "configured": {
+            "cpus": 1,
+            "memory_bytes": 2147483648,
+            "processes": 64,
+            "scratch_bytes": 1073741824
+          },
+          "enforced": null
+        },
+        "ordinary": {
+          "enforcement": "inherited-host",
+          "slot_limit": 1,
+          "peak_sessions": 1
+        }
+      },
+      "counts": {
+        "executed": 2,
+        "reused": 0,
+        "failed": 0,
+        "unsupported": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "selected": 2
+      },
+      "route_counts": {
+        "ordinary": {
+          "executed": 2,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 2
+        },
+        "scoped": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        },
+        "unresolved": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        }
+      },
+      "cases": {
+        "collected": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "case_outcomes": {
+        "fresh_passed": 2,
+        "cached_passed": 0,
+        "fresh_skipped": 0,
+        "cached_skipped": 0
+      },
+      "units": [
+        {
+          "name": "40ea660ad6de9bb09471c90199cedc80ab63646a8db6f5075bf88e77e6a72493",
+          "case_id": "40ea660ad6de9bb09471c90199cedc80ab63646a8db6f5075bf88e77e6a72493",
+          "selected": true,
+          "file": "tests/test_a.py",
+          "suite": "default",
+          "route": "ordinary",
+          "outcome": "executed",
+          "reason": "ordinary-fresh",
+          "attempts": 1,
+          "collected": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": "3c6fe5900d75832846410bd3d82fd97c8dff2e82720ef74d8cf7b7aeb2b71eaf",
+          "result_status": "passed",
+          "complete": true
+        },
+        {
+          "name": "6c7f9739d29f3e68767ba13ea52b404e5bc6c68810f6977b0827c33a080c258f",
+          "case_id": "6c7f9739d29f3e68767ba13ea52b404e5bc6c68810f6977b0827c33a080c258f",
+          "selected": true,
+          "file": "tests/test_b.py",
+          "suite": "default",
+          "route": "ordinary",
+          "outcome": "executed",
+          "reason": "ordinary-fresh",
+          "attempts": 1,
+          "collected": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": "3c6fe5900d75832846410bd3d82fd97c8dff2e82720ef74d8cf7b7aeb2b71eaf",
+          "result_status": "passed",
+          "complete": true
+        }
+      ],
+      "groups": [
+        {
+          "group_id": "3c6fe5900d75832846410bd3d82fd97c8dff2e82720ef74d8cf7b7aeb2b71eaf",
+          "suite": "default",
+          "files": [
+            "tests/test_a.py",
+            "tests/test_b.py"
+          ],
+          "route": "ordinary",
+          "profile": "ordinary-v1",
+          "case_ids": [
+            "40ea660ad6de9bb09471c90199cedc80ab63646a8db6f5075bf88e77e6a72493",
+            "6c7f9739d29f3e68767ba13ea52b404e5bc6c68810f6977b0827c33a080c258f"
+          ],
+          "outcome": "executed",
+          "complete": true,
+          "cache_eligible": false,
+          "attempts": 1,
+          "attempt_seconds": [
+            0.2
+          ],
+          "worker_seconds": 0.2,
+          "cpu_seconds": null,
+          "timing_complete": false,
+          "passed": 2,
+          "failed": 0,
+          "skipped": 0,
+          "not_run": 0,
+          "unresolved": 0,
+          "stop_reason": null,
+          "failures": []
+        }
+      ],
+      "collection": {
+        "outcome": "executed",
+        "collected": 2,
+        "worker_seconds": null,
+        "cpu_seconds": null,
+        "failures": [],
+        "suites": [
+          {
+            "name": "default",
+            "route": "ordinary",
+            "files": [
+              "tests/test_a.py",
+              "tests/test_b.py"
+            ],
+            "outcome": "executed",
+            "complete": true,
+            "collected": 2,
+            "inventory_digest": "3c5adc21e730dbad7c98ae9e8d393e348f1c28bdb205a1fe6744b9afcc9364d2",
+            "accounting_group_id": "3c6fe5900d75832846410bd3d82fd97c8dff2e82720ef74d8cf7b7aeb2b71eaf",
+            "worker_seconds": null,
+            "cpu_seconds": null,
+            "failures": []
+          }
+        ]
+      },
+      "elapsed_seconds": 0.5,
+      "setup_seconds": 0.05,
+      "worker_cpu_seconds": null,
+      "known_scoped_cpu_seconds": 0
+    },
+    "scoped_reuse": {
+      "schema": 3,
+      "kind": "run",
+      "status": "passed",
+      "inventory_complete": true,
+      "inventory_digest": "14900a9ad9fea9e1508c0d960a395c30d90e4033638c3071155da0bf3cb0fa14",
+      "routing_complete": true,
+      "grouping_complete": true,
+      "suites": [
+        {
+          "name": "default",
+          "files": [
+            "tests/test_scoped.py"
+          ]
+        }
+      ],
+      "execution": {
+        "mode": "batch",
+        "profile": "batch-v1"
+      },
+      "backend": {
+        "name": "bubblewrap",
+        "profile": "bubblewrap-v1",
+        "identity": "ceb82d7968e4fd5421db6019df2d5590d9f565c5d5653ee8c6e92d2ecc607bff"
+      },
+      "runtime": {
+        "profile": "python-v2",
+        "required_capabilities": [],
+        "identity": "17733c2b9925b61efee0568b76e71b383a61c2d24069f9803a8781b65af00bb0"
+      },
+      "python": {
+        "suites": [
+          {
+            "suite": "default",
+            "profile": "default",
+            "source_roots": [],
+            "identity": "ca02c968f4e6cc3840f2d53fdaef8a39d1b100b590507544fc30d9657af3e45d"
+          }
+        ]
+      },
+      "resources": {
+        "scoped": {
+          "required": true,
+          "validated": true,
+          "configured": {
+            "worker": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            },
+            "budget": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            }
+          },
+          "concurrency": 1,
+          "enforced": {
+            "worker": {
+              "cpu_max": {
+                "quota_usec": 100000,
+                "period_usec": 100000
+              },
+              "memory_max": 536870912,
+              "memory_swap_max": 0,
+              "pids_max": 128,
+              "scratch": {
+                "size_bytes": 67108864,
+                "inodes": 65536,
+                "noexec": true,
+                "nosuid": true,
+                "nodev": true
+              }
+            },
+            "pool": {
+              "cpu_max": {
+                "quota_usec": 100000,
+                "period_usec": 100000
+              },
+              "memory_max": 536870912,
+              "memory_swap_max": 0,
+              "pids_max": 128
+            },
+            "aggregate": {
+              "cpu_max": {
+                "quota_usec": 200000,
+                "period_usec": 100000
+              },
+              "memory_max": 2684354560,
+              "memory_swap_max": 0,
+              "pids_max": 192
+            }
+          }
+        },
+        "controller": {
+          "configured": {
+            "cpus": 1,
+            "memory_bytes": 2147483648,
+            "processes": 64,
+            "scratch_bytes": 1073741824
+          },
+          "enforced": {
+            "cpu_max": {
+              "quota_usec": 100000,
+              "period_usec": 100000
+            },
+            "memory_max": 2147483648,
+            "memory_swap_max": 0,
+            "pids_max": 64,
+            "storage": {
+              "kind": "engine-bounded-files",
+              "bytes": 1073741824,
+              "entries": 262144
+            }
+          }
+        },
+        "ordinary": {
+          "enforcement": "inherited-host",
+          "slot_limit": 1,
+          "peak_sessions": 0
+        }
+      },
+      "counts": {
+        "executed": 0,
+        "reused": 1,
+        "failed": 0,
+        "unsupported": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "selected": 1
+      },
+      "route_counts": {
+        "ordinary": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        },
+        "scoped": {
+          "executed": 0,
+          "reused": 1,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 1
+        },
+        "unresolved": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        }
+      },
+      "cases": {
+        "collected": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "case_outcomes": {
+        "fresh_passed": 0,
+        "cached_passed": 1,
+        "fresh_skipped": 0,
+        "cached_skipped": 0
+      },
+      "units": [
+        {
+          "name": "c0da702e7509b6088d84ad466a5bf3d57dab3771ca719a2a1848ab123a49a9dd",
+          "case_id": "c0da702e7509b6088d84ad466a5bf3d57dab3771ca719a2a1848ab123a49a9dd",
+          "selected": true,
+          "file": "tests/test_scoped.py",
+          "suite": "default",
+          "route": "scoped",
+          "outcome": "reused",
+          "reason": "cache-hit",
+          "attempts": 0,
+          "collected": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": "74272abdeb1c062894d883547e3e986f4ea3db456cc9da587de9045319445f4a",
+          "result_status": "passed",
+          "complete": true
+        }
+      ],
+      "groups": [
+        {
+          "group_id": "74272abdeb1c062894d883547e3e986f4ea3db456cc9da587de9045319445f4a",
+          "suite": "default",
+          "files": [
+            "tests/test_scoped.py"
+          ],
+          "route": "scoped",
+          "profile": "batch-v1",
+          "case_ids": [
+            "c0da702e7509b6088d84ad466a5bf3d57dab3771ca719a2a1848ab123a49a9dd"
+          ],
+          "outcome": "reused",
+          "complete": true,
+          "cache_eligible": true,
+          "attempts": 0,
+          "attempt_seconds": [],
+          "worker_seconds": 0,
+          "cpu_seconds": 0,
+          "timing_complete": true,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "not_run": 0,
+          "unresolved": 0,
+          "stop_reason": null,
+          "failures": []
+        }
+      ],
+      "collection": {
+        "outcome": "reused",
+        "collected": 1,
+        "worker_seconds": 0,
+        "cpu_seconds": 0,
+        "failures": [],
+        "suites": [
+          {
+            "name": "default",
+            "route": "scoped",
+            "files": [
+              "tests/test_scoped.py"
+            ],
+            "outcome": "reused",
+            "complete": true,
+            "collected": 1,
+            "inventory_digest": "1852d0025c8ca9c340dcf48536265fb4a2b1d07c687d7b4b3abaa753af10eae2",
+            "accounting_group_id": null,
+            "worker_seconds": 0,
+            "cpu_seconds": 0,
+            "failures": []
+          }
+        ]
+      },
+      "elapsed_seconds": 0.5,
+      "setup_seconds": 0.05,
+      "worker_cpu_seconds": 0,
+      "known_scoped_cpu_seconds": 0
+    },
+    "mixed": {
+      "schema": 3,
+      "kind": "run",
+      "status": "passed",
+      "inventory_complete": true,
+      "inventory_digest": "3f8fee624f43b2a9d685353269a0ab3eac785863ab6227636db1060fba1855e0",
+      "routing_complete": true,
+      "grouping_complete": true,
+      "suites": [
+        {
+          "name": "default",
+          "files": [
+            "tests/test_mixed.py"
+          ]
+        }
+      ],
+      "execution": {
+        "mode": "batch",
+        "profile": "batch-v1"
+      },
+      "backend": {
+        "name": "bubblewrap",
+        "profile": "bubblewrap-v1",
+        "identity": "ceb82d7968e4fd5421db6019df2d5590d9f565c5d5653ee8c6e92d2ecc607bff"
+      },
+      "runtime": {
+        "profile": "python-v2",
+        "required_capabilities": [],
+        "identity": "17733c2b9925b61efee0568b76e71b383a61c2d24069f9803a8781b65af00bb0"
+      },
+      "python": {
+        "suites": [
+          {
+            "suite": "default",
+            "profile": "default",
+            "source_roots": [],
+            "identity": "ca02c968f4e6cc3840f2d53fdaef8a39d1b100b590507544fc30d9657af3e45d"
+          }
+        ]
+      },
+      "resources": {
+        "scoped": {
+          "required": true,
+          "validated": true,
+          "configured": {
+            "worker": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            },
+            "budget": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            }
+          },
+          "concurrency": 1,
+          "enforced": {
+            "worker": {
+              "cpu_max": {
+                "quota_usec": 100000,
+                "period_usec": 100000
+              },
+              "memory_max": 536870912,
+              "memory_swap_max": 0,
+              "pids_max": 128,
+              "scratch": {
+                "size_bytes": 67108864,
+                "inodes": 65536,
+                "noexec": true,
+                "nosuid": true,
+                "nodev": true
+              }
+            },
+            "pool": {
+              "cpu_max": {
+                "quota_usec": 100000,
+                "period_usec": 100000
+              },
+              "memory_max": 536870912,
+              "memory_swap_max": 0,
+              "pids_max": 128
+            },
+            "aggregate": {
+              "cpu_max": {
+                "quota_usec": 200000,
+                "period_usec": 100000
+              },
+              "memory_max": 2684354560,
+              "memory_swap_max": 0,
+              "pids_max": 192
+            }
+          }
+        },
+        "controller": {
+          "configured": {
+            "cpus": 1,
+            "memory_bytes": 2147483648,
+            "processes": 64,
+            "scratch_bytes": 1073741824
+          },
+          "enforced": {
+            "cpu_max": {
+              "quota_usec": 100000,
+              "period_usec": 100000
+            },
+            "memory_max": 2147483648,
+            "memory_swap_max": 0,
+            "pids_max": 64,
+            "storage": {
+              "kind": "engine-bounded-files",
+              "bytes": 1073741824,
+              "entries": 262144
+            }
+          }
+        },
+        "ordinary": {
+          "enforcement": "inherited-host",
+          "slot_limit": 1,
+          "peak_sessions": 1
+        }
+      },
+      "counts": {
+        "executed": 2,
+        "reused": 0,
+        "failed": 0,
+        "unsupported": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "selected": 2
+      },
+      "route_counts": {
+        "ordinary": {
+          "executed": 1,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 1
+        },
+        "scoped": {
+          "executed": 1,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 1
+        },
+        "unresolved": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        }
+      },
+      "cases": {
+        "collected": 2,
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0
+      },
+      "case_outcomes": {
+        "fresh_passed": 2,
+        "cached_passed": 0,
+        "fresh_skipped": 0,
+        "cached_skipped": 0
+      },
+      "units": [
+        {
+          "name": "f931613fa6094e0650a9e7500f2dd350a8915bebffa587b8dc56126cb864cd8e",
+          "case_id": "f931613fa6094e0650a9e7500f2dd350a8915bebffa587b8dc56126cb864cd8e",
+          "selected": true,
+          "file": "tests/test_mixed.py",
+          "suite": "default",
+          "route": "ordinary",
+          "outcome": "executed",
+          "reason": "ordinary-fresh",
+          "attempts": 1,
+          "collected": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": "d2dc72b2631e201617fb3372f83e8fdf3d979db9a463aaa79baa4359626d8a6e",
+          "result_status": "passed",
+          "complete": true
+        },
+        {
+          "name": "4f9a8f7a487f6cfbd7525067b5a43332802bb8ae8352aab1fce914fa87b2395c",
+          "case_id": "4f9a8f7a487f6cfbd7525067b5a43332802bb8ae8352aab1fce914fa87b2395c",
+          "selected": true,
+          "file": "tests/test_mixed.py",
+          "suite": "default",
+          "route": "scoped",
+          "outcome": "executed",
+          "reason": "cache-miss",
+          "attempts": 1,
+          "collected": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": "360f7d1b086a01444cfbe7b5843baa18bd79fbb13327d246d45e5d88825329dd",
+          "result_status": "passed",
+          "complete": true
+        }
+      ],
+      "groups": [
+        {
+          "group_id": "d2dc72b2631e201617fb3372f83e8fdf3d979db9a463aaa79baa4359626d8a6e",
+          "suite": "default",
+          "files": [
+            "tests/test_mixed.py"
+          ],
+          "route": "ordinary",
+          "profile": "ordinary-v1",
+          "case_ids": [
+            "f931613fa6094e0650a9e7500f2dd350a8915bebffa587b8dc56126cb864cd8e"
+          ],
+          "outcome": "executed",
+          "complete": true,
+          "cache_eligible": false,
+          "attempts": 1,
+          "attempt_seconds": [
+            0.2
+          ],
+          "worker_seconds": 0.2,
+          "cpu_seconds": null,
+          "timing_complete": false,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "not_run": 0,
+          "unresolved": 0,
+          "stop_reason": null,
+          "failures": []
+        },
+        {
+          "group_id": "360f7d1b086a01444cfbe7b5843baa18bd79fbb13327d246d45e5d88825329dd",
+          "suite": "default",
+          "files": [
+            "tests/test_mixed.py"
+          ],
+          "route": "scoped",
+          "profile": "batch-v1",
+          "case_ids": [
+            "4f9a8f7a487f6cfbd7525067b5a43332802bb8ae8352aab1fce914fa87b2395c"
+          ],
+          "outcome": "executed",
+          "complete": true,
+          "cache_eligible": true,
+          "attempts": 1,
+          "attempt_seconds": [
+            0.2
+          ],
+          "worker_seconds": 0.2,
+          "cpu_seconds": 0.1,
+          "timing_complete": true,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "not_run": 0,
+          "unresolved": 0,
+          "stop_reason": null,
+          "failures": []
+        }
+      ],
+      "collection": {
+        "outcome": "executed",
+        "collected": 2,
+        "worker_seconds": null,
+        "cpu_seconds": null,
+        "failures": [],
+        "suites": [
+          {
+            "name": "default",
+            "route": "ordinary",
+            "files": [
+              "tests/test_mixed.py"
+            ],
+            "outcome": "executed",
+            "complete": true,
+            "collected": 2,
+            "inventory_digest": "7969a3206bb75ad7530abf34218de0298b2c1456627aaa7046c63d441de4a602",
+            "accounting_group_id": "d2dc72b2631e201617fb3372f83e8fdf3d979db9a463aaa79baa4359626d8a6e",
+            "worker_seconds": null,
+            "cpu_seconds": null,
+            "failures": []
+          },
+          {
+            "name": "default",
+            "route": "scoped",
+            "files": [
+              "tests/test_mixed.py"
+            ],
+            "outcome": "executed",
+            "complete": true,
+            "collected": 2,
+            "inventory_digest": "fba9018b0a2c94408d2cfd08f12efc6e71e160e383b2597a31c1de9b99ff55d1",
+            "accounting_group_id": null,
+            "worker_seconds": 0.1,
+            "cpu_seconds": 0.05,
+            "failures": []
+          }
+        ]
+      },
+      "elapsed_seconds": 0.5,
+      "setup_seconds": 0.05,
+      "worker_cpu_seconds": null,
+      "known_scoped_cpu_seconds": 0.15000000000000002
+    },
+    "precollection_refusal": {
+      "schema": 3,
+      "kind": "refusal",
+      "status": "unsupported",
+      "inventory_complete": false,
+      "inventory_digest": null,
+      "routing_complete": false,
+      "grouping_complete": false,
+      "suites": [
+        {
+          "name": "default",
+          "files": [
+            "tests/test_scoped.py"
+          ]
+        }
+      ],
+      "execution": {
+        "mode": "batch",
+        "profile": "batch-v1"
+      },
+      "backend": {
+        "name": "bubblewrap",
+        "profile": "bubblewrap-v1",
+        "identity": null
+      },
+      "runtime": {
+        "profile": "python-v2",
+        "required_capabilities": [],
+        "identity": null
+      },
+      "python": {
+        "suites": [
+          {
+            "suite": "default",
+            "profile": "default",
+            "source_roots": [],
+            "identity": null
+          }
+        ]
+      },
+      "resources": {
+        "scoped": {
+          "required": true,
+          "validated": false,
+          "configured": {
+            "worker": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            },
+            "budget": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            }
+          },
+          "concurrency": null,
+          "enforced": null
+        },
+        "controller": {
+          "configured": {
+            "cpus": 1,
+            "memory_bytes": 2147483648,
+            "processes": 64,
+            "scratch_bytes": 1073741824
+          },
+          "enforced": null
+        },
+        "ordinary": {
+          "enforcement": "inherited-host",
+          "slot_limit": 1,
+          "peak_sessions": 0
+        }
+      },
+      "counts": {
+        "executed": 0,
+        "reused": 0,
+        "failed": 0,
+        "unsupported": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "selected": 0
+      },
+      "route_counts": {
+        "ordinary": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        },
+        "scoped": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        },
+        "unresolved": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        }
+      },
+      "cases": {
+        "collected": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "case_outcomes": {
+        "fresh_passed": 0,
+        "cached_passed": 0,
+        "fresh_skipped": 0,
+        "cached_skipped": 0
+      },
+      "units": [],
+      "groups": [],
+      "collection": {
+        "outcome": "not-started",
+        "collected": 0,
+        "worker_seconds": null,
+        "cpu_seconds": null,
+        "failures": [],
+        "suites": [
+          {
+            "name": "default",
+            "route": "scoped",
+            "files": [
+              "tests/test_scoped.py"
+            ],
+            "outcome": "not-started",
+            "complete": false,
+            "collected": null,
+            "inventory_digest": null,
+            "accounting_group_id": null,
+            "worker_seconds": null,
+            "cpu_seconds": null,
+            "failures": []
+          }
+        ]
+      },
+      "elapsed_seconds": 0.01,
+      "setup_seconds": 0.01,
+      "worker_cpu_seconds": null,
+      "known_scoped_cpu_seconds": 0,
+      "error": "Required user namespace is unavailable in the invoking admission context.",
+      "capability": "backend:userns"
+    },
+    "partial_known_routing": {
+      "schema": 3,
+      "kind": "run",
+      "status": "declaration_error",
+      "inventory_complete": false,
+      "inventory_digest": null,
+      "routing_complete": false,
+      "grouping_complete": false,
+      "suites": [
+        {
+          "name": "default",
+          "files": [
+            "tests/test_partial.py"
+          ]
+        }
+      ],
+      "execution": {
+        "mode": "batch",
+        "profile": "batch-v1"
+      },
+      "backend": {
+        "name": "bubblewrap",
+        "profile": "bubblewrap-v1",
+        "identity": null
+      },
+      "runtime": {
+        "profile": "python-v2",
+        "required_capabilities": [],
+        "identity": null
+      },
+      "python": {
+        "suites": [
+          {
+            "suite": "default",
+            "profile": "default",
+            "source_roots": [],
+            "identity": null
+          }
+        ]
+      },
+      "resources": {
+        "scoped": {
+          "required": false,
+          "validated": false,
+          "configured": {
+            "worker": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            },
+            "budget": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            }
+          },
+          "concurrency": null,
+          "enforced": null
+        },
+        "controller": {
+          "configured": {
+            "cpus": 1,
+            "memory_bytes": 2147483648,
+            "processes": 64,
+            "scratch_bytes": 1073741824
+          },
+          "enforced": null
+        },
+        "ordinary": {
+          "enforcement": "inherited-host",
+          "slot_limit": 1,
+          "peak_sessions": 1
+        }
+      },
+      "counts": {
+        "executed": 0,
+        "reused": 0,
+        "failed": 0,
+        "unsupported": 1,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "selected": 1
+      },
+      "route_counts": {
+        "ordinary": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        },
+        "scoped": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        },
+        "unresolved": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 1,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 1
+        }
+      },
+      "cases": {
+        "collected": 1,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0
+      },
+      "case_outcomes": {
+        "fresh_passed": 0,
+        "cached_passed": 0,
+        "fresh_skipped": 0,
+        "cached_skipped": 0
+      },
+      "units": [
+        {
+          "name": "f32a98e934a099f142f4c9f0b8da029f80b13332532043b617682dc33a5b02a3",
+          "case_id": "f32a98e934a099f142f4c9f0b8da029f80b13332532043b617682dc33a5b02a3",
+          "selected": true,
+          "file": "tests/test_partial.py",
+          "suite": "default",
+          "route": null,
+          "outcome": "unsupported",
+          "reason": "declaration-invalid",
+          "attempts": 0,
+          "collected": 1,
+          "passed": 0,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": null,
+          "result_status": null,
+          "complete": false
+        }
+      ],
+      "groups": [],
+      "collection": {
+        "outcome": "failed",
+        "collected": 1,
+        "worker_seconds": null,
+        "cpu_seconds": null,
+        "failures": [],
+        "suites": [
+          {
+            "name": "default",
+            "route": "ordinary",
+            "files": [
+              "tests/test_partial.py"
+            ],
+            "outcome": "failed",
+            "complete": false,
+            "collected": 1,
+            "inventory_digest": null,
+            "accounting_group_id": null,
+            "worker_seconds": null,
+            "cpu_seconds": null,
+            "failures": []
+          }
+        ]
+      },
+      "elapsed_seconds": 0.5,
+      "setup_seconds": 0.05,
+      "worker_cpu_seconds": null,
+      "known_scoped_cpu_seconds": 0,
+      "error": "Unsupported mutation of a collected declaration."
+    },
+    "ordinary_selected_scoped_present": {
+      "schema": 3,
+      "kind": "run",
+      "status": "passed",
+      "inventory_complete": true,
+      "inventory_digest": "82ca073e8dc7b278e094b91f3c62b6791fc1a1ce3515f93c9fe111168e2390e6",
+      "routing_complete": true,
+      "grouping_complete": true,
+      "suites": [
+        {
+          "name": "default",
+          "files": [
+            "tests/test_mixed.py"
+          ]
+        }
+      ],
+      "execution": {
+        "mode": "batch",
+        "profile": "batch-v1"
+      },
+      "backend": {
+        "name": "bubblewrap",
+        "profile": "bubblewrap-v1",
+        "identity": "ceb82d7968e4fd5421db6019df2d5590d9f565c5d5653ee8c6e92d2ecc607bff"
+      },
+      "runtime": {
+        "profile": "python-v2",
+        "required_capabilities": [],
+        "identity": "17733c2b9925b61efee0568b76e71b383a61c2d24069f9803a8781b65af00bb0"
+      },
+      "python": {
+        "suites": [
+          {
+            "suite": "default",
+            "profile": "default",
+            "source_roots": [],
+            "identity": "ca02c968f4e6cc3840f2d53fdaef8a39d1b100b590507544fc30d9657af3e45d"
+          }
+        ]
+      },
+      "resources": {
+        "scoped": {
+          "required": true,
+          "validated": true,
+          "configured": {
+            "worker": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            },
+            "budget": {
+              "cpus": 1,
+              "memory_bytes": 536870912,
+              "processes": 128,
+              "scratch_bytes": 67108864
+            }
+          },
+          "concurrency": 1,
+          "enforced": {
+            "worker": {
+              "cpu_max": {
+                "quota_usec": 100000,
+                "period_usec": 100000
+              },
+              "memory_max": 536870912,
+              "memory_swap_max": 0,
+              "pids_max": 128,
+              "scratch": {
+                "size_bytes": 67108864,
+                "inodes": 65536,
+                "noexec": true,
+                "nosuid": true,
+                "nodev": true
+              }
+            },
+            "pool": {
+              "cpu_max": {
+                "quota_usec": 100000,
+                "period_usec": 100000
+              },
+              "memory_max": 536870912,
+              "memory_swap_max": 0,
+              "pids_max": 128
+            },
+            "aggregate": {
+              "cpu_max": {
+                "quota_usec": 200000,
+                "period_usec": 100000
+              },
+              "memory_max": 2684354560,
+              "memory_swap_max": 0,
+              "pids_max": 192
+            }
+          }
+        },
+        "controller": {
+          "configured": {
+            "cpus": 1,
+            "memory_bytes": 2147483648,
+            "processes": 64,
+            "scratch_bytes": 1073741824
+          },
+          "enforced": {
+            "cpu_max": {
+              "quota_usec": 100000,
+              "period_usec": 100000
+            },
+            "memory_max": 2147483648,
+            "memory_swap_max": 0,
+            "pids_max": 64,
+            "storage": {
+              "kind": "engine-bounded-files",
+              "bytes": 1073741824,
+              "entries": 262144
+            }
+          }
+        },
+        "ordinary": {
+          "enforcement": "inherited-host",
+          "slot_limit": 1,
+          "peak_sessions": 1
+        }
+      },
+      "counts": {
+        "executed": 1,
+        "reused": 0,
+        "failed": 0,
+        "unsupported": 0,
+        "infrastructure_error": 0,
+        "not-selected": 1,
+        "selected": 1
+      },
+      "route_counts": {
+        "ordinary": {
+          "executed": 1,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 1
+        },
+        "scoped": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 1,
+          "selected": 0
+        },
+        "unresolved": {
+          "executed": 0,
+          "reused": 0,
+          "failed": 0,
+          "unsupported": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "selected": 0
+        }
+      },
+      "cases": {
+        "collected": 2,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "case_outcomes": {
+        "fresh_passed": 1,
+        "cached_passed": 0,
+        "fresh_skipped": 0,
+        "cached_skipped": 0
+      },
+      "units": [
+        {
+          "name": "327bad7d08d03ed6912703fef8878b220302deccd845ee1323a88879d846aeaf",
+          "case_id": "327bad7d08d03ed6912703fef8878b220302deccd845ee1323a88879d846aeaf",
+          "selected": true,
+          "file": "tests/test_mixed.py",
+          "suite": "default",
+          "route": "ordinary",
+          "outcome": "executed",
+          "reason": "ordinary-fresh",
+          "attempts": 1,
+          "collected": 1,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": "c1f770a0a644fe667dfa3fc7c3d678a10ece17b466f698a464a0786e851fdd5d",
+          "result_status": "passed",
+          "complete": true
+        },
+        {
+          "name": "71ada7ef0371d4578092f310418fe206027442dfe845333004505391e887083e",
+          "case_id": "71ada7ef0371d4578092f310418fe206027442dfe845333004505391e887083e",
+          "selected": false,
+          "file": "tests/test_mixed.py",
+          "suite": "default",
+          "route": "scoped",
+          "outcome": "not-selected",
+          "reason": "not-selected",
+          "attempts": 0,
+          "collected": 1,
+          "passed": 0,
+          "failed": 0,
+          "skipped": 0,
+          "worker_seconds": null,
+          "cpu_seconds": null,
+          "failures": [],
+          "group_id": null,
+          "result_status": null,
+          "complete": false
+        }
+      ],
+      "groups": [
+        {
+          "group_id": "c1f770a0a644fe667dfa3fc7c3d678a10ece17b466f698a464a0786e851fdd5d",
+          "suite": "default",
+          "files": [
+            "tests/test_mixed.py"
+          ],
+          "route": "ordinary",
+          "profile": "ordinary-v1",
+          "case_ids": [
+            "327bad7d08d03ed6912703fef8878b220302deccd845ee1323a88879d846aeaf"
+          ],
+          "outcome": "executed",
+          "complete": true,
+          "cache_eligible": false,
+          "attempts": 1,
+          "attempt_seconds": [
+            0.2
+          ],
+          "worker_seconds": 0.2,
+          "cpu_seconds": null,
+          "timing_complete": false,
+          "passed": 1,
+          "failed": 0,
+          "skipped": 0,
+          "not_run": 0,
+          "unresolved": 0,
+          "stop_reason": null,
+          "failures": []
+        }
+      ],
+      "collection": {
+        "outcome": "executed",
+        "collected": 2,
+        "worker_seconds": null,
+        "cpu_seconds": null,
+        "failures": [],
+        "suites": [
+          {
+            "name": "default",
+            "route": "ordinary",
+            "files": [
+              "tests/test_mixed.py"
+            ],
+            "outcome": "executed",
+            "complete": true,
+            "collected": 2,
+            "inventory_digest": "e671ec865be212ce0859e77a842b4436c75efbb8193949e03338828995b230cc",
+            "accounting_group_id": "c1f770a0a644fe667dfa3fc7c3d678a10ece17b466f698a464a0786e851fdd5d",
+            "worker_seconds": null,
+            "cpu_seconds": null,
+            "failures": []
+          },
+          {
+            "name": "default",
+            "route": "scoped",
+            "files": [
+              "tests/test_mixed.py"
+            ],
+            "outcome": "executed",
+            "complete": true,
+            "collected": 2,
+            "inventory_digest": "1d861c4ff45860c00c677829768a22c035f478f19e622e20906ed9331c02e1c2",
+            "accounting_group_id": null,
+            "worker_seconds": 0.1,
+            "cpu_seconds": 0.05,
+            "failures": []
+          }
+        ]
+      },
+      "elapsed_seconds": 0.5,
+      "setup_seconds": 0.05,
+      "worker_cpu_seconds": null,
+      "known_scoped_cpu_seconds": 0.05
+    }
+  }
+}
