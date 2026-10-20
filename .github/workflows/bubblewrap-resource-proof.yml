@@ -103,8 +103,7 @@ jobs:
           sudo install -m 0644 "$RUNNER_TEMP/telescope52-user-manager.conf" "$dropin"
           sudo systemctl daemon-reload
           setup_start=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          sudo loginctl enable-linger "$(id -un)"
-          if sudo systemctl start "$manager_unit"; then
+          if sudo loginctl enable-linger "$(id -un)" && sudo systemctl start "$manager_unit"; then
             :
           else
             start_status=$?
