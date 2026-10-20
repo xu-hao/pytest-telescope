@@ -15,7 +15,8 @@ MAX_INVENTORY = 67_108_864
 
 
 def reap_completed_children():
-    # PID1 adopts orphaned children. Reap only those already exited after all teardown.
+    # Reap this worker's completed direct children only after all teardown.
+    # The separate PID 1 owns continuous orphan adoption and final namespace validation.
     # Both bounds prevent a concurrently forking live child from extending this phase.
     reap_deadline = time.monotonic() + 0.05
     for _ in range(4096):
@@ -421,7 +422,7 @@ def main():
     if declaration_error:
         exit_code = 4
     reap_completed_children()
-    leaked = [name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()]
+    leaked = False  # Provisional: PID 1 owns the final namespace scan after this worker exits.
     usage = resource.getrusage(resource.RUSAGE_SELF)
     children = resource.getrusage(resource.RUSAGE_CHILDREN)
     common = {

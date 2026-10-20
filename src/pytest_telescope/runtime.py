@@ -389,6 +389,14 @@ def worker_source():
     return _read(Path(__file__).with_name("worker.py"), 131072)
 
 
+def supervisor_source():
+    return _read(Path(__file__).with_name("supervisor.py"), 131072)
+
+
+def lifecycle_identity():
+    return hashlib.sha256(b"pid1-reaper-v1\0" + supervisor_source()).hexdigest()
+
+
 def _inspect_owned_image(image, project, *, attempts=1):
     if type(image) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
         raise InfrastructureError("runtime did not return an immutable image ID")
@@ -428,8 +436,10 @@ def _image_info(image, project, recipe=None):
     """Qualify only the current execution policy; historical ownership is insufficient."""
     info = _inspect_owned_image(image, project)
     labels = info["Config"]["Labels"]
-    if labels.get(LABEL + "policy") != POLICY or (
-        recipe is not None and labels.get(LABEL + "recipe") != recipe
+    if (
+        labels.get(LABEL + "policy") != POLICY
+        or labels.get(LABEL + "lifecycle") != lifecycle_identity()
+        or (recipe is not None and labels.get(LABEL + "recipe") != recipe)
     ):
         raise InfrastructureError("runtime image ownership or identity mismatch")
     return info
@@ -499,9 +509,16 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
             extra.append(line)
         pins += "\n".join(extra) + "\n"
     source = worker_source()
+    supervisor = supervisor_source()
+    lifecycle = lifecycle_identity()
     project = _project(root)
     recipe = hashlib.sha256(
-        BASE.encode() + pins.encode() + source + POLICY.encode() + provenance.encode()
+        BASE.encode()
+        + pins.encode()
+        + source
+        + POLICY.encode()
+        + provenance.encode()
+        + lifecycle.encode()
     ).hexdigest()
     lock = os.open(state / "runtime.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
@@ -565,6 +582,7 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                         (context / "git.deb").write_bytes(verified_archive)
                     prefix, environment = runtime_profiles.dockerfile(context, BASE)
                 (context / "worker.py").write_bytes(source)
+                (context / "supervisor.py").write_bytes(supervisor)
                 (context / "requirements.txt").write_text(pins)
                 (context / "Dockerfile").write_text(
                     prefix
@@ -575,8 +593,10 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                     "-r /opt/telescope/requirements.txt\n"
                     "RUN python -m pip check\n"
                     "COPY worker.py /opt/telescope/worker.py\n"
-                    "RUN chmod 0444 /opt/telescope/worker.py\n"
+                    "COPY supervisor.py /opt/telescope/supervisor.py\n"
+                    "RUN chmod 0444 /opt/telescope/worker.py /opt/telescope/supervisor.py\n"
                     + python_source.dockerfile()
+                    + f'LABEL {LABEL}lifecycle="{lifecycle}"\n'
                     + f'LABEL {LABEL}source-slot="{python_source.SLOT_ID}"\n'
                     f'LABEL {LABEL}policy="{POLICY}" {LABEL}recipe="{recipe}" '
                     f'{LABEL}project="{project}" {LABEL}profile="{profile}" '
@@ -660,6 +680,7 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
                             labels.get(LABEL + "profile") != profile
                             or labels.get(LABEL + "provenance") != provenance
                             or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
+                            or labels.get(LABEL + "lifecycle") != lifecycle
                         ):
                             raise CleanupError("runtime profile image identity mismatch")
                         if image not in images:
@@ -678,6 +699,7 @@ def build_runtime(root, requirements=None, *, runtime_profile=None):
             "image": image,
             "recipe": recipe,
             "worker": hashlib.sha256(source).hexdigest(),
+            "lifecycle": lifecycle,
             "policy": POLICY,
             "profile": profile,
             "provenance": provenance,
@@ -701,6 +723,7 @@ def identity(root, *, runtime_profile=None):
         metadata = json.loads(_read(Path(root) / ".pytest-telescope/runtime.json", 16384))
         if (
             metadata["worker"] != hashlib.sha256(worker_source()).hexdigest()
+            or metadata["lifecycle"] != lifecycle_identity()
             or metadata["policy"] != POLICY
             or metadata["profile"] != profile
             or metadata["provenance"] != provenance
@@ -713,6 +736,7 @@ def identity(root, *, runtime_profile=None):
             labels.get(LABEL + "profile") != profile
             or labels.get(LABEL + "provenance") != provenance
             or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
+            or labels.get(LABEL + "lifecycle") != metadata["lifecycle"]
         ):
             raise InfrastructureError("prepared runtime profile does not match requested identity")
         if (
@@ -762,6 +786,7 @@ def identity(root, *, runtime_profile=None):
                 "variant": inspected.get("Variant", ""),
             },
             "worker": metadata["worker"],
+            "lifecycle": metadata["lifecycle"],
             "recipe": metadata["recipe"],
             "policy": POLICY,
             "backend": backend,
@@ -979,7 +1004,7 @@ def execute(
     for key, value in sorted(environment.items()):
         if value is not None:
             cmd += ["--env", key + "=" + value]
-    cmd += ["--entrypoint", "python", image, "-I", "/opt/telescope/worker.py"]
+    cmd += ["--entrypoint", "python", image, "-I", "/opt/telescope/supervisor.py"]
     try:
         code, output = _owned_capture(
             directory,
@@ -990,6 +1015,30 @@ def execute(
             limit=MAX_COLLECTION if request["mode"] in {"collection", "batch"} else MAX_OUTPUT,
             cancellation=cancellation,
         )
+        incidents = [
+            line[len(b"TELESCOPE_INFRASTRUCTURE ") :]
+            for line in output.splitlines()
+            if line.startswith(b"TELESCOPE_INFRASTRUCTURE ")
+        ]
+        if incidents:
+            incident = json.loads(incidents[0])
+            messages = {
+                "descendant": "worker left descendant processes running",
+                "output": "worker output exceeded its bounded limit",
+                "protocol": "worker lifecycle protocol or startup failed",
+            }
+            if (
+                code != 3
+                or len(incidents) != 1
+                or type(incident) is not dict
+                or set(incident) != {"kind", "nonce"}
+                or incident["nonce"] != data["token"]
+                or type(incident["kind"]) is not str
+                or incident["kind"] not in messages
+                or len(output.splitlines()) != 1
+            ):
+                raise InfrastructureError("worker lifecycle incident identity mismatch")
+            raise InfrastructureError(messages[incident["kind"]])
         unsupported = [
             line[len(b"TELESCOPE_UNSUPPORTED ") :]
             for line in output.splitlines()

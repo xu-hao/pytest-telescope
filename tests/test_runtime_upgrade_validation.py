@@ -256,3 +256,27 @@ def test_current_execution_inspection_does_not_add_a_nested_retry(monkeypatch):
     with pytest.raises(InfrastructureError):
         runtime._image_info(IMAGE, PROJECT)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("lifecycle", [None, "", "0" * 64, [], 1])
+def test_pre_lifecycle_or_mismatched_v4_is_cleanup_only(monkeypatch, lifecycle):
+    info = image_info(CURRENT)
+    if lifecycle is not None:
+        info["Config"]["Labels"][PREFIX + "lifecycle"] = lifecycle
+    calls = inspector(monkeypatch, [info])
+    assert runtime._retained_image_info(IMAGE, PROJECT) == info
+    with pytest.raises(InfrastructureError):
+        runtime._image_info(IMAGE, PROJECT)
+    assert len(calls) == 2
+
+
+def test_current_execution_requires_exact_shipped_lifecycle(monkeypatch):
+    info = image_info(CURRENT)
+    info["Config"]["Labels"][PREFIX + "lifecycle"] = runtime.lifecycle_identity()
+    inspector(monkeypatch, [info])
+    assert runtime._image_info(IMAGE, PROJECT) == info
+    source = runtime.supervisor_source()
+    monkeypatch.setattr(runtime, "supervisor_source", lambda: source + b"\n# changed lifecycle\n")
+    with pytest.raises(InfrastructureError):
+        runtime._image_info(IMAGE, PROJECT)
+    assert runtime._retained_image_info(IMAGE, PROJECT) == info

@@ -1,7 +1,7 @@
-"""Measure an explicit upgrade from an installed published runtime package.
+"""Measure an explicit upgrade from an installed published or retained runtime package.
 
 Run with the candidate installed, --previous-python pointing to a separate environment
-containing the previous published package, and an unused host-visible --project path.
+containing the previous package, and an unused host-visible --project path.
 The probe creates only synthetic inputs and removes its exact owned runtime images.
 """
 
@@ -49,9 +49,14 @@ print(json.dumps({'policy':runtime.POLICY,'records':records}))
         )
         prepared = json.loads(previous.stdout)
         report["previous_policy"] = prepared["policy"]
-        assert prepared["policy"] in {"docker-nonroot-ro-none-v2", "docker-nonroot-ro-none-v3"}
+        assert prepared["policy"] in {
+            "docker-nonroot-ro-none-v2",
+            "docker-nonroot-ro-none-v3",
+            "docker-nonroot-ro-none-v4",
+        }
         assert len({record["image"] for record in prepared["records"]}) == 4
         report["previous_images"] = len(prepared["records"])
+        report["previous_lifecycle_present"] = "lifecycle" in prepared["records"][-1]
         state = root / ".pytest-telescope"
         before = (state / "runtime.json").read_bytes()
         try:
@@ -82,6 +87,8 @@ print(json.dumps({'policy':runtime.POLICY,'records':records}))
         report["outcome"] = "replaced"
         assert replacement["policy"] == runtime.POLICY
         assert runtime.identity(root)["image"] == replacement["image"]
+        assert prepared["records"][-1]["image"] in json.loads((state / "images.json").read_bytes())
+        report["previous_selected_image_protected"] = True
         result = controller.run(root)
         assert result["status"] == "passed" and result["counts"]["executed"] == 1
         report["fresh_passes"] = 1
