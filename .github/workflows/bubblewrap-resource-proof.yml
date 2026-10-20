@@ -62,19 +62,54 @@ jobs:
           dropin="$dropin_dir/52-telescope-resource-proof.conf"
           test ! -e "$dropin"
           test ! -L "$dropin"
+          manager_path="/sys/fs/cgroup/user.slice/user-$runner_uid.slice/$manager_unit"
+          capture_manager_tree() {
+            printf 'Manager hierarchy observation: %s\n' "$1"
+            for group in "/sys/fs/cgroup/user.slice/user-$runner_uid.slice" "$manager_path"; do
+              for field in cgroup.controllers cgroup.subtree_control cgroup.type cgroup.procs cgroup.events; do
+                printf 'Bounded field (at most 4096 bytes): %s/%s\n' "$group" "$field"
+                if timeout 2s head -c 4096 "$group/$field"; then
+                  printf '\nField read exit: 0\n'
+                else
+                  printf '\nField read unavailable, exit: %s\n' "$?"
+                fi
+              done
+            done
+          }
+          old_group=$(systemctl show "$manager_unit" -p ControlGroup --value)
+          [[ -z "$old_group" || "/sys/fs/cgroup$old_group" == "$manager_path" ]]
+          capture_manager_tree before-stop
+          sudo timeout 30s systemctl stop "$manager_unit"
+          stopped_state=$(systemctl show "$manager_unit" -p ActiveState --value)
+          printf 'Stopped manager state: %s\n' "$stopped_state"
+          test "$stopped_state" = inactive
+          capture_manager_tree after-stop-before-delegation
+          python - "$manager_path" <<'PYCG'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          try:
+              path.stat()
+          except FileNotFoundError:
+              print("Original manager cgroup absent before delegation")
+          else:
+              events = dict(line.split() for line in (path / "cgroup.events").read_text().splitlines())
+              assert events["populated"] == "0", events
+              assert not (path / "cgroup.procs").read_text().strip()
+              print("Original manager cgroup present and unpopulated before delegation")
+          PYCG
           printf '[Service]\nDelegate=cpu memory pids\n' > "$RUNNER_TEMP/telescope52-user-manager.conf"
           printf '%s\n' "$dropin" > "$RUNNER_TEMP/telescope52-delegation-owned"
           sudo install -d -m 0755 "$dropin_dir"
           sudo install -m 0644 "$RUNNER_TEMP/telescope52-user-manager.conf" "$dropin"
           sudo systemctl daemon-reload
-          sudo loginctl enable-linger "$(id -un)"
           setup_start=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          if sudo systemctl restart "$manager_unit"; then
+          sudo loginctl enable-linger "$(id -un)"
+          if sudo systemctl start "$manager_unit"; then
             :
           else
-            restart_status=$?
+            start_status=$?
             set +e
-            printf 'Owned manager restart failed: exit=%s\n' "$restart_status"
+            printf 'Owned manager clean start failed: exit=%s\n' "$start_status"
             timeout 10s systemctl show "$manager_unit" -p LoadState -p ActiveState -p SubState -p Result \
               -p ExecMainPID -p ExecMainCode -p ExecMainStatus -p ControlPID -p ControlGroup -p Delegate -p DelegateControllers
             printf 'Manager show exit: %s\n' "$?"
@@ -98,8 +133,10 @@ jobs:
                 printf 'Field read exit: %s\n' "$?"
               done
             done
-            exit "$restart_status"
+            capture_manager_tree after-failed-clean-start
+            exit "$start_status"
           fi
+          capture_manager_tree after-clean-start
           systemctl show "$manager_unit" -p Delegate -p DelegateControllers -p ControlGroup -p ActiveState
           delegated=$(systemctl show "$manager_unit" -p DelegateControllers --value)
           for controller in cpu memory pids; do
