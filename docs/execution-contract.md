@@ -268,3 +268,9 @@ infrastructure failure rather than permission to start without cleanup. Cleanup 
 only resources owned by that invocation. The pytest adapter may load other host plugins
 before routing to the controller; use `python -m pytest_telescope` to avoid host
 pytest/plugin startup entirely.
+
+Completed adopted worker children are reaped after all pytest teardown with nonblocking
+`waitpid`, bounded to 4096 calls and 50 ms. Child CPU accounting is read after reaping.
+Every process still present afterward, including any live descendant or unconsumed
+zombie after the bound, makes the invocation ineligible. The engine never waits for
+ongoing child work or kills a child to turn an incomplete run into reusable success.
