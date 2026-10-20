@@ -68,7 +68,7 @@ jobs:
           sudo install -m 0644 "$RUNNER_TEMP/telescope52-user-manager.conf" "$dropin"
           sudo systemctl daemon-reload
           sudo loginctl enable-linger "$(id -un)"
-          setup_start=$(date --iso-8601=seconds)
+          setup_start=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           if sudo systemctl restart "$manager_unit"; then
             :
           else
