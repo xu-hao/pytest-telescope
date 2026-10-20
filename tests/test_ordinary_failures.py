@@ -2,6 +2,7 @@
 
 import json
 import os
+import subprocess
 
 import pytest
 from test_ordinary_lifecycle import run_owned_lifecycle
@@ -225,3 +226,96 @@ def test_ordinary():
     assert report["schema"] == 3 and report["kind"] == "refusal"
     assert report["units"] == [] and report["groups"] == []
     assert not (tmp_path / "invalid-config-body-ran").exists()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "status", "capability"),
+    [
+        (("-n", "2"), "unsupported", "pytest:distributed-scheduling"),
+        (("--dist=load",), "unsupported", "pytest:distributed-scheduling"),
+        (("-k",), "declaration_error", None),
+    ],
+)
+def test_ordinary_prelaunch_refusal_has_no_session_or_timing_claim(
+    tmp_path, monkeypatch, arguments, status, capability
+):
+    write(tmp_path, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots=["tests"]\n')
+    write(
+        tmp_path,
+        "tests/test_known.py",
+        'from pathlib import Path\nPath("imported").touch()\ndef test_known(): pass\n',
+    )
+    launches = []
+    original = subprocess.Popen
+
+    def observe(*args, **kwargs):
+        launches.append(args[0] if args else kwargs["args"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", observe)
+    report = run_report(tmp_path, arguments=arguments)
+    detail = json.dumps(report, indent=2)
+    assert launches == [], detail
+    assert not (tmp_path / "imported").exists()
+    assert report["schema"] == 3
+    assert report["status"] == status, detail
+    assert report.get("capability") == capability, detail
+    assert report["kind"] == "refusal", detail
+    assert report["units"] == report["groups"] == []
+    assert all(value == 0 for value in report["counts"].values())
+    assert report["resources"]["ordinary"]["peak_sessions"] == 0, detail
+    assert report["worker_cpu_seconds"] == 0, detail
+    assert report["suites"] == [{"name": "default", "files": ["tests/test_known.py"]}]
+    assert report["inventory_complete"] is False and report["routing_complete"] is False
+    assert report["inventory_digest"] is None
+    observations = report["collection"]["suites"]
+    assert len(observations) == 1
+    observed = observations[0]
+    assert observed["name"] == "default" and observed["route"] == "ordinary"
+    assert observed["files"] == ["tests/test_known.py"]
+    assert observed["outcome"] == "not-started" and observed["complete"] is False
+    assert observed["collected"] is None and observed["inventory_digest"] is None
+    assert observed["accounting_group_id"] is None
+    assert observed["worker_seconds"] is None and observed["cpu_seconds"] is None
+    assert report["collection"]["worker_seconds"] is None
+    assert report["collection"]["cpu_seconds"] is None
+
+
+def test_later_prelaunch_validation_preserves_prior_actual_session(tmp_path):
+    suites(tmp_path)
+    configuration = tmp_path / "pyproject.toml"
+    configuration.write_text(
+        configuration.read_text().replace(
+            "[tool.pytest_telescope.suites.b]\n",
+            '[tool.pytest_telescope.suites.b]\nargs=["-k"]\n',
+        )
+    )
+    write(
+        tmp_path,
+        "tests/b/test_bad.py",
+        'from pathlib import Path\nPath("b-imported").touch()\ndef test_bad(): pass\n',
+    )
+    report = run_report(tmp_path)
+    detail = json.dumps(report, indent=2)
+    assert report["schema"] == 3 and report["kind"] == "run", detail
+    assert report["status"] == "declaration_error", detail
+    assert (tmp_path / "a-ran").exists()
+    assert not (tmp_path / "b-imported").exists()
+    assert not (tmp_path / "c-imported").exists()
+    assert len(report["units"]) == len(report["groups"]) == 1, detail
+    unit, group = report["units"][0], report["groups"][0]
+    assert unit["suite"] == group["suite"] == "a"
+    assert unit["route"] == group["route"] == "ordinary"
+    assert unit["outcome"] == "executed" and unit["result_status"] == "passed"
+    assert unit["complete"] is True and unit["attempts"] == 1
+    assert report["resources"]["ordinary"]["peak_sessions"] == 1
+    assert report["counts"]["executed"] == report["counts"]["selected"] == 1
+    assert report["inventory_complete"] is False and report["routing_complete"] is False
+    observed = {row["name"]: row for row in report["collection"]["suites"]}
+    assert set(observed) == {"a", "b", "c"}
+    assert observed["a"]["accounting_group_id"] == group["group_id"]
+    for name in ("b", "c"):
+        row = observed[name]
+        assert row["outcome"] == "not-started" and row["complete"] is False, detail
+        assert row["accounting_group_id"] is None and row["collected"] is None
+        assert row["worker_seconds"] is None and row["cpu_seconds"] is None
