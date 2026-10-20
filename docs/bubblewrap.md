@@ -105,8 +105,15 @@ All setup, supervisor, test and descendant processes count toward worker ceiling
 The initial feasibility candidate uses ordinary-user systemd units with private user/mount
 namespaces, cgroup-v2 limits and quota-bound noexec/nosuid/nodev tmpfs. It is unqualified
 until actual effective controllers, numeric limits, mount flags and negative controls pass.
-A supported host may require administrator provisioning of a standard user manager and
-resource delegation, but normal production launch must not use a privileged helper.
+Administrator provisioning must delegate CPU, memory and process controllers to the
+standard user manager before normal unprivileged launch. A boolean `Delegate=yes` alone
+is insufficient: the measured Ubuntu 22.04/systemd 249 default delegates only `memory pids`,
+leaving `cpu.max` unavailable despite requested CPUQuota settings. Check the effective
+`DelegateControllers` and actual cgroup controllers. The proposed ephemeral CI setup uses
+an instance-specific runtime-only `user@<uid>.service` drop-in with
+`Delegate=cpu memory pids`; no system-wide template or security-policy change is needed.
+This prerequisite correction does not yet qualify the full resource mechanism. Normal
+production launch must not use a privileged helper or silently provision its own host.
 Unsupported prerequisites refuse; neither global security-policy changes nor a broader
 execution path are an alternative. Source and runtime remain read-only and networking
 remains disabled before scoped project imports.

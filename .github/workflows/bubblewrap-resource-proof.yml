@@ -56,11 +56,33 @@ jobs:
             fi
           done
           sudo cat /sys/kernel/security/apparmor/profiles | awk '/bwrap/'
+          runner_uid=$(id -u)
+          manager_unit="user@$runner_uid.service"
+          dropin_dir="/run/systemd/system/$manager_unit.d"
+          dropin="$dropin_dir/52-telescope-resource-proof.conf"
+          test ! -e "$dropin"
+          test ! -L "$dropin"
+          printf '[Service]\nDelegate=cpu memory pids\n' > "$RUNNER_TEMP/telescope52-user-manager.conf"
+          printf '%s\n' "$dropin" > "$RUNNER_TEMP/telescope52-delegation-owned"
+          sudo install -d -m 0755 "$dropin_dir"
+          sudo install -m 0644 "$RUNNER_TEMP/telescope52-user-manager.conf" "$dropin"
+          sudo systemctl daemon-reload
           sudo loginctl enable-linger "$(id -un)"
-          sudo systemctl start "user@$(id -u).service"
-          systemctl show "user@$(id -u).service" -p Delegate -p DelegateControllers -p ControlGroup -p ActiveState
+          sudo systemctl restart "$manager_unit"
+          systemctl show "$manager_unit" -p Delegate -p DelegateControllers -p ControlGroup -p ActiveState
+          delegated=$(systemctl show "$manager_unit" -p DelegateControllers --value)
+          for controller in cpu memory pids; do
+            [[ " $delegated " == *" $controller "* ]]
+          done
+          manager_cgroup=$(systemctl show "$manager_unit" -p ControlGroup --value)
+          test "$manager_cgroup" = "/user.slice/user-$runner_uid.slice/$manager_unit"
+          read -r available < "/sys/fs/cgroup$manager_cgroup/cgroup.controllers"
+          printf 'Actual user-manager controllers: %s\n' "$available"
+          for controller in cpu memory pids; do
+            [[ " $available " == *" $controller "* ]]
+          done
           systemd --version
-      - name: Observe cgroup delegation without workloads
+      - name: Run bounded ordinary-user resource proof
         shell: bash
         run: |
           set -euo pipefail
@@ -69,7 +91,7 @@ jobs:
           systemctl --user is-active default.target
           "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -B scripts/probe_bubblewrap_resources.py \
             --output "$RUNNER_TEMP/telescope-resource-proof" \
-            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --run-id "$GITHUB_RUN_ID" --cgroup-diagnostic
+            --bwrap "$RUNNER_TEMP/telescope-bubblewrap/bin/bwrap" --run-id "$GITHUB_RUN_ID"
       - name: Retain narrow namespace failure audit
         if: failure()
         shell: bash
@@ -95,4 +117,22 @@ jobs:
           if [[ -f "$RUNNER_TEMP/telescope-resource-proof.launch.json" ]]; then
             "$RUNNER_TEMP/telescope-benchmark-venv/bin/python" -B scripts/probe_bubblewrap_resources.py \
               --cleanup --config "$RUNNER_TEMP/telescope-resource-proof.launch.json"
+          fi
+      - name: Remove only owned ephemeral delegation configuration
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="$RUNNER_TEMP/telescope52-delegation-owned"
+          if [[ -f "$marker" ]]; then
+            expected="/run/systemd/system/user@$(id -u).service.d/52-telescope-resource-proof.conf"
+            test "$(cat "$marker")" = "$expected"
+            if sudo test -e "$expected"; then
+              sudo cmp "$RUNNER_TEMP/telescope52-user-manager.conf" "$expected"
+              sudo rm -- "$expected"
+            fi
+            sudo rmdir --ignore-fail-on-non-empty "$(dirname "$expected")"
+            sudo systemctl daemon-reload
+            test ! -e "$expected"
+            printf 'Owned runtime-only delegation drop-in removed; ephemeral manager is not restarted during cleanup.\n'
           fi
