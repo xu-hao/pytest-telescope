@@ -1,6 +1,7 @@
 """Malformed dependency responses refuse with bounded typed infrastructure evidence."""
 
 import json
+import uuid
 
 import pytest
 
@@ -40,23 +41,51 @@ def test_non_utf8_platform_response_is_typed_and_bounded(tmp_path, monkeypatch):
     assert not (tmp_path / ".pytest-telescope").exists()
 
 
-def test_real_foreign_base_image_is_refused_without_removal_or_state_writes(tmp_path):
+def test_real_foreign_image_is_refused_without_removal_or_state_writes(tmp_path):
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
-    prepared = runtime.build_runtime(tmp_path)
+    owner = uuid.uuid4().hex
+    label = "org.pytest-telescope.fixture-owner"
+    context = tmp_path / "foreign-image"
+    context.mkdir()
+    (context / "inert.txt").write_text("owned inspection fixture\n")
+    (context / "Dockerfile").write_text(
+        f'FROM scratch\nLABEL {label}="{owner}"\nCOPY inert.txt /inert.txt\n'
+    )
+    image_id = tmp_path / "foreign-image.id"
+    prepared = None
     state = tmp_path / ".pytest-telescope/runtime.json"
-    original = state.read_bytes()
-    base = json.loads(runtime.command(["docker", "image", "inspect", runtime.BASE]))[0]
-    altered = {**prepared, "image": base["Id"]}
-    state.write_text(json.dumps(altered))
-    before = state.read_bytes()
+    original = None
     try:
+        runtime.command(["docker", "build", "--iidfile", str(image_id), str(context)], timeout=60)
+        foreign = image_id.read_text().strip()
+        before_image = json.loads(runtime.command(["docker", "image", "inspect", foreign]))
+        assert before_image[0]["Id"] == foreign
+        assert before_image[0]["Config"]["Labels"][label] == owner
+        prepared = runtime.build_runtime(tmp_path)
+        original = state.read_bytes()
+        state.write_text(json.dumps({**prepared, "image": foreign}))
+        before_state = state.read_bytes()
         with pytest.raises(InfrastructureError):
             runtime.inspect_runtime(tmp_path)
-        assert state.read_bytes() == before
-        still_present = json.loads(runtime.command(["docker", "image", "inspect", base["Id"]]))[0]
-        assert still_present["Id"] == base["Id"]
-        assert still_present["RootFS"] == base["RootFS"]
+        assert state.read_bytes() == before_state
+        after_image = json.loads(runtime.command(["docker", "image", "inspect", foreign]))
+        assert after_image == before_image
     finally:
-        state.write_bytes(original)
-        runtime._image_info(prepared["image"], runtime._project(tmp_path))
-        runtime.command(["docker", "image", "rm", prepared["image"]], timeout=30)
+        try:
+            if original is not None:
+                state.write_bytes(original)
+            if prepared is not None:
+                runtime._image_info(prepared["image"], runtime._project(tmp_path))
+                runtime.command(["docker", "image", "rm", prepared["image"]], timeout=30)
+                remaining = runtime.command(["docker", "image", "ls", "--quiet", "--no-trunc"])
+                assert prepared["image"] not in remaining.decode().splitlines()
+        finally:
+            if image_id.exists():
+                foreign = image_id.read_text().strip()
+                info = json.loads(runtime.command(["docker", "image", "inspect", foreign]))[0]
+                assert info["Id"] == foreign
+                assert info["Config"]["Labels"][label] == owner
+                runtime.command(["docker", "image", "rm", foreign], timeout=30)
+                assert not runtime.command(
+                    ["docker", "image", "ls", "--quiet", "--filter", f"label={label}={owner}"]
+                ).strip()
