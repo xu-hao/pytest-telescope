@@ -7,6 +7,19 @@ Only the bounded native resource mechanism passed
 Runtime preparation/root closure, Git ABI, isolated children, ordinary/scoped routing,
 continuous descendant supervision and final cgroup CPU accounting remain required.
 
+The staged `scripts/probe_python_capsules.py` and `python-capsule-proof.yml` workflow
+are **UNRUN and UNQUALIFIED**. This focused route exercises only the installed production
+assembler: transport an Ubuntu 24 system CPython 3.12 closure as bounded hash-addressed
+blobs plus a manifest preserving bytes, modes, nanosecond mtimes and symlink topology,
+then run it and a setup-python dedicated CPython 3.12.9 closure on the previously proven
+Ubuntu 22 user-unit/Bubblewrap resource route. Sealed namespaces must expose no original
+host interpreter installation; the proof must observe scoped cgroup limits and verify
+exact owned cleanup. Archive and payload storage bounds are distinct from aggregate disk
+quota enforcement, which remains unimplemented. This route does not qualify public
+`runtime.build_runtime` admission, retention, controller/backend integration, lifecycle
+or Git, and does not resolve the remaining ordinary accounting gaps. No staged execution
+receipt or timing is claimed.
+
 Use a dedicated Python 3.11+ virtual environment and install development dependencies:
 
 ```sh
