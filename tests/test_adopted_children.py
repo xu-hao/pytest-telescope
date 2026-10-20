@@ -22,38 +22,35 @@ def project(tmp_path):
 
 
 CHILD = r"""
-import os, pathlib, time
+import os, time
 
 def adopted_child(live):
-    marker = pathlib.Path('/tmp/owned-adopted-child')
-    completed = pathlib.Path('/tmp/owned-adopted-completed')
+    read_fd, write_fd = os.pipe()
     child = os.fork()
     if child == 0:
-        grandchild = os.fork()
+        os.close(read_fd)
+        try:
+            grandchild = os.fork()
+        except OSError:
+            os.write(write_fd, b'failed')
+            os._exit(1)
         if grandchild == 0:
             if live:
+                os.write(write_fd, b'ready')
+                os.close(write_fd)
                 time.sleep(30)
             else:
                 # Charge measurable child CPU before exiting.
                 started = time.process_time()
                 while time.process_time() - started < 0.03:
                     pass
-                completed.write_text('complete')
+                os.write(write_fd, b'complete')
             os._exit(0)
-        marker.write_text(str(grandchild))
         os._exit(0)
-    os.waitpid(child, 0)
-    grandchild = int(marker.read_text())
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        try:
-            state = pathlib.Path('/proc/' + str(grandchild) + '/stat').read_text().split()[2]
-        except FileNotFoundError:
-            state = None
-        if live or (completed.exists() and state in (None, 'Z')):
-            break
-        time.sleep(0.002)
-    assert live or (completed.read_text() == 'complete' and state in (None, 'Z'))
+    os.close(write_fd)
+    assert os.waitpid(child, 0) == (child, 0)
+    with os.fdopen(read_fd, 'rb') as stream:
+        assert stream.read() == (b'ready' if live else b'complete')
 """
 
 
@@ -69,17 +66,21 @@ def test_completed_adopted_child_vs_live_descendant(project, mode, phase, live):
     (project / "tests/test_child.py").write_text(source)
     result = controller.run(project, execution_mode=mode)
     if live:
-        assert result["status"] == "infrastructure_error"
-        assert result["counts"]["reused"] == 0
-        assert not any(group["cache_eligible"] for group in result["groups"])
+        assert result["status"] == "infrastructure_error", json.dumps(result, indent=2)
+        assert result["counts"]["reused"] == 0, json.dumps(result, indent=2)
+        assert not any(group["cache_eligible"] for group in result["groups"]), json.dumps(
+            result, indent=2
+        )
         if phase == "call":
-            assert result["groups"][0]["attempts"] == 2
+            assert result["groups"][0]["attempts"] == 2, json.dumps(result, indent=2)
     else:
-        assert result["status"] == "passed", result
-        assert result["counts"]["executed"] == 1
-        assert result["worker_cpu_seconds"] >= 0.03
+        assert result["status"] == "passed", json.dumps(result, indent=2)
+        assert result["counts"]["executed"] == 1, json.dumps(result, indent=2)
+        assert result["worker_cpu_seconds"] >= 0.03, json.dumps(result, indent=2)
         warm = controller.run(project, execution_mode=mode)
-        assert warm["status"] == "passed" and warm["counts"]["reused"] == 1
+        assert warm["status"] == "passed" and warm["counts"]["reused"] == 1, json.dumps(
+            warm, indent=2
+        )
 
 
 @pytest.mark.parametrize("bound", ["iterations", "deadline", "live", "none"])
