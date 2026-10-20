@@ -1,6 +1,6 @@
 # Run results and explicit refusals
 
-This reference describes the 0.1.0a3 schema. Start with the practical
+This reference describes the 0.1.0a4 schema. Start with the practical
 [quickstart](index.md). The [scoped execution contract](scoped-execution.md)
 defines metadata, suite and resource boundaries.
 
@@ -48,13 +48,19 @@ run are accounted in its result where possible. `controller.error_result(error)`
 typed declaration, capability or infrastructure exception into the refusal envelope below.
 Consumers should dispatch on the explicit status and capability, without parsing messages.
 
-### Next-alpha runtime profiles
+### Runtime profiles
 
 The [pinned local Git contract](git-runtime.md) adds `runtime_profile=None` and
 `required_capabilities=None` keyword arguments to `controller.run` and `plan.make_plan`.
 `runtime.build_runtime(root, requirements=None, *, runtime_profile=None)` prepares the
 configured profile or explicit override. CLI `runtime`, `plan` and `run` accept
 `--runtime-profile`; `plan` and `run` also accept repeated `--require-capability`.
+`runtime.inspect_runtime(root, *, runtime_profile=None, required_capabilities=None)`
+returns exactly the same three-field runtime envelope as a successful run. It validates
+prepared identity without preparation, recovery, collection, cache access or state writes,
+and owns at most two retryable inspection attempts. It supplies identity only, not
+execution or cache authority.
+
 These interfaces are separate from `execution_mode` and do not change configuration files.
 
 The default runtime profile is `python-v1`. `git-local-v1` adds pinned local Git for

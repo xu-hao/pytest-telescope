@@ -193,7 +193,7 @@ records cause the whole selected group to rerun. See [batching](batching.md) for
 4,096-member limits and lifecycle rules, and [result schema 2](result-schema.md) for
 member/group outcomes, partial pytest stops and honest shared-worker timing.
 
-## Next-alpha local Git profile
+## Local Git profile (0.1.0a4)
 
 The separately qualified [local Git profile](git-runtime.md) selects immutable tooling
 for an invocation while preserving each case or group's declared project inputs:
@@ -214,7 +214,7 @@ python -m pytest_telescope run --require-capability git-local
 for preparation, planning or execution. Requirements declared in configuration remain
 in force when a caller supplies an override; requesting Git with the default Python
 profile refuses before collection or cache reuse. See the
-[runtime interfaces](result-schema.md#next-alpha-runtime-profiles) for Python arguments
+[runtime interfaces](result-schema.md#runtime-profiles) for Python arguments
 and the distinct runtime identity in results.
 
 Create repositories and linked worktrees in private writable scratch, copying only

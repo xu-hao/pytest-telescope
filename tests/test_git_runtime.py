@@ -6,7 +6,7 @@ import re
 import pytest
 
 from pytest_telescope import controller, runtime
-from pytest_telescope.model import DeclarationError, InfrastructureError, UnsupportedCapability
+from pytest_telescope.model import DeclarationError, UnsupportedCapability
 from pytest_telescope.plan import make_plan
 
 
@@ -248,7 +248,7 @@ def prepared(tmp_path):
 def passed(root, **kwargs):
     result = controller.run(root, **kwargs)
     assert result["schema"] == 2 and result["kind"] == "run"
-    assert result["status"] == "passed", result
+    assert result["status"] == "passed", json.dumps(result, indent=2)
     assert result["inventory_complete"] and result["grouping_complete"]
     assert re.fullmatch("[0-9a-f]{64}", result["runtime"]["identity"])
     return result
@@ -267,6 +267,7 @@ def test_local_git_operations_fault_repair_isolation_and_warm_reuse(prepared, mo
     assert len(cold["groups"]) == (2 if mode == "case" else 1)
     assert cold["runtime"]["profile"] == "git-local-v1"
     assert cold["runtime"]["required_capabilities"] == ["git-local"]
+    assert runtime.inspect_runtime(root) == cold["runtime"]
     assert cold["execution"]["profile"] == mode + "-v1"
 
     def no_fresh_work(*args, **kwargs):
@@ -333,8 +334,9 @@ def test_profile_requirements_and_execution_modes_bind_reuse(prepared):
     assert batch["counts"]["executed"] == 1
     assert batch["groups"][0]["group_id"] != required["groups"][0]["group_id"]
     assert batch["runtime"] == required["runtime"]
-    with pytest.raises(InfrastructureError):
-        controller.run(root, runtime_profile="python-v1")
+    mismatch = controller.run(root, runtime_profile="python-v1")
+    assert mismatch["status"] == "infrastructure_error"
+    assert mismatch["runtime"]["identity"] is None
     assert (root / "pyproject.toml").read_bytes() == original
 
 

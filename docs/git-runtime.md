@@ -1,8 +1,8 @@
 # Pinned local Git runtime profile
 
-This is the proposed next-alpha contract for a separately qualified runtime profile.
-Version 0.1.0a3 and earlier releases remain immutable. Production implementation follows
-review of the restricted mechanism proof; this document is not a release claim.
+This is the 0.1.0a4 contract for a separately qualified runtime profile.
+Version 0.1.0a3 and earlier releases remain immutable. Candidate qualification is
+in progress; the recorded mechanism proof is not a final release verdict.
 
 ## Selected capability and API
 
@@ -41,6 +41,16 @@ with the existing bounded recovery policy; it is not silently prepared during `r
 The prepared profile must exactly match the requested profile, even when a wider image
 happens to contain the requested executable. `plan` proves static compatibility only.
 
+`runtime.inspect_runtime(root, *, runtime_profile=None, required_capabilities=None)`
+returns the same three-field `runtime` envelope as a successful run. It applies the same
+requirements union and requested-profile validation, and owns at most two retryable
+inspection attempts (including the backend platform probe). Typed unsupported mismatches
+are immediate. Inspection never prepares, downloads, recovers, collects, accesses the
+case cache or writes project/state files. Missing/stale/corrupt prepared state is an
+infrastructure failure. The opaque identity supplies no execution, cache or cleanup
+authority; callers must not reconstruct it or multiply its bounded retries. Preparation
+likewise permits at most two backend platform probes before any build.
+
 ## Tool provenance and reproducible payload
 
 The profile extends the existing immutable Python base, not the host installation:
@@ -73,8 +83,11 @@ Network retrieval is bounded to two attempts, 30 seconds per attempt and 16 MiB;
 size and SHA256 before extraction. Hash/format mismatch is terminal, not retried as a
 network fault. No mirror guessing or floating-version fallback. Extract only in the
 owned Docker build context/container, with the existing 300-second build deadline and
-2 GiB final-image bound. Git-profile build/inspection failures allow at most two complete
-attempts, with a fresh owned context after confirmed cleanup; an integrity mismatch or
+2 GiB final-image bound. Git-profile builds allow at most two complete
+attempts, with a fresh owned context after confirmed cleanup. The verified bounded archive
+is retained between these attempts; retrieval remains limited to two attempts across the
+whole preparation. An immutable candidate image permits at most two read-only ownership
+inspections in its existing context, without rebuilding it; an integrity mismatch or
 unconfirmed cleanup is terminal. There is no unbounded stage retry or broader recipe.
 Commit runtime state atomically only after closure validation,
 image ownership inspection and complete preparation cleanup. Retry exhaustion reports

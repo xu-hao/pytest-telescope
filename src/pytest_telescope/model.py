@@ -69,6 +69,7 @@ class Manifest:
     suites: list = field(default_factory=list)
     distributions: dict = field(default_factory=dict)
     execution: dict = field(default_factory=dict)
+    runtime: dict = field(default_factory=dict)
 
     @cached_property
     def registry_by_id(self):
@@ -314,7 +315,16 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     mapping(
         spec,
         "pytest_telescope",
-        {"defaults", "bundles", "test_roots", "env", "suites", "distributions", "execution"},
+        {
+            "defaults",
+            "bundles",
+            "test_roots",
+            "env",
+            "suites",
+            "distributions",
+            "execution",
+            "runtime",
+        },
     )
     bundles = mapping(spec.get("bundles", {}), "bundles")
     if len(bundles) > 256 or any(not name or len(name) > 128 for name in bundles):
@@ -551,6 +561,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         configured_suites,
         distributions,
         execution,
+        mapping(spec.get("runtime", {}), "runtime", {"profile", "requires"}),
     )
 
 

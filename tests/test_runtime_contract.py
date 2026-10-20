@@ -497,6 +497,8 @@ def test_identity_tracks_filesystem_configuration_and_daemon_policy(tmp_path, mo
         "recipe": "b" * 64,
         "worker": hashlib.sha256(runtime.worker_source()).hexdigest(),
         "policy": runtime.POLICY,
+        "profile": "python-v1",
+        "provenance": runtime.runtime_profiles.provenance("python-v1"),
     }
     runtime._durable(state / "runtime.json", metadata)
     inspected = {
@@ -505,7 +507,11 @@ def test_identity_tracks_filesystem_configuration_and_daemon_policy(tmp_path, mo
         "Architecture": "amd64",
         "RootFS": {"Type": "layers", "Layers": ["sha256:" + "c" * 64]},
         "Config": {
-            "Labels": {runtime.LABEL + "project": runtime._project(tmp_path)},
+            "Labels": {
+                runtime.LABEL + "project": runtime._project(tmp_path),
+                runtime.LABEL + "profile": metadata["profile"],
+                runtime.LABEL + "provenance": metadata["provenance"],
+            },
             "Env": ["FIXED=1"],
         },
     }
