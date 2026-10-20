@@ -96,8 +96,16 @@ def test_pinned_python_path_file_and_metadata_interpretation(tmp_path):
             "metadata": ["Example", "ExampleEgg"],
         }
     finally:
-        info = json.loads(runtime.command(["docker", "inspect", name]))[0]
-        assert info["Config"]["Labels"][label] == token
-        runtime.command(["docker", "rm", "-f", name])
-        runtime._image_info(prepared["image"], runtime._project(tmp_path))
-        runtime.command(["docker", "image", "rm", prepared["image"]])
+        try:
+            owned = (
+                runtime.command(["docker", "ps", "-aq", "--filter", "label=" + label + "=" + token])
+                .decode()
+                .split()
+            )
+            for container in owned:
+                info = json.loads(runtime.command(["docker", "inspect", container]))[0]
+                assert info["Config"]["Labels"][label] == token
+                runtime.command(["docker", "rm", "-f", container])
+        finally:
+            runtime._image_info(prepared["image"], runtime._project(tmp_path))
+            runtime.command(["docker", "image", "rm", prepared["image"]])

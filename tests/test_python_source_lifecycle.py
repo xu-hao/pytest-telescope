@@ -122,3 +122,95 @@ def test_invalid_prepared_slot_refuses_before_worker_or_warm_reuse(project, monk
     result = controller.run(root)
     assert result["status"] == "infrastructure_error"
     assert result["counts"]["reused"] == 0
+
+
+@pytest.mark.parametrize("stage", ["collection", "case", "batch"])
+def test_isolated_source_child_cannot_leave_live_descendants(project, stage):
+    root, _ = project
+    spawn = (
+        'subprocess.Popen([sys.executable,"-I","-c",'
+        '"import example,time; assert example.value==7; time.sleep(30)"],'
+        "stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)"
+    )
+    (root / "test_example.py").write_text(
+        "import pytest,subprocess,sys\n"
+        'pytestmark=pytest.mark.telescope(inputs=["src/example.py"])\n'
+        + (spawn + "\n" if stage == "collection" else "")
+        + "def test_child():\n    "
+        + ("pass" if stage == "collection" else spawn)
+        + "\n"
+    )
+    result = controller.run(root, execution_mode="batch" if stage == "batch" else "case")
+    assert result["status"] == "infrastructure_error"
+    assert not any(group["cache_eligible"] for group in result["groups"])
+    assert not list((root / ".pytest-telescope/cache").glob("*.json"))
+    # Successful, fully cleaned collection remains valid; leaked execution does not.
+    inventories = list((root / ".pytest-telescope/cache/inventory").glob("*.json"))
+    assert len(inventories) == (0 if stage == "collection" else 1)
+    assert not list((root / ".pytest-telescope/scratch").iterdir())
+    assert not runtime.command(
+        [
+            "docker",
+            "ps",
+            "-aq",
+            "--filter",
+            "label=" + runtime.LABEL + "project=" + runtime._project(root),
+        ]
+    ).strip()
+
+
+@pytest.mark.parametrize("mode", ["case", "batch"])
+def test_source_projection_terminal_cleanup_drains_actual_sibling(project, monkeypatch, mode):
+    import threading
+
+    from pytest_telescope.execution import DEFAULT_WORKER
+
+    root, _ = project
+    (root / "test_example.py").unlink()
+    for name, pause in (("a", 0), ("b", 30), ("c", 0)):
+        (root / f"test_{name}.py").write_text(
+            "import pytest,subprocess,sys,time\n"
+            'pytestmark=pytest.mark.telescope(inputs=["src/example.py"])\n'
+            "def test_child():\n"
+            ' subprocess.run([sys.executable,"-I","-c","import example; assert example.value==7"],check=True,capture_output=True)\n'
+            f" time.sleep({pause})\n"
+        )
+    original = runtime.execute
+    barrier = threading.Barrier(2, timeout=10)
+    entered, completed, interrupted = [], [], []
+
+    def execute(*args, **kwargs):
+        if kwargs["request"]["mode"] == "collection":
+            return original(*args, **kwargs)
+        filename = args[2][-1]
+        entered.append(filename)
+        barrier.wait()
+        try:
+            result = original(*args, **kwargs)
+        except runtime.InvocationInterrupted:
+            interrupted.append(filename)
+            raise
+        completed.append(filename)
+        assert filename.endswith("test_a.py") and result["exit_code"] == 0
+        raise runtime.CleanupError("synthetic terminal cleanup fault after isolated source worker")
+
+    monkeypatch.setattr(runtime, "execute", execute)
+    result = controller.run(
+        root, execution_mode=mode, budget={key: value * 2 for key, value in DEFAULT_WORKER.items()}
+    )
+    assert result["status"] == "infrastructure_error"
+    assert len(entered) == 2 and len(completed) == len(interrupted) == 1
+    assert result["counts"]["selected"] == result["counts"]["infrastructure_error"] == 3
+    assert sum(group["attempts"] for group in result["groups"]) == 2
+    assert not any(group["cache_eligible"] for group in result["groups"])
+    assert not list((root / ".pytest-telescope/cache").rglob("*.json"))
+    assert not list((root / ".pytest-telescope/scratch").iterdir())
+    assert not runtime.command(
+        [
+            "docker",
+            "ps",
+            "-aq",
+            "--filter",
+            "label=" + runtime.LABEL + "project=" + runtime._project(root),
+        ]
+    ).strip()

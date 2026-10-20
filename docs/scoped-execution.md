@@ -67,6 +67,11 @@ metadata-only directory to Python's search path before pytest startup. All appli
 imports still resolve through the declared `/project` snapshot and explicit pytest
 configuration. No application source enters the shared image or metadata tree.
 
+The explicit [isolated Python source profile](isolated-source.md) can make selected
+metadata and declared source roots discoverable by `python -I` children as well. It
+uses a per-view read-only path projection; it is not an application installation and
+never grants files merely by naming a source root. The default profile remains unchanged.
+
 The effective metadata set is complete: omitted distributions are absent, including
 negative lookups. Duplicate normalized names or conflicts with installed runtime
 packages refuse rather than shadowing runtime metadata. Changing a selected metadata

@@ -1,8 +1,8 @@
 # Declared source in isolated Python children
 
-This is the proposed contract for the separately qualified `isolated-source-v1`
-capability. The existing Git implementation is gated; release publication remains held
-while this contract and mechanism are reviewed. No application installation is implied.
+This is the 0.1.0a4 contract for the explicit `isolated-source-v1` capability.
+It adds source lookup for isolated Python children without application installation.
+Release qualification includes the complete guarded installed-distribution gate.
 
 ## Explicit selection and source scope
 
@@ -159,8 +159,8 @@ as a collision by the separate runtime-only metadata enumeration; the ordinary
 unfiltered scan was also shown to include selected project metadata itself.
 
 These are mechanism results, not production cache or suite-parser qualification.
-The path-file slot was overlaid directly in the proof image; production still needs
-its prepared empty-slot validation, full view preflight, protocol/schema integration
+The path-file slot was overlaid directly in the proof image; production qualification additionally covers
+prepared empty-slot validation, full view preflight, protocol/schema integration
 and lifecycle controls. All exact owned proof containers and the prepared image were
 removed and their absence verified. The first four-scenario proof is retained separately
 from the extended proof; neither changes the earlier Git release gate receipt.
