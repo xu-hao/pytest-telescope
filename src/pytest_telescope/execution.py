@@ -3,7 +3,7 @@
 import configparser
 import shlex
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .model import (
@@ -82,6 +82,7 @@ class Suite:
     raw: bytes
     inventory: list
     structural_files: list | None = None
+    python: dict = field(default_factory=lambda: {"profile": "default", "source_roots": []})
 
     def identity(self):
         result = {
@@ -97,6 +98,7 @@ class Suite:
                 "args",
                 "config_args",
                 "plugins",
+                "python",
             )
         }
         if self.structural_files is not None:
@@ -139,7 +141,10 @@ def config_options(root, name):
         raise DeclarationError("invalid suite pytest configuration") from exc
 
 
-def suites(root, spec, selected=None):
+def suites(root, spec, selected=None, python_profile=None, source_roots=None):
+    from . import python_source
+
+    inherited = python_source.normalize(root, spec.get("python", {}))
     entries = spec.get("suites")
     if entries is None:
         for name in ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg"):
@@ -183,7 +188,16 @@ def suites(root, spec, selected=None):
                 "args",
                 "plugins",
                 "capabilities",
+                "python",
             },
+        )
+        source_settings = (
+            python_source.normalize(root, entry["python"], complete=True)
+            if "python" in entry
+            else inherited
+        )
+        source_settings = python_source.normalize(
+            root, source_settings, python_profile, source_roots
         )
         sequence(
             [
@@ -251,6 +265,7 @@ def suites(root, spec, selected=None):
                 patterns,
                 raw,
                 [],
+                python=source_settings,
             )
         )
     return result

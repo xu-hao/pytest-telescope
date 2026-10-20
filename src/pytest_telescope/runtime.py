@@ -15,7 +15,8 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from .model import DeclarationError, InfrastructureError, UnsupportedCapability
+from . import python_source, runtime_profiles
+from .model import DeclarationError, InfrastructureError, UnsupportedCapability, fingerprint
 from .result import validate_batch, validate_collection, validate_result
 
 try:
@@ -24,7 +25,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BASE = "python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1"
-POLICY = "docker-nonroot-ro-none-v3"
+POLICY = "docker-nonroot-ro-none-v4"
 DEFAULT_REQUIREMENTS = (
     "pytest==9.1.1\niniconfig==2.3.0\npackaging==25.0\npluggy==1.6.0\npygments==2.19.2\n"
 )
@@ -388,24 +389,93 @@ def worker_source():
     return _read(Path(__file__).with_name("worker.py"), 131072)
 
 
-def _image_info(image, project, recipe=None):
+def _inspect_owned_image(image, project, *, attempts=1):
     if type(image) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
         raise InfrastructureError("runtime did not return an immutable image ID")
-    info = json.loads(command(["docker", "image", "inspect", image]))[0]
-    labels = info["Config"]["Labels"]
+    # Only the cleanup caller requests a second read. Current-runtime inspection
+    # retains its existing outer retry owner, and validation failures never retry.
+    for attempt in range(attempts):
+        try:
+            output = command(["docker", "image", "inspect", image])
+            break
+        except CleanupError:
+            raise
+        except InfrastructureError:
+            if attempt + 1 == attempts:
+                raise
+    try:
+        response = json.loads(output)
+    except (ValueError, UnicodeError) as exc:
+        raise InfrastructureError("runtime image inspection returned invalid JSON") from exc
+    if type(response) is not list or len(response) != 1 or type(response[0]) is not dict:
+        raise InfrastructureError("runtime image inspection requires one image object")
+    info = response[0]
+    config = info.get("Config")
+    if type(config) is not dict or type(config.get("Labels")) is not dict:
+        raise InfrastructureError("runtime image inspection requires explicit ownership labels")
+    labels = config["Labels"]
     if (
-        info["Id"] != image
+        info.get("Id") != image
         or labels.get(LABEL + "project") != project
-        or labels.get(LABEL + "policy") != POLICY
-        or (recipe is not None and labels.get(LABEL + "recipe") != recipe)
         or type(info.get("Size")) is not int
+        or info["Size"] < 0
     ):
         raise InfrastructureError("runtime image ownership or identity mismatch")
     return info
 
 
-def build_runtime(root, requirements=None):
+def _image_info(image, project, recipe=None):
+    """Qualify only the current execution policy; historical ownership is insufficient."""
+    info = _inspect_owned_image(image, project)
+    labels = info["Config"]["Labels"]
+    if labels.get(LABEL + "policy") != POLICY or (
+        recipe is not None and labels.get(LABEL + "recipe") != recipe
+    ):
+        raise InfrastructureError("runtime image ownership or identity mismatch")
+    return info
+
+
+def _retained_image_info(image, project):
+    """Inspect registered historical ownership for cleanup, never for execution."""
+    info = _inspect_owned_image(image, project, attempts=2)
+    labels = info["Config"]["Labels"]
+    policy = labels.get(LABEL + "policy")
+    recipe = labels.get(LABEL + "recipe")
+    if (
+        type(policy) is not str
+        or policy not in {"docker-nonroot-ro-none-v2", "docker-nonroot-ro-none-v3", POLICY}
+        or type(recipe) is not str
+        or not re.fullmatch(r"[0-9a-f]{64}", recipe)
+    ):
+        raise InfrastructureError("retained runtime image policy or recipe is unrecognized")
+    if policy == POLICY:
+        provenance = labels.get(LABEL + "provenance")
+        profile = labels.get(LABEL + "profile")
+        if (
+            type(profile) is not str
+            or profile not in {runtime_profiles.DEFAULT, runtime_profiles.GIT}
+            or type(provenance) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", provenance)
+            or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
+        ):
+            raise InfrastructureError("retained runtime image provenance is invalid")
+    return info
+
+
+def build_runtime(root, requirements=None, *, runtime_profile=None):
     root = Path(root).resolve()
+    selection = runtime_profiles.normalize(runtime_profiles.config(root), runtime_profile)
+    for probe in range(2):
+        try:
+            runtime_profiles.validate_backend(selection, command)
+            break
+        except CleanupError:
+            raise
+        except InfrastructureError:
+            if probe:
+                raise
+    profile = selection["profile"]
+    provenance = runtime_profiles.provenance(profile)
     state = _state(root)
     _local_endpoint()
     recover(root)
@@ -430,7 +500,9 @@ def build_runtime(root, requirements=None):
         pins += "\n".join(extra) + "\n"
     source = worker_source()
     project = _project(root)
-    recipe = hashlib.sha256(BASE.encode() + pins.encode() + source + POLICY.encode()).hexdigest()
+    recipe = hashlib.sha256(
+        BASE.encode() + pins.encode() + source + POLICY.encode() + provenance.encode()
+    ).hexdigest()
     lock = os.open(state / "runtime.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         try:
@@ -441,62 +513,175 @@ def build_runtime(root, requirements=None):
             images = json.loads(_read(state / "images.json", 8192))
         except FileNotFoundError:
             images = []
-        if type(images) is not list or len(images) > MAX_IMAGES:
+        if (
+            type(images) is not list
+            or len(images) > MAX_IMAGES
+            or any(
+                type(image) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", image)
+                for image in images
+            )
+            or len(set(images)) != len(images)
+        ):
             raise InfrastructureError("runtime image registry is invalid")
-        # Only inspect/remove exact IDs retained in this project's registry.
+        # Protect the currently selected image even when it is the oldest entry.
+        try:
+            previous = json.loads(_read(state / "runtime.json", 16384))
+            protected = previous["image"]
+        except FileNotFoundError:
+            protected = None
         while len(images) >= MAX_IMAGES:
-            old = images[0]
-            _image_info(old, project)
-            command(["docker", "image", "rm", old], timeout=30)
-            images.pop(0)
+            candidates = [item for item in images if item != protected]
+            if not candidates:
+                raise InfrastructureError("runtime image quota cannot preserve current preparation")
+            old = candidates[0]
+            _retained_image_info(old, project)
+            try:
+                command(["docker", "image", "rm", old], timeout=30)
+            except InfrastructureError as exc:
+                raise CleanupError(
+                    "retained runtime image removal unconfirmed; preparation stopped"
+                ) from exc
+            images.remove(old)
             _durable(state / "images.json", images)
-        with invocation(root) as directory:
-            context = directory / "build"
-            context.mkdir()
-            (context / "worker.py").write_bytes(source)
-            (context / "requirements.txt").write_text(pins)
-            (context / "Dockerfile").write_text(
-                f"FROM {BASE}\n"
-                "ENV PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1\n"
-                "COPY requirements.txt /opt/telescope/requirements.txt\n"
-                "RUN python -m pip install --no-cache-dir --no-deps --only-binary=:all: "
-                "-r /opt/telescope/requirements.txt\n"
-                "RUN python -m pip check\n"
-                "COPY worker.py /opt/telescope/worker.py\n"
-                "RUN chmod 0444 /opt/telescope/worker.py\n"
-                f'LABEL {LABEL}policy="{POLICY}" {LABEL}recipe="{recipe}" '
-                f'{LABEL}project="{project}"\n'
-                "ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 "
-                "HOME=/tmp TMPDIR=/tmp\n"
-                "USER 65534:65534\nWORKDIR /project\n"
-            )
-            build_data = _journal(root, directory)
-            code, output = _owned_capture(
-                directory,
-                build_data,
-                ["docker", "build", "--quiet", "--pull", "--network=default", str(context)],
-                300,
-            )
-            if code:
-                raise InfrastructureError("runtime image build failed; verify pinned dependencies")
-            lines = output.decode().strip().splitlines()
-            if not lines:
-                raise InfrastructureError("runtime build returned no image ID")
-            image = lines[-1]
-            info = _image_info(image, project, recipe)
-            if image not in images:
-                images.append(image)
-                _durable(state / "images.json", images)
-            if info["Size"] > MAX_IMAGE_SIZE:
-                command(["docker", "image", "rm", image], timeout=30)
-                images.remove(image)
-                _durable(state / "images.json", images)
-                raise InfrastructureError("runtime image exceeded 2 GiB")
+        verified_archive = None
+        attempts = 2 if profile == runtime_profiles.GIT else 1
+        for attempt in range(attempts):
+            build_failed = False
+            with invocation(root) as directory:
+                context = directory / "build"
+                context.mkdir()
+                build_data = _journal(root, directory)
+                prefix, environment = f"FROM {BASE}\n", ""
+                if profile == runtime_profiles.GIT:
+                    if verified_archive is None:
+                        verified_archive = runtime_profiles.fetch_archive(
+                            context,
+                            lambda args, timeout: _owned_capture(
+                                directory, build_data, args, timeout
+                            ),
+                            terminal=CleanupError,
+                        )
+                    else:
+                        (context / "git.deb").write_bytes(verified_archive)
+                    prefix, environment = runtime_profiles.dockerfile(context, BASE)
+                (context / "worker.py").write_bytes(source)
+                (context / "requirements.txt").write_text(pins)
+                (context / "Dockerfile").write_text(
+                    prefix
+                    + environment
+                    + "ENV PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1\n"
+                    "COPY requirements.txt /opt/telescope/requirements.txt\n"
+                    "RUN python -m pip install --no-cache-dir --no-deps --only-binary=:all: "
+                    "-r /opt/telescope/requirements.txt\n"
+                    "RUN python -m pip check\n"
+                    "COPY worker.py /opt/telescope/worker.py\n"
+                    "RUN chmod 0444 /opt/telescope/worker.py\n"
+                    + python_source.dockerfile()
+                    + f'LABEL {LABEL}source-slot="{python_source.SLOT_ID}"\n'
+                    f'LABEL {LABEL}policy="{POLICY}" {LABEL}recipe="{recipe}" '
+                    f'{LABEL}project="{project}" {LABEL}profile="{profile}" '
+                    f'{LABEL}provenance="{provenance}"\n'
+                    "ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 "
+                    "HOME=/tmp TMPDIR=/tmp\n"
+                    "USER 65534:65534\nWORKDIR /project\n"
+                )
+                build_options = (
+                    ["--progress=plain", "--iidfile", str(context / "image.id")]
+                    if profile == runtime_profiles.GIT
+                    else ["--quiet"]
+                )
+                try:
+                    code, output = _owned_capture(
+                        directory,
+                        build_data,
+                        [
+                            "docker",
+                            "build",
+                            *build_options,
+                            "--pull",
+                            "--network=default",
+                            str(context),
+                        ],
+                        300,
+                        merged=profile == runtime_profiles.GIT,
+                    )
+                except CleanupError:
+                    raise
+                except InfrastructureError:
+                    if attempt + 1 == attempts:
+                        raise
+                    build_failed = True
+                else:
+                    if runtime_profiles.integrity_failed(output):
+                        raise InfrastructureError(
+                            "Git native closure integrity verification failed"
+                        )
+                    if code:
+                        if attempt + 1 == attempts:
+                            raise InfrastructureError(
+                                "runtime image build exhausted bounded attempts"
+                            )
+                        build_failed = True
+                    else:
+                        if profile == runtime_profiles.GIT:
+                            try:
+                                candidates = [_read(context / "image.id", 128).decode().strip()]
+                            except (OSError, ValueError, InfrastructureError) as exc:
+                                raise CleanupError(
+                                    "runtime build did not preserve its immutable image ID"
+                                ) from exc
+                        else:
+                            candidates = output.decode().splitlines()
+                        ids = [
+                            line
+                            for line in candidates
+                            if re.fullmatch(r"sha256:[0-9a-f]{64}", line)
+                        ]
+                        if len(ids) != 1:
+                            raise CleanupError("runtime build returned no unique owned image ID")
+                        image = ids[0]
+                        for inspection in range(attempts):
+                            try:
+                                info = _image_info(image, project, recipe)
+                                break
+                            except (
+                                InfrastructureError,
+                                ValueError,
+                                KeyError,
+                                IndexError,
+                                TypeError,
+                            ) as exc:
+                                if inspection + 1 == attempts:
+                                    raise CleanupError(
+                                        "runtime image ownership inspection exhausted; preparation unaccepted"
+                                    ) from exc
+                        labels = info["Config"]["Labels"]
+                        if (
+                            labels.get(LABEL + "profile") != profile
+                            or labels.get(LABEL + "provenance") != provenance
+                            or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
+                        ):
+                            raise CleanupError("runtime profile image identity mismatch")
+                        if image not in images:
+                            images.append(image)
+                            _durable(state / "images.json", images)
+                        if info["Size"] > MAX_IMAGE_SIZE:
+                            if image != protected:
+                                command(["docker", "image", "rm", image], timeout=30)
+                                images.remove(image)
+                                _durable(state / "images.json", images)
+                            raise InfrastructureError("runtime image exceeded 2 GiB")
+            # A new attempt cannot start before the preceding context has cleaned up.
+            if not build_failed:
+                break
         metadata = {
             "image": image,
             "recipe": recipe,
             "worker": hashlib.sha256(source).hexdigest(),
             "policy": POLICY,
+            "profile": profile,
+            "provenance": provenance,
+            "source_slot": python_source.SLOT_ID,
         }
         _durable(state / "runtime.json", metadata)
         return metadata
@@ -506,16 +691,36 @@ def build_runtime(root, requirements=None):
         os.close(lock)
 
 
-def identity(root):
+def identity(root, *, runtime_profile=None):
+    selection = runtime_profiles.normalize(runtime_profiles.config(root), runtime_profile)
+    runtime_profiles.validate_backend(selection, command)
+    profile = selection["profile"]
+    provenance = runtime_profiles.provenance(profile)
     try:
         endpoint = _local_endpoint()
         metadata = json.loads(_read(Path(root) / ".pytest-telescope/runtime.json", 16384))
         if (
             metadata["worker"] != hashlib.sha256(worker_source()).hexdigest()
             or metadata["policy"] != POLICY
+            or metadata["profile"] != profile
+            or metadata["provenance"] != provenance
+            or metadata["source_slot"] != python_source.SLOT_ID
         ):
             raise InfrastructureError("runtime is stale; run the runtime command again")
         inspected = _image_info(metadata["image"], _project(root), metadata["recipe"])
+        labels = inspected["Config"]["Labels"]
+        if (
+            labels.get(LABEL + "profile") != profile
+            or labels.get(LABEL + "provenance") != provenance
+            or labels.get(LABEL + "source-slot") != python_source.SLOT_ID
+        ):
+            raise InfrastructureError("prepared runtime profile does not match requested identity")
+        if (
+            profile == runtime_profiles.GIT
+            and (inspected["Os"] + "/" + inspected["Architecture"])
+            != runtime_profiles.MANIFEST["platform"]
+        ):
+            raise InfrastructureError("prepared Git image platform is invalid")
         if inspected["Size"] > MAX_IMAGE_SIZE:
             raise InfrastructureError("runtime image exceeds 2 GiB")
         server = json.loads(command(["docker", "info", "--format", "{{json .}}"], timeout=10))
@@ -547,6 +752,8 @@ def identity(root):
             "runtimes": server["Runtimes"],
         }
         execution = {
+            "profile": profile,
+            "provenance": provenance,
             "rootfs": rootfs,
             "config": config,
             "platform": {
@@ -571,6 +778,30 @@ def identity(root):
         raise InfrastructureError(
             "missing or invalid runtime; run the runtime command first"
         ) from exc
+
+
+def _inspect(root, selection):
+    """One bounded identity operation; callers must not wrap it in further retries."""
+    for attempt in range(2):
+        try:
+            return identity(root, runtime_profile=selection["profile"])
+        except CleanupError:
+            raise
+        except InfrastructureError:
+            if attempt:
+                raise
+
+
+def runtime_envelope(selection, inspected):
+    return {**selection, "identity": fingerprint(inspected["execution"])}
+
+
+def inspect_runtime(root, *, runtime_profile=None, required_capabilities=None):
+    """Read-only prepared identity: no preparation, recovery, collection or cache access."""
+    selection = runtime_profiles.normalize(
+        runtime_profiles.config(root), runtime_profile, required_capabilities
+    )
+    return runtime_envelope(selection, _inspect(root, selection))
 
 
 def _owned_capture(
@@ -602,6 +833,7 @@ def execute(
     suite_cwd=".",
     suite="default",
     metadata_directory=None,
+    python_settings=None,
     limits=None,
     cancellation=None,
     selection_disabled=False,
@@ -629,6 +861,15 @@ def execute(
         raise InfrastructureError("worker invocation is not owned by this controller")
     if any(key.startswith("TELESCOPE_") for key in environment):
         raise DeclarationError("environment must not override worker protocol")
+    settings = (
+        {"profile": "default", "source_roots": []} if python_settings is None else python_settings
+    )
+    metadata_present = False
+    if metadata_directory is not None:
+        metadata_directory = Path(metadata_directory).resolve()
+        if metadata_directory.parent != directory or metadata_directory.name != "metadata":
+            raise InfrastructureError("metadata requires an owned worker directory")
+        metadata_present = next(metadata_directory.iterdir(), None) is not None
     control = directory / "control"
     control.mkdir(exist_ok=True)
     for filename, text in {
@@ -662,6 +903,14 @@ def execute(
                 "suite_root": suite_root,
                 "suite": suite,
                 "metadata": metadata_directory is not None,
+                "python_paths": python_source.projection(settings, False)
+                .decode("utf-8")
+                .splitlines(),
+                "source_projection": hashlib.sha256(
+                    python_source.projection(settings, metadata_present)
+                ).hexdigest()
+                if settings["profile"] == python_source.ISOLATED
+                else None,
                 "selection_disabled": selection_disabled,
                 "allow_unknown_selectors": allow_unknown_selectors,
             }
@@ -715,6 +964,16 @@ def execute(
         if metadata_directory.parent != directory or metadata_directory.name != "metadata":
             raise InfrastructureError("metadata requires an owned worker directory")
         cmd += ["--mount", f"type=bind,src={metadata_directory},dst=/metadata,readonly"]
+    projection = python_source.materialize(control, settings, metadata_present)
+    if projection is not None:
+        if projection.parent != control or projection.name != "source-view.pth":
+            raise InfrastructureError("source projection requires its exact owned control file")
+        if _read(projection, python_source.MAX_BYTES) != python_source.projection(
+            settings, metadata_present
+        ):
+            raise InfrastructureError("source projection bytes do not match the declared view")
+        os.utime(projection, ns=(0, 0), follow_symlinks=False)
+        cmd += ["--mount", f"type=bind,src={projection},dst={python_source.SLOT},readonly"]
     for filename in ("hosts", "hostname", "resolv.conf"):
         cmd += ["--mount", f"type=bind,src={control / filename},dst=/etc/{filename},readonly"]
     for key, value in sorted(environment.items()):

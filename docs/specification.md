@@ -192,3 +192,80 @@ has one worker's limits. Group records are atomic: failures, partial runs or cor
 records cause the whole selected group to rerun. See [batching](batching.md) for ordering,
 4,096-member limits and lifecycle rules, and [result schema 2](result-schema.md) for
 member/group outcomes, partial pytest stops and honest shared-worker timing.
+
+## Local Git profile (0.1.0a4)
+
+The separately qualified [local Git profile](git-runtime.md) selects immutable tooling
+for an invocation while preserving each case or group's declared project inputs:
+
+```toml
+[tool.pytest_telescope.runtime]
+profile = "git-local-v1"
+requires = ["git-local"]
+```
+
+```sh
+python -m pytest_telescope runtime
+python -m pytest_telescope plan --require-capability git-local
+python -m pytest_telescope run --require-capability git-local
+```
+
+`python-v1` remains the default. `--runtime-profile` selects an invocation-only override
+for preparation, planning or execution. Requirements declared in configuration remain
+in force when a caller supplies an override; requesting Git with the default Python
+profile refuses before collection or cache reuse. See the
+[runtime interfaces](result-schema.md#runtime-profiles) for Python arguments
+and the distinct runtime identity in results.
+
+Create repositories and linked worktrees in private writable scratch, copying only
+declared input content when needed. Project source stays read-only, and host `.git`
+metadata remains excluded. The profile supports local-file origins and ordinary
+explicit-message commits, not remote-network helpers or executable hooks. Set author,
+committer dates and identity explicitly when tests rely on stable commit IDs. Selecting
+Git does not change resource limits, noexec scratch, case/batch fixture lifetime, or the
+meaning of `cache=False`.
+
+## Declared source in isolated Python children
+
+The opt-in [isolated-source profile](isolated-source.md) lets the pinned Python
+interpreter discover declared source and selected static metadata when a test launches
+`python -I`. It does not install the application. Add an ordered lookup root:
+
+```toml
+[tool.pytest_telescope.python]
+profile = "isolated-source-v1"
+source_roots = ["src"]
+```
+
+For `src/example_core.py` containing `value = 7`, a narrow test can use:
+
+```python
+import subprocess
+import sys
+import pytest
+
+
+@pytest.mark.telescope(inputs=["src/example_core.py"])
+def test_isolated_child():
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", "import example_core; assert example_core.value == 7"],
+        capture_output=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0
+```
+
+The root controls import lookup; the marker grants the file. Undeclared neighboring
+modules remain absent. Selected `distributions` metadata is discoverable by children,
+but an entry point can load only source in that same view. Empty source roots support
+metadata-only children. Namespace package portions and same-named modules follow the
+declared root order, so suite-specific complete replacements can keep independent roots.
+
+Without the table the profile is `default`, which accepts no roots and preserves existing
+behavior. `--python-profile` and repeated `--source-root`, or the corresponding Python
+API fields, override an invocation without editing configuration. See the
+[lookup interfaces and result identity](result-schema.md#isolated-child-source-lookup).
+System/runtime modules keep earlier lookup precedence. `-S` disables site initialization
+and has no source-discovery guarantee. Visible source-root startup hooks and installed
+metadata directories refuse before any worker; arbitrary source-root `.pth` files stay
+inert. Read-only source, noexec scratch, limits and case/batch scope boundaries are unchanged.

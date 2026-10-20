@@ -32,7 +32,7 @@ network.
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a3
+python -m pip install pytest-telescope==0.1.0a4
 ```
 
 Follow the [complete runnable quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
@@ -68,7 +68,8 @@ project defaults or bundles. Application files and host virtual environments are
 installed into the prepared runtime.
 
 Filesystem isolation does not establish universal determinism. Make clock, randomness,
-and native/external-state assumptions reproducible or mark affected cases `cache=False`.
+and native/external-state assumptions reproducible. `cache=False` executes fresh without
+recording reusable results; it does not widen permissions, capabilities or determinism guarantees.
 Use `run --force` to execute again or `run --no-cache` to bypass reuse and recording.
 
 The dedicated CLI starts no host pytest session. `pytest --telescope` also routes to
@@ -76,7 +77,7 @@ workers, but other plugins may execute during host pytest startup. `pytest
 --telescope-plan` is a static planning adapter. Ordinary pytest stays ordinary when
 telescope mode is disabled; `-p no:telescope` disables plugin loading entirely.
 
-**Version note:** 0.1.0a3 adds [scoped project metadata, independent suites and explicit parallel budgets](https://pytest-telescope.readthedocs.io/en/latest/scoped-execution/).
+**Version note:** 0.1.0a4 adds an explicit [pinned local Git runtime](https://pytest-telescope.readthedocs.io/en/latest/git-runtime/) while retaining the default Python profile. Version 0.1.0a3 introduced [scoped project metadata, independent suites and explicit parallel budgets](https://pytest-telescope.readthedocs.io/en/latest/scoped-execution/).
 The marker interface introduced in 0.1.0a2 remains supported. Immutable 0.1.0a1 used file/group
 targets; central `targets` declarations must migrate to markers, defaults, and bundles.
 The [benchmark](https://github.com/xu-hao/pytest-telescope/blob/main/docs/benchmark.md)

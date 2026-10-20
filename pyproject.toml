@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-telescope"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Declared inputs. Isolated tests. Focused reruns."
 readme = "README.md"
 license = "MIT"

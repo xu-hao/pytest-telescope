@@ -14,6 +14,21 @@ import pytest
 MAX_INVENTORY = 67_108_864
 
 
+def reap_completed_children():
+    # PID1 adopts orphaned children. Reap only those already exited after all teardown.
+    # Both bounds prevent a concurrently forking live child from extending this phase.
+    reap_deadline = time.monotonic() + 0.05
+    for _ in range(4096):
+        if time.monotonic() >= reap_deadline:
+            break
+        try:
+            child, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+        if child == 0:
+            break
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -46,13 +61,28 @@ def main():
     if len(encoded) > MAX_INVENTORY:
         raise ValueError("request limit exceeded")
     request = json.loads(encoded)
+    if request["source_projection"] is not None:
+        with open(
+            "/usr/local/lib/python3.12/site-packages/zz_telescope_source_view.pth", "rb"
+        ) as source_projection:
+            projected = source_projection.read(256 * 1024 + 1)
+        if (
+            len(projected) > 256 * 1024
+            or hashlib.sha256(projected).hexdigest() != request["source_projection"]
+        ):
+            raise ValueError("source projection does not match the declared view")
     if request.get("metadata"):
         from importlib import metadata
 
         def normalize(name):
             return re.sub(r"[-_.]+", "-", name).lower()
 
-        installed = {normalize(dist.metadata["Name"]) for dist in metadata.distributions()}
+        runtime_paths = [
+            path for path in sys.path if path != "/metadata" and path not in request["python_paths"]
+        ]
+        installed = {
+            normalize(dist.metadata["Name"]) for dist in metadata.distributions(path=runtime_paths)
+        }
         local = {
             normalize(dist.metadata["Name"]) for dist in metadata.distributions(path=["/metadata"])
         }
@@ -63,7 +93,8 @@ def main():
                 flush=True,
             )
             return 4
-        sys.path.insert(0, "/metadata")
+        if "/metadata" not in sys.path:
+            sys.path.insert(0, "/metadata")
     suite_root = request["suite_root"]
 
     def case_identity(nodeid):
@@ -389,6 +420,7 @@ def main():
             pytest.mark.telescope = original_marker
     if declaration_error:
         exit_code = 4
+    reap_completed_children()
     leaked = [name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()]
     usage = resource.getrusage(resource.RUSAGE_SELF)
     children = resource.getrusage(resource.RUSAGE_CHILDREN)

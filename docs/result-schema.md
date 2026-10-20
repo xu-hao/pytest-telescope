@@ -1,6 +1,6 @@
 # Run results and explicit refusals
 
-This reference describes the 0.1.0a3 schema. Start with the practical
+This reference describes the 0.1.0a4 schema. Start with the practical
 [quickstart](index.md). The [scoped execution contract](scoped-execution.md)
 defines metadata, suite and resource boundaries.
 
@@ -47,6 +47,67 @@ The Python API raises `DeclarationError` for invalid declarations and
 run are accounted in its result where possible. `controller.error_result(error)` converts a
 typed declaration, capability or infrastructure exception into the refusal envelope below.
 Consumers should dispatch on the explicit status and capability, without parsing messages.
+
+### Runtime profiles
+
+The [pinned local Git contract](git-runtime.md) adds `runtime_profile=None` and
+`required_capabilities=None` keyword arguments to `controller.run` and `plan.make_plan`.
+`runtime.build_runtime(root, requirements=None, *, runtime_profile=None)` prepares the
+configured profile or explicit override. CLI `runtime`, `plan` and `run` accept
+`--runtime-profile`; `plan` and `run` also accept repeated `--require-capability`.
+`runtime.inspect_runtime(root, *, runtime_profile=None, required_capabilities=None)`
+returns exactly the same three-field runtime envelope as a successful run. It validates
+prepared identity without preparation, recovery, collection, cache access or state writes,
+and owns at most two retryable inspection attempts. It supplies identity only, not
+execution or cache authority.
+
+These interfaces are separate from `execution_mode` and do not change configuration files.
+
+The default runtime profile is `python-v1`. `git-local-v1` adds pinned local Git for
+the qualified Linux/amd64 Docker server platform. Configured `runtime.requires` and
+caller requirements form a sorted unique union; each supplied list is bounded to 16
+strings. A caller cannot remove a configured requirement. Unknown profile versions
+refuse with `runtime:profile`; unknown or unmet requirements use `runtime:capability`.
+Those compatibility checks precede backend and cache access. Git platform qualification
+checks the actual Docker server and refuses unsupported platforms with `runtime:platform`.
+Static planning does not contact Docker and cannot establish platform or prepared-image validity.
+
+Plan and run results add a separate `runtime` object with exactly `profile`,
+`required_capabilities`, and `identity`. Identity is `null` before backend validation
+(always in a static plan); afterward it is an opaque lowercase SHA-256 digest of the
+validated runtime identity. `execution.profile` still means `case-v1` or `batch-v1`.
+A refusal does not claim a validated runtime identity. A missing, stale, corrupted or
+different prepared profile is an infrastructure failure; `run` never prepares it
+implicitly or accepts a wider installed image as a substitute.
+
+### Isolated child source lookup
+
+The [isolated-source contract](isolated-source.md) adds `python_profile=None` and
+`source_roots=None` to `controller.run` and `plan.make_plan`. CLI `plan` and `run` accept
+`--python-profile` and repeated `--source-root`. These are lookup settings, separate from
+the immutable runtime profile and case/batch execution mode. They grant no source files.
+
+Project settings live in `[tool.pytest_telescope.python]`. A suite's `python` table
+completely replaces them and must contain both `profile` and `source_roots`. Caller
+fields replace the corresponding effective field after inheritance across selected
+suites. Omitted caller fields preserve inherited settings; API `source_roots=[]`
+explicitly clears roots. Supplying roots alone does not enable the isolated profile.
+Roots preserve order, are unique, and have a 64-directory bound. Invalid paths or
+incomplete configuration raise `DeclarationError`; unknown profiles use
+`python:profile`, and unsupported visible startup layouts use `python:source-layout`.
+
+The result's separate `python` object contains exactly one `suites` list in selected
+suite order. Every row has `suite`, `profile`, ordered `source_roots`, and `identity`.
+Identity is null in static plans and before validated projection preparation; afterward
+it is an opaque SHA-256 digest of the versioned mechanism and that suite's effective
+settings. It does not assert equal source or metadata between individual views: actual
+projection bytes and each selected scope also bind case/group keys. The three-field
+`runtime` object and `execution.profile` retain their existing meanings.
+
+Static plan suite entries also expose `python={profile, source_roots}` as part of their
+configuration identity, including for default suites. An enabled lookup profile does
+not claim that every configured root exists inside every narrow worker view. Python
+ignores roots absent from that view; they do not acquire files from another case.
 
 ## Complete and incomplete run inventories
 

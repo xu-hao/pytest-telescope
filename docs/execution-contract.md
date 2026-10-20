@@ -2,6 +2,9 @@
 
 ## Status
 
+The proposed [ordinary/Bubblewrap routing contract](bubblewrap.md) records accepted
+next-backend rules; it is not yet implemented or qualified.
+
 Version 0.1.0a3 implements this per-case marker contract with Linux Docker
 enforcement and lifecycle recovery, plus the [scoped execution extension](scoped-execution.md)
 and versioned [result schema](result-schema.md). Version 0.1.0a2 introduced per-case markers;
@@ -160,6 +163,37 @@ prune it. The Docker administrator must configure its storage quotas and garbage
 collection; the image retention bound is not a bound on the daemon's shared build-cache
 storage.
 
+### Explicit rebuilds after runtime upgrades
+
+After upgrading pytest-telescope, run `python -m pytest_telescope runtime` explicitly
+when the prepared runtime no longer matches the current recipe or policy. `run` and
+runtime inspection do not rebuild it implicitly. A historical image never becomes
+eligible for current execution merely because its ownership can be verified.
+
+Preparation can reclaim exact project-owned image IDs from its bounded retention
+registry under these known label formats:
+
+| Policy | Cleanup ownership evidence |
+| --- | --- |
+| `docker-nonroot-ro-none-v2` (published 0.1.0a1/0.1.0a2) | Exact project owner and a 64-character hexadecimal recipe digest. |
+| `docker-nonroot-ro-none-v3` (published 0.1.0a3) | The same historical owner/recipe fields; newer profile or source-slot labels are not required. |
+| `docker-nonroot-ro-none-v4` | Owner/recipe plus known `python-v1` or `git-local-v1` profile, a 64-character provenance digest and the exact current source-slot identity. |
+
+Every inspected record must identify the requested immutable image ID, contain the
+expected object and label shapes, and report a nonnegative integer size. This validation
+authorizes bounded retention cleanup only. Current execution retains its stricter
+current-policy validation. The currently selected image remains protected during
+replacement preparation; an older registered image can be reclaimed without deleting
+that selected image or scanning arbitrary daemon images.
+
+A transient read-only inspection dependency failure permits one retry, at most two
+attempts. Malformed inspection data, unknown policy, foreign ownership, or invalid
+provenance is terminal. A failed removal is an unconfirmed cleanup incident and is
+never blindly replayed. Registry/state changes for removal occur only after removal is
+confirmed; partial preparation never replaces accepted runtime state. Preserve the
+incident evidence and resolve the exact ownership, metadata or Docker failure before
+retrying explicit preparation. No broader cleanup fallback or daemon-wide prune is used.
+
 The initial worker policy gives each case or batch one CPU, 512 MiB memory with no added swap
 allowance, 128 processes, 256 open descriptors, 64 MiB of private `/tmp`. The combined merged worker-output stream is limited to
 1 MiB for case execution and 64 MiB for batch execution or collection, including
@@ -268,3 +302,9 @@ infrastructure failure rather than permission to start without cleanup. Cleanup 
 only resources owned by that invocation. The pytest adapter may load other host plugins
 before routing to the controller; use `python -m pytest_telescope` to avoid host
 pytest/plugin startup entirely.
+
+Completed adopted worker children are reaped after all pytest teardown with nonblocking
+`waitpid`, bounded to 4096 calls and 50 ms. Child CPU accounting is read after reaping.
+Every process still present afterward, including any live descendant or unconsumed
+zombie after the bound, makes the invocation ineligible. The engine never waits for
+ongoing child work or kills a child to turn an incomplete run into reusable success.

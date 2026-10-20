@@ -19,7 +19,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import runtime
+from . import runtime, runtime_profiles
 from .model import (
     DeclarationError,
     InfrastructureError,
@@ -231,7 +231,9 @@ class PendingRecords:
 
 def runner_identity():
     digest = hashlib.sha256()
-    for name in sorted(path.name for path in Path(__file__).parent.glob("*.py")):
+    for name in sorted(
+        path.name for path in Path(__file__).parent.iterdir() if path.suffix in {".py", ".json"}
+    ):
         digest.update(name.encode())
         digest.update(Path(__file__).with_name(name).read_bytes())
     return {"version": version("pytest-telescope"), "implementation": digest.hexdigest()}
@@ -423,10 +425,15 @@ def run(
     suites=None,
     execution_mode=None,
     structural_files=None,
+    runtime_profile=None,
+    required_capabilities=None,
+    python_profile=None,
+    source_roots=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+    from . import python_source
     from .batching import group_jobs, project_result
     from .execution import effective_arguments as suite_arguments
     from .execution import envelope
@@ -442,7 +449,16 @@ def run(
     state = (
         Path(cache_dir).resolve() if cache_dir else Path(root).resolve() / ".pytest-telescope/cache"
     )
-    manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
+    manifest = load(
+        root,
+        cache_dir=state,
+        suite_names=suites,
+        structural_files=structural_files,
+        python_profile=python_profile,
+        source_roots=source_roots,
+    )
+    selection = runtime_profiles.normalize(manifest.runtime, runtime_profile, required_capabilities)
+    runtime_profiles.validate_environment(selection, manifest.env)
     resources = envelope(manifest.execution, budget)
     mode = choose_mode(manifest.execution, execution_mode)
     profile = mode + "-v1"
@@ -490,6 +506,7 @@ def run(
     results, groups = [], []
     published = False
     grouping_complete = False
+    python_validated = False
 
     def summary(setup):
         if mode == "batch":
@@ -499,6 +516,8 @@ def run(
         report["schema"] = 2
         report["kind"] = "run"
         report["execution"] = dict(mode=mode, profile=profile)
+        report["runtime"] = dict(selection)
+        report["python"] = python_source.envelope(manifest.suites, validated=python_validated)
         report["groups"] = groups
         report["grouping_complete"] = grouping_complete
         report["worker_cpu_seconds"] = collection["cpu_seconds"] + sum(
@@ -535,16 +554,22 @@ def run(
         report["suites"] = [suite.name for suite, _ in configured]
         return report
 
+    try:
+        identity = runtime._inspect(manifest.root, selection)
+        selection = runtime.runtime_envelope(selection, identity)
+    except InfrastructureError as exc:
+        collection["reason"] = str(exc)
+        return summary(time.monotonic() - started)
     for attempt in range(2):
         try:
             runtime.recover(manifest.root)
-            identity = runtime.identity(manifest.root)
             break
         except InfrastructureError as exc:
             if attempt == 1 or isinstance(exc, runtime.CleanupError):
                 collection["reason"] = str(exc)
                 return summary(time.monotonic() - started)
     common = {
+        "runtime_selection": selection,
         "schema": SCHEMA,
         "runtime": identity["execution"],
         "runner": runner_identity(),
@@ -581,6 +606,11 @@ def run(
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
+                    for suite, unit in configured:
+                        python_source.validate_view(
+                            suite.python, [name for name in unit.inputs if name in record_map]
+                        )
+                    python_validated = True
                     pool_is_broad = pool_unit.inputs == manifest.broad_inputs
                     frozen_scope_hashes = {}
                     metadata_hashes = {}
@@ -620,6 +650,9 @@ def run(
                                 "inputs": [record_map[name] for name in collection_unit.inputs],
                                 "absent": collection_unit.absent,
                                 "metadata": metadata_identity(collection_unit.distributions),
+                                "python_projection": python_source.key(
+                                    suite.python, bool(collection_unit.distributions)
+                                ),
                                 "files": suite.inventory,
                                 "registry": registry,
                             }
@@ -689,6 +722,7 @@ def run(
                                             suite_cwd=suite.cwd,
                                             suite=suite.name,
                                             metadata_directory=metadata,
+                                            python_settings=suite.python,
                                             limits=resources.worker,
                                             selection_disabled=selection_disabled,
                                             allow_unknown_selectors=True,
@@ -799,6 +833,9 @@ def run(
                                         "inputs": frozen_scope_hashes[file_scope],
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
+                                        "python_projection": python_source.key(
+                                            suite.python, bool(unit.distributions)
+                                        ),
                                         "cache": unit.cache,
                                     }
                                 )
@@ -930,6 +967,7 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        python_settings=suite.python,
                                         limits=resources.worker,
                                         cancellation=cancellation,
                                         request=request,
@@ -1086,8 +1124,18 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest="command", required=True)
     preparation = subparsers.add_parser("runtime", help="build the clean Docker runtime")
     preparation.add_argument("--requirements", type=Path)
-    subparsers.add_parser("plan", help="preview literal declarations without collecting tests")
+    planning = subparsers.add_parser(
+        "plan", help="preview literal declarations without collecting tests"
+    )
     execution = subparsers.add_parser("run", help="execute or reuse each selected pytest case")
+    for command_parser in (preparation, planning, execution):
+        command_parser.add_argument("--runtime-profile")
+    for command_parser in (planning, execution):
+        command_parser.add_argument("--python-profile")
+        command_parser.add_argument("--source-root", action="append", dest="source_roots")
+        command_parser.add_argument(
+            "--require-capability", action="append", dest="required_capabilities"
+        )
     execution.add_argument("--force", action="store_true")
     execution.add_argument("--no-cache", action="store_true")
     execution.add_argument("--explain", action="store_true")
@@ -1101,11 +1149,19 @@ def main(argv=None):
     try:
         options = parser.parse_args(argv)
         if options.command == "runtime":
-            result = runtime.build_runtime(Path.cwd(), options.requirements)
+            result = runtime.build_runtime(
+                Path.cwd(), options.requirements, runtime_profile=options.runtime_profile
+            )
         elif options.command == "plan":
             from .plan import make_plan
 
-            result = make_plan(Path.cwd())
+            result = make_plan(
+                Path.cwd(),
+                runtime_profile=options.runtime_profile,
+                required_capabilities=options.required_capabilities,
+                python_profile=options.python_profile,
+                source_roots=options.source_roots,
+            )
         else:
             arguments = (
                 options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
@@ -1124,6 +1180,10 @@ def main(argv=None):
                 budget=budget,
                 suites=options.suites,
                 execution_mode=options.execution_mode,
+                runtime_profile=options.runtime_profile,
+                required_capabilities=options.required_capabilities,
+                python_profile=options.python_profile,
+                source_roots=options.source_roots,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
