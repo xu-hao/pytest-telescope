@@ -6,9 +6,12 @@ they fail with the sandbox:namespaces refusal.
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import sysconfig
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -249,8 +252,68 @@ def test_case_mode_is_default_and_batch_is_opt_in(project):
     assert batch["counts"]["executed"] == 3
 
 
+class Rendezvous:
+    """A host-side barrier on an abstract socket, which scoped tests reach over the shared
+    network namespace. It records when each sandboxed case reached it and releases all of
+    them only once the expected number are connected at the same time."""
+
+    def __init__(self, expected):
+        self.address = "\0telescope-" + uuid.uuid4().hex
+        self.expected = expected
+        self.started = time.monotonic()
+        self.events = []
+        self.connections = {}
+        self.lock = threading.Lock()
+        self.server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.server.bind(self.address)
+        self.server.listen()
+        self.server.settimeout(0.2)
+        self.stopping = threading.Event()
+        self.thread = threading.Thread(target=self.serve, daemon=True)
+        self.thread.start()
+
+    def record(self, event, name, sandbox_started=None):
+        self.events.append(
+            {
+                "event": event,
+                "case": name,
+                "host_seconds": round(time.monotonic() - self.started, 3),
+                "test_body_started_seconds": None
+                if sandbox_started is None
+                else round(sandbox_started - self.started, 3),
+            }
+        )
+
+    def serve(self):
+        while not self.stopping.is_set():
+            try:
+                connection, _ = self.server.accept()
+            except TimeoutError:
+                continue
+            connection.settimeout(10)
+            name, sandbox_started = connection.makefile("rb").readline().decode().split()
+            with self.lock:
+                # CLOCK_MONOTONIC is shared with the sandbox: no time namespace is created.
+                self.record("connected", name, float(sandbox_started))
+                self.connections[name] = connection
+                if len(self.connections) == self.expected:
+                    for peer in self.connections.values():
+                        try:
+                            peer.sendall(b"go\n")
+                        except OSError:
+                            self.record("peer-already-gone", "?")
+                    self.record("released", "all")
+
+    def close(self):
+        self.stopping.set()
+        self.thread.join(5)
+        self.server.close()
+        for connection in self.connections.values():
+            connection.close()
+
+
 def test_independent_cases_overlap_up_to_the_worker_count(project):
-    token = uuid.uuid4().hex
+    rendezvous = Rendezvous(expected=2)
     put(
         project,
         "tests/test_overlap.py",
@@ -261,31 +324,42 @@ def test_independent_cases_overlap_up_to_the_worker_count(project):
         "@pytest.mark.telescope(inputs=[])\n"
         "@pytest.mark.parametrize('name', ['left', 'right'])\n"
         "def test_overlap(name):\n"
-        "    # Abstract sockets live in the shared network namespace, not the filesystem.\n"
-        "    mine = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-        f"    mine.bind('\\0{token}-' + name)\n"
-        "    mine.listen()\n"
-        "    other = 'right' if name == 'left' else 'left'\n"
-        "    deadline = time.monotonic() + 20\n"
-        "    while True:\n"
-        "        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
-        "        try:\n"
-        f"            probe.connect('\\0{token}-' + other)\n"
-        "            break\n"
-        "        except OSError:\n"
-        "            probe.close()\n"
-        "            if time.monotonic() > deadline:\n"
-        "                pytest.fail('the other sandbox never ran concurrently')\n"
-        "            time.sleep(0.05)\n"
-        "    # Stay alive until the other case has connected here too.\n"
-        "    mine.settimeout(max(0.1, deadline - time.monotonic()))\n"
-        "    peer, _ = mine.accept()\n"
-        "    peer.close()\n"
-        "    probe.close()\n",
+        "    started = time.monotonic()\n"
+        "    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
+        "    client.settimeout(45)\n"
+        f"    client.connect({rendezvous.address!r})\n"
+        "    client.sendall(f'{name} {started}\\n'.encode())\n"
+        "    # Released only while both sandboxes are connected at the same time.\n"
+        "    assert client.makefile('rb').readline() == b'go\\n'\n",
     )
-    report = passed(project, workers=2, no_cache=True, timeout=60)
-    assert report["execution"]["workers"] == 2
-    assert report["counts"]["executed"] == 2
+    try:
+        report = controller.run(project, explain=True, workers=2, no_cache=True, timeout=120)
+    finally:
+        rendezvous.close()
+    diagnostic = json.dumps(
+        {
+            "timeline": rendezvous.events,
+            "status": report["status"],
+            "units": [
+                {
+                    key: row[key]
+                    for key in ("route", "outcome", "result_status", "worker_seconds", "failures")
+                }
+                for row in report["units"]
+            ],
+            "groups": [
+                {key: group[key] for key in ("route", "outcome", "attempts", "attempt_seconds")}
+                for group in report["groups"]
+            ],
+        },
+        indent=1,
+    )
+    assert report["status"] == "passed", diagnostic
+    assert report["execution"]["workers"] == 2, diagnostic
+    assert report["route_counts"]["scoped"]["executed"] == 2, diagnostic
+    connected = [event["case"] for event in rendezvous.events if event["event"] == "connected"]
+    assert sorted(connected) == ["left", "right"], diagnostic
+    assert [event["event"] for event in rendezvous.events][-1] == "released", diagnostic
 
 
 def test_cache_identity_covers_the_installed_distributions(project, tmp_path):
