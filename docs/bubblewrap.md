@@ -65,7 +65,7 @@ invocation. Inside, the filesystem looks like this:
 | `/proc` | A new process filesystem for the sandbox's PID namespace | kernel-controlled |
 | `/dev` | Minimal device nodes | read-only, except `/dev/shm` |
 | `/tmp`, `/dev/shm` | Private, empty, discarded scratch | writable |
-| Everything else, including `/` and `/home` | Absent | read-only |
+| Everything else, such as `/home` outside the environment and `/run` | Absent | read-only |
 
 **Declared files are visible; undeclared project files are absent.** An undeclared file
 does not exist at `/project/...` and its host path does not exist either, so `open`,
@@ -77,8 +77,9 @@ and installed distributions as the invoking pytest-telescope process, including 
 active virtual environment. There is no separate runtime to build, no wheel download and
 no sealed interpreter copy. Installed packages, `sys.executable` subprocesses and native
 extensions work as on the host, but nothing in the environment can be modified. The
-project itself is never imported from the environment: an editable install whose source
-lives inside the project is not visible; declare the source and use pytest `pythonpath`.
+project itself is never imported from the environment: an import directory that contains
+or lies inside the project, such as an editable install of the project, is not bound;
+declare the source and use pytest `pythonpath`.
 
 **Writes outside private scratch fail.** `/project`, the environment, system directories
 and the sandbox root are read-only, so writes fail with a read-only file system error.
@@ -116,8 +117,8 @@ with the worker. No other namespace is created.
 ## Collection, cache identity and reuse
 
 Scoped discovery for files whose module-level declaration scopes every case runs in one
-sandboxed pytest collection per suite. Its view is the union of the suite's scoped
-declarations, defaults, configuration and those test files. That union is a collection
+sandboxed pytest collection per suite. Its view is the union of those files'
+declarations, project defaults, configuration and the files themselves. That union is a collection
 view only: no case body ever runs with it. Scoped cases in mixed files are identified by
 the ordinary session's collection. Every scoped execution collects its containing file
 again inside its own narrow view and refuses when that file's case inventory or the
@@ -170,7 +171,7 @@ that refuses or stops after ordinary sessions started does not prove that no tes
 | --- | --- |
 | `bwrap` is not installed | `unsupported`, `sandbox:bubblewrap` |
 | Bubblewrap cannot create the user, mount or PID namespace | `unsupported`, `sandbox:namespaces` |
-| The interpreter cannot start in the view, or its environment contains the project or a system directory | `unsupported`, `sandbox:environment` |
+| The interpreter cannot start in the view, an environment prefix contains the project, the project lives in `/usr` or `/etc`, or an environment directory overlaps a sandbox mount point | `unsupported`, `sandbox:environment` |
 | A suite requests `network:none` or `scratch:noexec` | `unsupported`, that capability |
 | Invalid, unsupported or mutated declaration | `declaration_error` |
 
