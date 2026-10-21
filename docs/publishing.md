@@ -27,9 +27,10 @@ label the version published merely because the trigger was accepted.
 ## PyPI
 
 Version `0.1.0a3` extends the per-case interface introduced in `0.1.0a2`; the original
-`0.1.0a1` release used file/group declarations. Every release must provide its complete
-execution and result-reuse contract, including real backend qualification and measured
-benchmark results. No package release
+`0.1.0a1` release used file/group declarations. The next release replaces the Docker
+backend with ordinary pytest plus Bubblewrap filesystem views. Every release must provide
+its complete execution and result-reuse contract, including real sandbox qualification
+and measured benchmark results. No package release
 is implied by a source merge. The `publish.yml` workflow runs only when a GitHub Release
 is published. It requires a tag of `v` followed by the exact package version, and it
 refuses publication until a license is recorded in package metadata and a `LICENSE` file

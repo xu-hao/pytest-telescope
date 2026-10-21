@@ -1,13 +1,13 @@
-# Scoped metadata, independent suites, and parallel workers
+# Metadata, independent suites, and parallel workers
 
-This document specifies the 0.1.0a3 extension to the
-[execution contract](execution-contract.md). Implementation and qualification must
-satisfy these boundaries before publication. Existing releases are immutable.
+This document extends the [declaration contract](execution-contract.md) and the
+[ordinary and Bubblewrap execution contract](bubblewrap.md) with local distribution
+metadata, independent suites and parallel scoped workers. Existing releases are immutable.
 
 ## Static project metadata
 
-Local distribution metadata is a frozen PROJECT input, distinct from the pinned
-third-party runtime. A project opts into the versioned static translator:
+Local distribution metadata is a frozen PROJECT input, distinct from the packages
+installed in the invoking environment. A project opts into the versioned static translator:
 
 ```toml
 [tool.pytest_telescope.distributions.core]
@@ -34,10 +34,10 @@ def test_entry_point():
 ```
 
 `distributions` is additive in markers, defaults, and bundles. Like `inputs` and
-`bundles`, a literal marker field establishes narrow scope, including an empty list.
-Broad cases receive all configured distribution metadata. A narrow case receives only
-its effective distribution names, their metadata source and declared build inputs.
-Declaring metadata never implicitly grants the package's application source.
+`bundles`, a literal marker field makes a case scoped, including an empty list. A scoped
+case receives only its effective distribution names, their metadata source and declared
+build inputs. Declaring metadata never implicitly grants the package's application
+source. Ordinary cases receive no generated metadata.
 
 Version 1 supports static `[project]` name, version, description, requires-python,
 dependencies, optional-dependencies, scripts, gui-scripts and entry-points. All fields
@@ -61,23 +61,19 @@ Wheel-specific files and arbitrary backend-generated resources are outside this 
 
 Freeze source bytes before deriving generated files. The generated representation has a
 versioned identity, files with mode `0444`, directories with mode `0755`, and epoch
-access/modification times. The worker mount is read-only. This representation participates
-in the exact case key and is mounted at `/metadata` only for that worker. The worker adds this
-metadata-only directory to Python's search path before pytest startup. All application
-imports still resolve through the declared `/project` snapshot and explicit pytest
-configuration. No application source enters the shared image or metadata tree.
-
-The explicit [isolated Python source profile](isolated-source.md) can make selected
-metadata and declared source roots discoverable by `python -I` children as well. It
-uses a per-view read-only path projection; it is not an application installation and
-never grants files merely by naming a source root. The default profile remains unchanged.
+access/modification times. The sandbox mount is read-only. This representation
+participates in the exact case key and is mounted at `/metadata` only for that sandbox.
+The worker adds this metadata-only directory to Python's search path before pytest
+startup. All application imports still resolve through the declared `/project` snapshot
+and explicit pytest configuration. Child interpreters do not see `/metadata` unless the
+test adds it to their path.
 
 The effective metadata set is complete: omitted distributions are absent, including
-negative lookups. Duplicate normalized names or conflicts with installed runtime
-packages refuse rather than shadowing runtime metadata. Changing a selected metadata
-source, build input, entry point, generated representation, or relevant application
-source invalidates its consumers. Unrelated narrow resources do not. Missing/deleted
-required sources fail validation. Broad cases retain broad invalidation.
+negative lookups. Duplicate normalized names or conflicts with packages installed in the
+invoking environment refuse rather than shadowing installed metadata. Changing a selected
+metadata source, build input, entry point, generated representation, or relevant
+application source invalidates its consumers. Unrelated narrow resources do not.
+Missing/deleted required sources fail validation.
 
 ## Independent suites and structural membership
 
@@ -98,15 +94,15 @@ test_roots = ["tests/addon"]
 plugins = []
 ```
 
-Suite names identify separate pytest invocations. Each has its own collection worker,
-working directory, actual pytest root directory, explicit configuration, options and
-plugin activation. `root` sets pytest's root directory. Optional `cwd` sets the worker's
-working directory independently and defaults to `root`; both are existing directories
+Suite names identify separate pytest invocations. Each has its own ordinary session,
+sandboxed collection, working directory, actual pytest root directory, explicit
+configuration, options and plugin activation. `root` sets pytest's root directory.
+Optional `cwd` sets the sessions' working directory independently and defaults to `root`; both are existing directories
 relative to the outer project. For example, `root = "packages/core"` with `cwd = "."`
 preserves an invocation from the workspace directory with a nested pytest root.
 Configuration supports pytest.ini, .pytest.ini, pyproject.toml,
 tox.ini and setup.cfg; unsupported configuration syntax refuses. Suite configuration
-and applicable conftest files remain inputs. Narrow cases must declare conftest files
+and applicable conftest files remain inputs. Scoped cases must declare conftest files
 and common collection support; their test source and both project and suite configuration
 are automatic. With no suites, existing root-suite behavior remains the default.
 Explicit suites cannot be combined with top-level `test_roots`.
@@ -133,15 +129,16 @@ Fixtures observing `request.node.nodeid` retain ordinary suite-local pytest sema
 Collection and execution use identical normalization;
 marker origin paths and containing-file inventory digests stay project-relative. The
 suite identity, root, working directory, configuration bytes, arguments, plugins, structural membership,
-collection inputs and runtime all key inventory reuse. Case keys cover the same suite
-contract and their own actual scopes. Additions/removals refresh the affected suite's
-inventory; unrelated suite resource changes do not invalidate narrow case results.
+collection inputs and sandbox identity all key scoped inventory reuse. Case keys cover
+the same suite contract and their own actual scopes. Additions/removals refresh the
+affected suite's inventory; unrelated suite resource changes do not invalidate scoped
+case results.
 
 ### Invocation-only structural file narrowing
 
 Python callers can pass `controller.run(root, structural_files={"core":
 ["tests/core/test_small.py"]})` to narrow configured structural membership for this
-invocation before marker AST parsing or isolated collection imports. This is separate
+invocation before marker AST parsing or collection imports. This is separate
 from `arguments=["tests/core/test_small.py"]`: ordinary selectors retain collection of
 the entire configured structural inventory before selecting cases.
 
@@ -153,13 +150,13 @@ than treated as aliases. Each list is limited to 4,096 files. Values are lists o
 Python test files: no absolute paths, `./`, `..`, repeated separators, backslashes,
 symlinks or symlink ancestors. A file must satisfy that suite's configured test roots,
 include/exclude patterns and Python test-file patterns. Foreign or excluded modules,
-unknown or unselected suite keys, and nonfiles refuse before backend startup.
+unknown or unselected suite keys, and nonfiles refuse before any session starts.
 
-This is a narrowing operation only. It never changes cwd, rootdir, source declarations,
-resource limits or runtime capabilities. Input declarations remain beside tests.
+This is a narrowing operation only. It never changes cwd, rootdir, routes, source
+declarations or capabilities. Input declarations remain beside tests.
 `plan.make_plan(root, suites=None, structural_files=None)` supports the same static
-validation and effective file preview without importing tests or contacting Docker.
-It cannot establish the real parametrized inventory or determine runtime capabilities.
+validation and effective file preview without importing tests or starting a sandbox.
+It cannot establish the real parametrized inventory.
 
 Suite identity includes the normalized explicit override (including an empty list),
 conservatively distinct from an omitted override even if effective files happen to match.
@@ -175,87 +172,75 @@ cases nor unselected rows. Callers remain responsible for any broader coverage
 requirement. Newly added files are discovered automatically only in suites without an
 explicit exact-file override, or when the caller adds them to that override.
 
-Pinned third-party dependencies continue to be prepared from exact wheel pins with a
-complete dependency closure and `pip check`. Autoload is disabled. Suite plugins are
-explicit import names. Distributed schedulers (including xdist), scheduler options and
-conflicting plugin declarations are rejected; telescope alone owns parallel workers.
-Local distribution metadata never satisfies third-party runtime installation.
+Scoped sessions use the third-party packages installed in the invoking environment,
+read-only, with plugin autoload disabled; suite plugins are explicit import names that
+must be installed there. Ordinary sessions load plugins as ordinary pytest does.
+Distributed schedulers (including xdist), scheduler options and conflicting plugin
+declarations are rejected; telescope alone owns parallel workers. Local distribution
+metadata never satisfies third-party installation.
 
-## Resource-derived fresh parallelism
+## Parallel scoped workers
 
 ```toml
-[tool.pytest_telescope.execution.worker]
-cpus = 1
-memory_bytes = 536870912
-processes = 128
-scratch_bytes = 67108864
-
-[tool.pytest_telescope.execution.budget]
-cpus = 4
-memory_bytes = 2147483648
-processes = 512
-scratch_bytes = 268435456
+[tool.pytest_telescope.execution]
+workers = 4
 ```
 
-Defaults retain one worker with the existing resource policy. When a worker or budget
-table is supplied, every dimension is explicit. Positive integer dimensions are validated
-before collection or any cache hit. Concurrency is the minimum of each aggregate budget
-divided by its per-worker limit, capped at 32 to reserve bounded lifecycle journal
-capacity. An envelope that cannot fit one worker refuses. Host CPU discovery does not
-set concurrency. Collection runs sequentially within one worker slot, then independent
-case misses use the computed bound. By default each case starts a fresh container and pytest
-session with private scratch. The approved optional [batch profile](batching.md) instead
-shares one fresh session and scratch only among exactly equal scopes in one suite/module. Aggregate limits bound active worker containers; bounded
-host control, frozen pool storage and output retain their separate documented limits.
+`workers` is the number of independent scoped sandboxes that may run at once: a positive
+integer of at most 32, default 1. `run --workers N` and `controller.run(root,
+workers=N)` override it for one invocation. It is a concurrency count, not a resource
+budget: pytest-telescope sets no CPU, memory, process or scratch limits and does not
+infer them from the host. Limit resources in the job that runs pytest; every sandbox is a
+child process of the invocation and stays inside those limits. The 0.1.0a3
+`execution.worker` and `execution.budget` tables are rejected with a message naming this
+replacement.
 
-Per-worker CPU, memory (without extra swap), process and scratch quotas are Docker
-limits and are cache identity. Aggregate scheduling budgets affect scheduling; because project configuration is an
-automatic input, changing a budget conservatively invalidates results too. The aggregate budget does not itself opt into batching; execution mode is explicit.
-The controller schedules at most the worker bound, without an unbounded future queue.
-All summary rows appear in deterministic suite/node order and each current case is
-accounted exactly once. Completion order never changes identity or counts.
+Collection and ordinary sessions run one at a time; independent scoped case misses or
+batches then use up to `workers` sandboxes. By default each scoped case starts a fresh
+sandbox and pytest session with private scratch. The optional [batch profile](batching.md)
+instead shares one fresh sandbox and scratch only among exactly equal scopes in one
+suite/module. The number of workers does not change results and is not part of any cache
+key. The controller schedules at most `workers` sessions, without an unbounded future
+queue. All summary rows appear in deterministic suite/node order and each current case
+is accounted exactly once. Completion order never changes identity or counts.
 
-A single controller owns the existing stable cache lock and all cache mutation. Worker
-threads return fully validated results only after their own container/client/descendant
-cleanup. New records stay pending until every worker, cancellation handler, frozen pool,
-and invocation cleanup completes. Any terminal lifecycle failure prevents publication
-of all new records; previously eligible records remain intact. The scheduler stops
-submitting work on cancellation/terminal cleanup failure, cancels and drains owned active
-work, marks unscheduled selected cases with explicit infrastructure outcomes, and never
-accepts half-cleaned successes. Infrastructure retry remains at most two attempts per
-case; retry attempts occupy the same worker slot. No global Docker pruning is permitted.
+A single controller owns the stable cache lock and all cache mutation. Worker threads
+return fully validated results only after their own sandbox has exited. New records stay
+pending until every worker, cancellation handler and frozen-copy cleanup completes. Any
+terminal cleanup failure prevents publication of all new records; previously eligible
+records remain intact. The scheduler stops submitting work on cancellation or terminal
+cleanup failure, drains active work, marks unscheduled selected cases with explicit
+infrastructure outcomes, and never accepts half-cleaned successes. Infrastructure retry
+remains at most two attempts per scoped case or batch; a retry occupies the same worker
+slot.
 
 ## Explicit capability refusals
 
-The first profile remains pinned Python wheels and their packaged executables, read-only
-project inputs, read-only metadata, private noexec scratch, and no network. Runtime and
-source files never come from host checkout/environment mounts. Native toolchain installs,
-browsers, alternate interpreters, executable scratch, writable source, services, and
-unsupported link/metadata forms require a separately specified and qualified profile.
-This extension does not add those profiles or silently install missing tools.
+The sandbox provides the [filesystem view](bubblewrap.md): read-only declared project
+files and metadata, the read-only host interpreter, environment and system directories,
+private writable scratch, and the host network. It does not install tools, build runtimes,
+limit resources or isolate the network.
 
-A suite may declare `capabilities = ["scratch:exec"]`, for example. This profile
-supports `python`, `project:readonly`, `scratch:noexec`, and `network:none`; other
-capabilities require a separately qualified profile. Explicit capability declarations
-that this profile cannot satisfy return a machine-readable
-`unsupported` result with a stable capability code and exit status 4. They cannot mint a
-success or a reusable cache entry. Refusal does not silently widen the execution profile.
-Choose structural partitions and preflight routing to ordinary pytest before starting a
-run: a refusal or incomplete inventory alone does not prove that no earlier case executed.
-Do not automatically replay an invocation after a runtime refusal.
-Missing files or invalid syntax remain declaration errors;
-backend outages remain infrastructure errors. Runtime code that invokes an undeclared
-missing executable remains a test failure: telescope does not guess capabilities from
-arbitrary test bodies or retry under relaxed restrictions.
+A suite may declare `capabilities = ["python", "project:readonly"]`. Requesting
+`network:none` or `scratch:noexec`, which the 0.1.0a3 Docker backend provided, or any
+other capability, returns a machine-readable `unsupported` result with that capability
+code and exit status 4. A refusal cannot mint a success or a reusable cache entry, and
+never silently widens the execution profile or falls back to ordinary execution. A
+refusal or incomplete inventory alone does not prove that no earlier case executed. Do
+not automatically replay an invocation after a refusal. Missing files or invalid syntax
+remain declaration errors; sandbox outages remain infrastructure errors. Runtime code
+that invokes a missing executable remains a test failure: telescope does not guess
+capabilities from arbitrary test bodies or retry under relaxed restrictions.
 
 ## Result and privacy contract
 
-The [run result reference](result-schema.md) defines schema 2, complete/incomplete
-inventories, selected-case accounting and typed refusals for CLI and Python callers.
-Collection protocol 4 emits opaque case identities, hashed selector aliases and each selected case's actual execution-order position (null for unselected cases). Raw
-collected node IDs remain transient inside the worker; execution requests, inventory
+The [run result reference](result-schema.md) defines schema 3, complete/incomplete
+inventories, routes, selected-case accounting and typed refusals for CLI and Python
+callers. Collection emits opaque case identities, hashed selector aliases and each
+selected case's actual execution-order position (null for unselected cases). Raw
+collected node IDs remain transient inside each session; execution requests, inventory
 records and public results use the opaque identity. Explicit caller-supplied `-k` and
-`-m` expressions still reach the worker unchanged, as the result reference explains.
+`-m` expressions still reach every session unchanged, as the result reference explains.
 Structural file names and configured suite names remain
 visible. Terminal cleanup failures preserve known accounting and prevent new cache
 publication.
@@ -274,37 +259,9 @@ and host-environment paths are not supported inputs.
 
 ## Qualification
 
-The synthetic Docker investigation in `scripts/probe_boundaries.py` checks standard
-version/entry-point lookup and load, source without metadata, metadata without source,
-negative lookup of the other distribution, independent root/cwd/conftest behavior,
-explicit asynchronous fixtures, and a deliberately unimportable structurally excluded
-module. The implementation gate must additionally cover frozen provenance and mutations,
-unsupported metadata, membership changes, selectors, parallel quota/isolation/cancellation,
-retry exhaustion, cleanup, supported Python/pytest, existing regressions, and useful-scale
-cold/warm/selective benchmarks. Measurements must report startup overhead honestly.
-
-### Candidate qualification status
-
-As of 2026-10-20, focused qualification of the 0.1.0a3 candidate includes:
-
-| Controls | Result and boundary |
-| --- | --- |
-| Structural file overrides | 34 passed: static preflight and path bounds, exclusion before parsing/import, selector contrast, exact-list identity, unaffected suites, empty inventories, and unchanged broad input visibility in case and batch modes. |
-| Session and collection verdict regressions | 25 passed: execution-side collection failures and nonzero pytest session verdicts remain failures, preserve observed member outcomes and bounded evidence, and cannot produce reusable success. |
-| Installed-wheel host matrix | 110 focused controls passed on each of Python 3.11 with pytest 8.3.5 and Python 3.13 with pytest 9.1.1, using the same wheel bytes. |
-
-The host matrix includes real Docker controls and uses the profile's pinned worker
-runtime. It does not qualify alternate worker interpreters or every host Python/pytest
-combination. Focused counts overlap; they must not be added to claim distinct coverage.
-
-An earlier complete behavioral run recorded **296 passed, 1 failed**. Its execution-side
-collection-verdict regression has since been fixed and verified by the focused controls
-above. That earlier run remains a failed receipt. The mandatory guarded full gate for
-the integrated candidate is still pending; these focused results do not replace it or
-establish release qualification. See [development](development.md) for the full gate and
-[benchmark methodology](benchmark.md#comparing-case-and-batch-on-the-same-scopes) for the
-separate performance comparison.
-
-The separately proposed [pinned local Git profile](git-runtime.md) defines a narrow
-additional tool capability. It does not change the published alpha3 runtime or qualify
-Bash, executable scratch, browsers or services.
+Behavioral tests cover metadata version and entry-point lookup, source without metadata,
+metadata without source, negative lookup of other distributions, independent root/cwd/
+conftest behavior and structurally excluded modules inside real Bubblewrap sandboxes, plus
+routing, selectors, workers, retries and cleanup. See [development](development.md) for
+the full gate and its current status. Earlier Docker-era qualification results apply to
+0.1.0a3 only.

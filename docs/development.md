@@ -11,26 +11,29 @@ python scripts/check.py --artifacts /tmp/telescope-check
 
 The check command runs Ruff lint and formatting checks, builds the sdist and a wheel
 from it, validates package metadata, builds documentation with warnings as errors,
-installs the built wheel without dependencies, and runs behavioral tests. It requires a
-virtual environment and uses its interpreter. The artifact directory must not already
+installs the built wheel without dependencies, and runs the behavioral tests. It requires
+a virtual environment and uses its interpreter. The artifact directory must not already
 exist; use a new directory for another run. Build dependencies may need network access.
-No package is uploaded by this command.
-Each stage has a five-minute deadline, except the complete real-Docker behavioral suite,
-which has a fifteen-minute deadline. A timeout fails the gate.
+No package is uploaded by this command. Each stage has a five-minute deadline, except the
+behavioral suite, which has fifteen minutes. A timeout fails the gate.
 
-Linux and a usable Docker daemon are required for real enforcement qualification. The
-runtime build uses the pinned public Python base described in the
-[specification](specification.md), not an existing application image. Do not treat
-skipped integration tests or mocked Docker responses as enforcement evidence. Ordinary
-pytest behavior, disabled-plugin behavior, malformed declarations, and static planning
-can be tested without running the backend.
+The behavioral suite needs Linux and a `bwrap` executable that can create user, mount and
+PID namespaces. Tests that launch Bubblewrap are required controls: they are never
+skipped or marked as expected failures. On a host whose security policy denies those
+namespaces, they fail with the `sandbox:namespaces` refusal, and the gate fails. Do not
+weaken the host policy to work around that; run the gate on a host that permits
+Bubblewrap. Ordinary routing, declarations, planning, the interpreter probe and refusal
+classification are tested without launching Bubblewrap and pass on any Linux host.
 
-Behavioral tests should cover collection/import/fixture/teardown isolation, undeclared
-reads from Python/native code/subprocesses, immutable inputs, network restrictions,
-exact-snapshot invalidation, new test inventory, corrupt/concurrent records, deadlines,
-descendants, retry exhaustion, and cleanup. Every test owns and cleans up its projects
-and backend resources. Avoid tests that assert source code or documentation text instead
-of observable behavior.
+Behavioral tests cover what a scoped test can observe: declared files present, undeclared
+project files and host paths absent, the host interpreter and installed packages usable
+but read-only, writes outside private scratch refused, fresh scratch per sandbox, and
+descendants. They also cover ordinary routing staying fresh and unsandboxed, case and
+batch modes, parallel workers, exact cache invalidation (declared inputs, interpreter and
+installed distributions), new test inventory, corrupt/concurrent records, deadlines,
+retry exhaustion and cleanup. Every test owns and cleans up its projects. A test that
+simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
+assert source code or documentation text instead of observable behavior.
 
 For documentation alone:
 
@@ -54,16 +57,14 @@ Check the quickstart, sidebar links, search, source links, and mobile navigation
 real browser after layout changes. Stop the local server when finished. Edit navigation
 in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples first.
 
-The [benchmark](benchmark.md) uses a copied synthetic project and external clocks. It
-must preserve per-phase command results and distinguish host controller CPU from
-container worker CPU. Benchmark output is qualification evidence, not a universal
-speedup guarantee.
+The CI matrix covers supported host Python/pytest versions on Linux runners with
+Bubblewrap installed. Keep build/documentation tools in development dependencies. The
+[benchmark](benchmark.md) defines the plain-versus-Bubblewrap measurement; its output is
+qualification evidence, not a universal speedup guarantee.
 
-The CI matrix covers supported host Python/pytest versions. Backend qualification must
-additionally execute on a supported Docker host. Keep build/documentation tools in
-development dependencies and keep runtime contents explicit. Never use an editable
-application install as evidence of a clean isolated runtime.
+## Qualification status
 
-The [candidate qualification status](scoped-execution.md#candidate-qualification-status)
-records focused evidence and remaining release gates separately. A corrected regression
-does not turn its earlier failed full-run receipt into a passing one.
+The Bubblewrap replacement has not yet passed a complete gate on a host that permits
+Bubblewrap namespaces. Results of the 0.1.0a3 Docker gate do not
+transfer to it. A corrected regression does not turn its earlier failed full-run receipt
+into a passing one.
