@@ -21,11 +21,12 @@ BOOT = (
 )
 
 
-def session(manifest, suite, files, options, selectors, selection_disabled, timeout):
+def session(manifest, suite, files, options, selectors, selection_disabled):
     """Run the suite's ordinary cases with the invoking interpreter and environment.
 
     Every file is collected; scoped cases of mixed files are removed before fixture
-    setup and returned only as inventory rows.
+    setup and returned only as inventory rows. Like normal pytest, the session has no
+    deadline of its own: the job that runs pytest bounds it.
     """
     root = manifest.root
     nonce = uuid.uuid4().hex
@@ -59,7 +60,7 @@ def session(manifest, suite, files, options, selectors, selection_disabled, time
         request_path.write_bytes(encoded)
         code, output = capture(
             [sys.executable, "-c", BOOT, str(WORKER), str(request_path)],
-            timeout,
+            None,
             env=dict(os.environ),
             cwd=root / suite.cwd,
             limit=MAX_COLLECTION,

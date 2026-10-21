@@ -163,8 +163,10 @@ and bounded failure evidence, not arbitrary pytest output.
 - `run --no-cache`: execute without reading or writing successful result records.
 - `run --explain`: explain each case's route and execution or reuse decision.
 - `run --cache-dir PATH`: select the result-record directory.
-- `run --timeout SECONDS`: bound the wall time of each session the controller starts;
-  default 60 seconds, allowed range 0.1 through 3,600 seconds.
+- `run --timeout SECONDS`: bound the wall time of each sandboxed session (scoped
+  collection, case or batch); default 60 seconds, allowed range 0.1 through 3,600
+  seconds. Ordinary suite sessions have no pytest-telescope deadline, like normal
+  pytest; the job that runs pytest bounds them.
 - `run --workers N`: run up to N independent scoped sandboxes at once; default 1.
 - Marker `cache=False`: always execute the case and never record a reusable
   success, regardless of other cases' cache settings.
@@ -192,8 +194,9 @@ A failed test remains a failed execution and never becomes a reusable success. T
 interpreter probe and Bubblewrap preflight get at most two attempts for transient
 failures; a missing `bwrap` or a namespace denial refuses immediately. A scoped collection,
 case or batch gets at most two execution attempts for infrastructure failures; an
-ordinary session gets one. Cache lock acquisition is bounded by twice the configured
-timeout plus 30 seconds. Startup, deadline, output, storage, invalid-result, or cleanup
+ordinary session gets one and has no pytest-telescope deadline. Cache lock acquisition
+is bounded by twice the configured timeout plus 30 seconds; a concurrent invocation that
+waits behind a long ordinary session can therefore end with an infrastructure outcome. Startup, deadline, output, storage, invalid-result, or cleanup
 failure that exhausts recovery ends with a distinct infrastructure outcome. Retrying
 forever and silently removing restrictions are not recovery strategies. Force execution
 can diagnose a suspected record without relying on it; removing damaged records should

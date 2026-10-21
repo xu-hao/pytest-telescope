@@ -628,9 +628,7 @@ def run(
             session_started()
             attempt_started = time.monotonic()
             try:
-                result = ordinary.session(
-                    manifest, suite, files, options, selectors, disabled, timeout
-                )
+                result = ordinary.session(manifest, suite, files, options, selectors, disabled)
             except InfrastructureError as exc:
                 if isinstance(exc, sandbox.CleanupError):
                     raise

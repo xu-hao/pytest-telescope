@@ -19,7 +19,9 @@ make_plan(root, *, suites=None, structural_files=None)
   uses `[tool.pytest_telescope.execution] workers`, default 1.
 - `execution_mode` is `"case"` or `"batch"`; `None` uses the configured mode, default
   `"case"`.
-- `timeout` bounds each session the controller starts, from 0.1 to 3,600 seconds.
+- `timeout` bounds each sandboxed session (scoped collection, case or batch), from 0.1 to
+  3,600 seconds. Ordinary suite sessions have no pytest-telescope deadline; the job that
+  runs pytest bounds them.
 - `arguments`, `suites`, `structural_files`, `force`, `no_cache`, `explain` and `cache_dir`
   keep their 0.1.0a3 meanings ([structural narrowing](scoped-execution.md#invocation-only-structural-file-narrowing)).
 - `run` raises `DeclarationError` for invalid declarations and `UnsupportedCapability`

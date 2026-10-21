@@ -114,10 +114,13 @@ def _terminate(process):
 
 
 def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None):
-    """Run one bounded child with merged output; never retain more than the limit."""
+    """Run one child with bounded merged output; never retain more than the limit.
+
+    A timeout of None sets no deadline: the caller's own job bounds that session.
+    """
     process = None
     output = bytearray()
-    deadline = time.monotonic() + timeout
+    deadline = None if timeout is None else time.monotonic() + timeout
     try:
         process = subprocess.Popen(
             args,
@@ -134,7 +137,7 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
             while selector.get_map():
                 if cancellation is not None and cancellation.is_set():
                     raise InvocationInterrupted("session cancelled; owned cleanup required")
-                remaining = deadline - time.monotonic()
+                remaining = 0.1 if deadline is None else deadline - time.monotonic()
                 if remaining <= 0:
                     raise InfrastructureError("session deadline exceeded")
                 for key, _ in selector.select(min(0.1, remaining)):
@@ -147,7 +150,9 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
                         raise InfrastructureError(
                             f"session output exceeded {max(1, limit // 1_048_576)} MiB"
                         )
-        code = process.wait(timeout=max(0.01, deadline - time.monotonic()))
+        code = process.wait(
+            timeout=None if deadline is None else max(0.01, deadline - time.monotonic())
+        )
         return code, bytes(output)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise InfrastructureError("session could not start or exceeded its deadline") from exc

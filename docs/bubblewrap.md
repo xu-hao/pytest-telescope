@@ -159,8 +159,9 @@ starts.
 4. Run each suite's ordinary session; it also identifies scoped cases in mixed files.
 5. Reuse or execute scoped cases and batches, up to `workers` at a time.
 
-`--timeout` bounds every session the controller starts: each ordinary suite session,
-scoped collection and scoped case or batch. A scoped collection, case or batch gets at
+`--timeout` bounds each sandboxed session: a scoped collection, case or batch. Ordinary
+suite sessions have no pytest-telescope deadline, like normal pytest; the job that runs
+pytest bounds them, as it bounds resources. A scoped collection, case or batch gets at
 most two attempts for infrastructure failures, with fresh scratch each time. An ordinary
 session is attempted once, because replaying it could repeat its side effects. A run
 that refuses or stops after ordinary sessions started does not prove that no test ran.
