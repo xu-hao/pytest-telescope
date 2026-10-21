@@ -1,0 +1,29 @@
+{
+ "items": [
+  {
+   "sku": "item-6-0",
+   "quantity": 1,
+   "price": 6
+  },
+  {
+   "sku": "item-6-1",
+   "quantity": 2,
+   "price": 7
+  },
+  {
+   "sku": "item-6-2",
+   "quantity": 3,
+   "price": 8
+  },
+  {
+   "sku": "item-6-3",
+   "quantity": 4,
+   "price": 9
+  },
+  {
+   "sku": "item-6-4",
+   "quantity": 5,
+   "price": 10
+  }
+ ]
+}

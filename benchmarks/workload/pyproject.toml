@@ -1,0 +1,16 @@
+# Synthetic benchmark workload. The runner copies it and, for scoped runs, replaces each
+# "# telescope-scope:" comment with the matching module-level declaration.
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.pytest_telescope]
+test_roots = ["tests"]
+
+[tool.pytest_telescope.bundles.cpu]
+inputs = ["app/__init__.py", "app/compute.py"]
+
+[tool.pytest_telescope.bundles.imports]
+inputs = ["app/__init__.py", "app/heavy.py"]
+
+[tool.pytest_telescope.bundles.io]
+inputs = ["app/__init__.py", "app/records.py", "data"]

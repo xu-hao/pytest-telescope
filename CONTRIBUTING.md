@@ -1,12 +1,12 @@
 # Contributing
 
 See [development](docs/development.md) for installation and checks, and the
-[execution contract](docs/execution-contract.md) for the complete first release.
+[execution contract](docs/bubblewrap.md) for routing and the sandbox view.
 
-Add behavioral regression tests and relevant documentation together. Real worker
-integration tests must establish isolation before it is claimed; skipped sandbox
-tests are not a qualifying result. Keep the synthetic benchmark reproducible and
-publish observed measurements, including overhead and unfavorable results.
+Add behavioral regression tests and relevant documentation together. Tests that launch
+Bubblewrap must establish the filesystem view before it is claimed; skipped or
+expected-failure sandbox tests are not a qualifying result. Publish observed benchmark
+measurements, including overhead and unfavorable results.
 
 Documentation is Markdown rendered by Sphinx with Furo and MyST. Use the strict
 documentation command in the development guide and inspect desktop/mobile navigation

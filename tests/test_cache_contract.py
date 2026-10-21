@@ -1,6 +1,5 @@
 """Corrupt records and controller boundaries must fail closed."""
 
-import hashlib
 import json
 import os
 import subprocess
@@ -8,6 +7,7 @@ import sys
 
 import pytest
 
+from pytest_telescope import controller, sandbox
 from pytest_telescope.controller import SCHEMA, read_record
 from pytest_telescope.model import DeclarationError, fingerprint, load
 
@@ -26,17 +26,17 @@ def success():
         "skipped": 0,
         "case_ids": ["a" * 64],
         "worker_seconds": 0.2,
-        "cpu_seconds": 0.1,
     }
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"cpu_seconds": float("nan")},
+        {"worker_seconds": float("nan")},
         {"worker_seconds": float("inf")},
-        {"cpu_seconds": -1},
-        {"cpu_seconds": True},
+        {"worker_seconds": -1},
+        {"worker_seconds": True},
+        {"cpu_seconds": 0.1},
         {"protocol": 0},
         {"exit_code": False},
         {"case_ids": "a" * 64, "collected": 64, "passed": 64},
@@ -106,100 +106,72 @@ def test_nan_timeout_is_rejected_before_project_access(tmp_path):
         run(tmp_path, timeout=float("nan"))
 
 
-def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, monkeypatch):
-    import contextlib
-
-    from pytest_telescope import controller
-
-    (tmp_path / "test_unit.py").write_text("def test_unit(): pass\n")
-    (tmp_path / "test_second.py").write_text("def test_second(): pass\n")
+def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_double, module_rows):
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+    rows = module_rows(tmp_path, [("test_unit.py", ["unit"]), ("test_second.py", ["second"])])
     calls = []
 
-    ordinal = 0
+    def execute(*args, request, **kwargs):
+        calls.append(request["mode"])
+        if request["mode"] == "collection":
+            return dict(
+                protocol=4,
+                kind="collection",
+                nonce="b" * 32,
+                exit_code=0,
+                complete=True,
+                leaked_descendants=False,
+                items=rows,
+                worker_seconds=0.1,
+                failures=[],
+            )
+        # The worker's own scratch fails to clean after this attempt.
+        raise sandbox.CleanupError("owned cleanup failed")
 
-    @contextlib.contextmanager
-    def invocation(root):
-        nonlocal ordinal
-        ordinal += 1
-        current = ordinal
-        directory = root / ".pytest-telescope" / "scratch" / str(current)
-        directory.mkdir(parents=True)
-        yield directory
-        if current > 1:
-            raise controller.runtime.CleanupError("owned cleanup failed")
-
-    monkeypatch.setattr(controller.runtime, "recover", lambda root: None)
-    monkeypatch.setattr(
-        controller.runtime,
-        "identity",
-        lambda root, *, runtime_profile=None: {"image": "fixture", "execution": {"fixture": True}},
-    )
-    monkeypatch.setattr(controller.runtime, "invocation", invocation)
-    monkeypatch.setattr(
-        controller.runtime, "execute", lambda *args, **kw: calls.append(1) or success()
-    )
+    sandbox_double(execute)
     report = controller.run(tmp_path)
-    assert report["units"] == []
     assert report["collection"]["outcome"] == "infrastructure_error"
     assert report["counts"]["executed"] == 0
-    assert calls == [1]
+    assert report["counts"]["infrastructure_error"] == 2
+    assert calls == ["collection", "execution"]
     assert not list((tmp_path / ".pytest-telescope/cache").glob("*.json"))
 
 
-def test_unavailable_backend_reports_unknown_inventory_after_bounded_retry(tmp_path, monkeypatch):
-    from pytest_telescope import controller
-
-    for name in ("first", "second"):
-        (tmp_path / f"test_{name}.py").write_text(f"def test_{name}(): pass\n")
+def test_unavailable_sandbox_reports_unknown_inventory_after_bounded_retry(
+    tmp_path, monkeypatch, module_rows
+):
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+    module_rows(tmp_path, [("test_first.py", ["first"]), ("test_second.py", ["second"])])
+    stand_in = tmp_path / "bin"
+    stand_in.mkdir()
+    (stand_in / "bwrap").write_text("#!/bin/sh\nexit 0\n")
+    (stand_in / "bwrap").chmod(0o755)
+    monkeypatch.setenv("PATH", str(stand_in))
     attempts = []
 
-    def unavailable(root, *, runtime_profile=None):
-        attempts.append(1)
-        raise controller.InfrastructureError("backend unavailable")
+    def unavailable(args, timeout, **kwargs):
+        attempts.append(args[0])
+        raise controller.InfrastructureError("session could not start or exceeded its deadline")
 
-    monkeypatch.setattr(controller.runtime, "recover", lambda root: None)
-    monkeypatch.setattr(controller.runtime, "identity", unavailable)
+    monkeypatch.setattr(sandbox, "capture", unavailable)
     report = controller.run(tmp_path)
-    assert attempts == [1, 1]
+    assert len(attempts) == 2
     assert report["status"] == "infrastructure_error"
     assert report["units"] == []
+    assert report["sandbox"]["required"] is True and report["sandbox"]["identity"] is None
     assert report["collection"]["outcome"] == "infrastructure_error"
-    assert report["collection"]["reason"] == "backend unavailable"
+    assert "deadline" in report["collection"]["reason"]
     assert report["inventory_complete"] is False
     assert report["inventory_digest"] is None
     assert report["collection"]["suites"][0]["files"] == ["test_first.py", "test_second.py"]
+    assert not (tmp_path / ".pytest-telescope").exists()
 
 
-def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path, monkeypatch):
-    import contextlib
-
-    from pytest_telescope import controller
-
+def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
+    tmp_path, sandbox_double, module_rows
+):
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
-    (tmp_path / "test_unit.py").write_text("def test_unit(): pass\n")
-    ordinal = 0
-
-    @contextlib.contextmanager
-    def invocation(root):
-        nonlocal ordinal
-        ordinal += 1
-        current = ordinal
-        directory = root / ".pytest-telescope" / "scratch" / str(current)
-        directory.mkdir(parents=True)
-        yield directory
-        if current == 1:
-            raise controller.runtime.CleanupError("frozen pool cleanup failed")
-
-    item = {
-        "case_id": "a" * 64,
-        "file": "test_unit.py",
-        "origins": [],
-        "aliases": sorted(["a" * 64, hashlib.sha256(b"test_unit.py").hexdigest()]),
-        "selected": True,
-        "order": 0,
-    }
+    rows = module_rows(tmp_path, [("test_unit.py", ["unit"])])
     collected = {
         "protocol": 4,
         "kind": "collection",
@@ -207,30 +179,26 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(tmp_path,
         "exit_code": 0,
         "complete": True,
         "leaked_descendants": False,
-        "items": [item],
+        "items": rows,
         "worker_seconds": 0.1,
-        "cpu_seconds": 0.1,
         "failures": [],
     }
     calls = []
 
     def execute(*args, request, **kwargs):
         calls.append(request["mode"])
-        return collected if request["mode"] == "collection" else success()
+        return (
+            collected
+            if request["mode"] == "collection"
+            else success() | {"case_ids": [rows[0]["case_id"]]}
+        )
 
-    monkeypatch.setattr(controller.runtime, "recover", lambda root: None)
-    monkeypatch.setattr(
-        controller.runtime,
-        "identity",
-        lambda root, *, runtime_profile=None: {"image": "fixture", "execution": {"fixture": True}},
-    )
-    monkeypatch.setattr(controller.runtime, "invocation", invocation)
-    monkeypatch.setattr(controller.runtime, "execute", execute)
+    sandbox_double(execute, fail_outer=True)
     report = controller.run(tmp_path)
     assert report["status"] == "infrastructure_error"
     assert report["inventory_complete"] is True
     assert len(report["units"]) == 1
-    assert "frozen pool" in report["collection"]["reason"]
+    assert "outer cleanup" in report["collection"]["reason"]
     assert calls == ["collection", "execution"]
     cache = tmp_path / ".pytest-telescope" / "cache"
     assert not list(cache.glob("*.json"))

@@ -1,10 +1,10 @@
 # Marker and project reference
 
 The [quickstart](index.md) provides every file for a runnable project. The
-[execution contract](execution-contract.md) is authoritative for the supported boundary.
-The base marker interface is available in 0.1.0a2; old central `targets` declarations
-are rejected with a migration message. Version 0.1.0a3 additions are specified in the
-[scoped execution guide](scoped-execution.md) and [result reference](result-schema.md).
+[ordinary and Bubblewrap execution contract](bubblewrap.md) is authoritative for routing
+and the sandbox, and the [declaration contract](execution-contract.md) for inventory and
+reuse. The base marker interface is available since 0.1.0a2; old central `targets`
+declarations are rejected with a migration message.
 
 ## Markers beside cases
 
@@ -18,15 +18,17 @@ def test_red(): ...
 
 | Marker field | Meaning |
 | --- | --- |
-| `inputs=["path", "data/*.json"]` | Explicit project paths, directories, and globs. Establishes narrow scope, including when empty. |
-| `bundles=["pricing"]` | Reusable project declarations. Also establishes narrow scope, including when empty. |
-| `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not narrow scope alone. |
-| `cache=False` | Never reuse or record success for this case; does not narrow scope alone. |
+| `inputs=["path", "data/*.json"]` | Explicit project paths, directories, and globs. Makes the case scoped, including when empty. |
+| `bundles=["pricing"]` | Reusable project declarations. Also makes the case scoped, including when empty. |
+| `distributions=["core"]` | Selected local distribution metadata. Also makes the case scoped, including when empty. |
+| `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not make a case scoped. |
+| `cache=False` | Never reuse or record success for this case; does not make a case scoped. |
 
-Without an `inputs` or `bundles` marker field, a case sees and hashes the broad project
-snapshot. Project defaults alone do not narrow it. Explicit file-scope markers replace
-that broad implicit scope with the union of inherited declarations, defaults, containing
-test source, and configuration. Each actual parametrized item is a separate unit.
+Without an `inputs`, `bundles` or `distributions` field on or above it, a case is
+ordinary: it runs in an ordinary pytest session every time, with no sandbox and no cache.
+Project defaults alone do not make it scoped. A scoped case sees exactly the union of its
+inherited declarations, defaults, containing test source and configuration, read-only, in
+a [Bubblewrap view](bubblewrap.md). Each actual parametrized item is a separate unit.
 
 Use direct `pytest.mark.telescope(...)` calls with literal lists of strings and booleans.
 Supported locations are function/class decorators, module/class `pytestmark`, and
@@ -51,13 +53,13 @@ class TestParsing:
 This case receives the application bundle, common JSON, valid JSON, project defaults,
 its containing test file, and configuration. Function or parameter declarations cannot
 subtract inherited files. Module/class/function/parameter markers add together, and any
-inherited `cache=False` wins. A module-level `bundles` field narrows all its cases, even
-functions with no individual marker.
+inherited `cache=False` wins. A module-level `bundles` field scopes all its cases, even
+functions with no individual marker, and keeps the module's import off the host.
 
 Keep shared import-time and parametrization dependencies in each consumer's scope.
-Discovery runs with the union of potential scopes; an individual execution never borrows
-another case's inputs. Each execution must collect the same containing-file case
-inventory as discovery before running its selected case.
+Collection of wholly scoped modules runs with the union of their potential scopes; an
+individual execution never borrows another case's inputs. Each execution must collect
+the same containing-file case inventory as discovery before running its selected case.
 
 ## Project configuration
 
@@ -82,14 +84,14 @@ absent = ["app/local_override.json"]
 | Table or field | Meaning |
 | --- | --- |
 | `test_roots` | Static test-source discovery roots; default `["."]`. Real pytest inventory includes new files and cases before accepting hits. |
-| `env` | Explicit host environment names to forward and key, including presence/absence. Reserved runtime/protocol names are rejected. |
-| `defaults` | Shared `inputs`, `bundles`, `absent`, and `cache` policy. Adds support without narrowing otherwise unmarked cases. |
+| `env` | Explicit host environment names to forward into scoped sandboxes and key, including presence/absence. Reserved runtime/protocol names are rejected. Ordinary sessions inherit the whole environment. |
+| `defaults` | Shared `inputs`, `bundles`, `absent`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
 | `bundles.NAME` | Reusable `inputs`, nested `bundles`, and `absent` lists. Cycles and unknown names are errors. |
 
-Containing test source and configuration are automatic inputs. Narrow cases explicitly
+Containing test source and configuration are automatic inputs. Scoped cases explicitly
 declare application modules, package initializers, conftest files, helpers, and resources.
-Broad cases already include visible project files. A configuration change invalidates
-all cases; a bundle input change invalidates its consumers and broad cases.
+A configuration change invalidates all scoped cases; a bundle input change invalidates
+its consumers. Ordinary cases always run, so nothing invalidates them.
 
 Inputs are project-relative; missing declarations and paths escaping the project are
 errors. `absent` asserts actual source nonexistence, unlike merely making a path
@@ -97,12 +99,11 @@ inaccessible. Creating a declared-absent file is a validation error even on a wa
 A leaf symlink must use relative target text, with its destination in the effective
 scope. Directory symlinks, special files, and unsupported paths fail explicitly.
 
-Broad scope includes hidden and Git-ignored project files, except version-control
-metadata (`.git`, `.hg`, `.svn`), telescope state (`.pytest-telescope` and an explicit
-in-project cache directory), pytest/bytecode caches (`.pytest_cache`, `__pycache__`),
-and host Python environments (`.venv`, `venv`, or a directory with validated
-`pyvenv.cfg`). Other large trees such as `build`, `dist`, and `node_modules` count toward
-snapshot limits. Explicit declarations into excluded namespaces are errors.
+Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
+state (`.pytest-telescope` and an explicit in-project cache directory), pytest/bytecode
+caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, or
+a directory with validated `pyvenv.cfg`). Hidden and Git-ignored files can be declared.
+pytest-telescope never walks or hashes undeclared project files.
 
 The default suite keeps pytest settings in `[tool.pytest.ini_options]`. Next-alpha
 [independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
@@ -120,8 +121,9 @@ python -m pytest_telescope run --no-cache -- -q
 Selectors apply actual pytest semantics, after accounting for the full current inventory.
 Other cases are reported unselected. Full options and selectors affect cache identity;
 a filtered invocation cannot reuse an unfiltered run's result. `--force` refreshes
-inventory and executes successes again; `--no-cache` also prevents recording them.
-`plan` is only a nonexecuting static scope preview, not actual case enumeration.
+inventory and executes scoped successes again; `--no-cache` also prevents recording them.
+`--workers N` runs up to N independent scoped sandboxes at once. `plan` is only a
+nonexecuting static route and scope preview, not actual case enumeration.
 
 Python callers can narrow a suite's files before marker parsing or collection imports:
 
@@ -138,8 +140,8 @@ result = run(Path("."), suites=["core"], structural_files=files)
 Unlike a node selector in `arguments`, this exact list excludes other test modules from
 the invocation's inventory. `collection.suites` reports the effective files, and
 `inventory_complete` covers only that boundary. Omitted files have no unselected rows.
-This API does not change a case's input scope: unmarked cases still see and key the
-broad project snapshot. It also preserves suite cwd, root, resources and capabilities.
+This API does not change routing or any case's input scope. It also preserves suite cwd,
+root and capabilities.
 
 Unspecified suites keep their configured membership; `{}` changes nothing and `[]`
 makes one suite empty. Lists contain at most 4,096 canonical existing regular Python
@@ -151,22 +153,23 @@ invocation only when added to the list. See the
 [structural narrowing contract](scoped-execution.md#invocation-only-structural-file-narrowing)
 for validation and coverage rules. This override is available through the Python API.
 
-Each case gets a new pytest session. Fixtures with broader pytest scopes are recreated
-for each case in default `case` mode. Optional [batch mode](batching.md) shares ordinary
-pytest fixture lifetime only inside equal-scope suite/module groups. See the
-[execution contract](execution-contract.md) for supported options, runtime requirements,
-bounded failures, exact cache identity, and outcome accounting.
+Each scoped case gets a new sandbox and pytest session. Fixtures with broader pytest
+scopes are recreated for each scoped case in default `case` mode. Optional
+[batch mode](batching.md) shares ordinary pytest fixture lifetime only inside equal-scope
+suite/module groups. Ordinary cases share one ordinary session per suite. See the
+[declaration contract](execution-contract.md) for supported options, bounded failures,
+exact cache identity, and outcome accounting.
 
 
-## Next-alpha scoped execution
+## Metadata and independent suites
 
-A literal `distributions=["core"]` marker adds selected local metadata and establishes
-narrow scope, including an empty list. Distribution names also compose through defaults
-and bundles. Metadata does not grant application source: declare package modules through
-`inputs` as usual. Broad cases receive every configured distribution.
+A literal `distributions=["core"]` marker adds selected local metadata and makes the case
+scoped, including an empty list. Distribution names also compose through defaults and
+bundles. Metadata does not grant application source: declare package modules through
+`inputs` as usual. Ordinary cases see the checkout and installed environment as they are.
 
-The [complete scoped guide](scoped-execution.md) provides versioned static metadata,
-independent suite and worker-budget configuration. A suite's `root`, `config`,
+The [metadata and suite guide](scoped-execution.md) provides versioned static metadata
+and independent suite configuration. A suite's `root`, `config`,
 `test_roots`, `include` and `exclude` paths are all outer-project-relative. Exclusions
 remove files before parsing or importing them. `args` preserve argument order; `plugins`
 name installed explicit plugins with autoload disabled. A project using explicit suites
@@ -174,98 +177,58 @@ cannot also set top-level `test_roots`.
 
 Configured `addopts` are resolved before scheduler validation. For a suite configuration
 containing `addopts = -n auto`, an explicit `-o addopts=` removes that option; the run
-then uses telescope's declared resource envelope. Without that override, nested scheduler
-options return an explicit unsupported capability. This does not enable xdist workers.
+then uses telescope's `workers` setting. Without that override, nested scheduler options
+return an explicit unsupported capability. This does not enable xdist workers.
 
 
 ## Choose execution and fixture lifetime
 
 `[tool.pytest_telescope.execution] mode = "case"` is the default. Set `mode = "batch"`
-to share one fresh pytest session among selected cases with exactly equal effective
-scope, metadata and cache policy in one suite/module. Module/class/session fixtures and
-scratch share only inside that group; function `tmp_path` remains per test.
+to share one fresh sandbox and pytest session among selected scoped cases with exactly
+equal effective scope, metadata and cache policy in one suite/module. Module/class/session
+fixtures and scratch share only inside that group; function `tmp_path` remains per test.
 
 `run --execution-mode case|batch` and `controller.run(root, execution_mode="case"|"batch")`
 override the configuration without editing it. `plan` reports the configured mode/profile,
-not dynamically collected group membership. Each group occupies one resource slot and
-has one worker's limits. Group records are atomic: failures, partial runs or corrupted
-records cause the whole selected group to rerun. See [batching](batching.md) for ordering,
-4,096-member limits and lifecycle rules, and [result schema 2](result-schema.md) for
-member/group outcomes, partial pytest stops and honest shared-worker timing.
+not dynamically collected group membership. Each group occupies one worker slot. Group
+records are atomic: failures, partial runs or corrupted records cause the whole selected
+group to rerun. See [batching](batching.md) for ordering, 4,096-member limits and
+lifecycle rules, and [result schema 3](result-schema.md) for member/group outcomes,
+partial pytest stops and honest shared-worker timing.
 
-## Local Git profile (0.1.0a4)
+## Host tools and child interpreters
 
-The separately qualified [local Git profile](git-runtime.md) selects immutable tooling
-for an invocation while preserving each case or group's declared project inputs:
+Scoped tests run the host's own tools from the read-only system directories, for example
+`git` from `/usr/bin`, with `HOME` and `TMPDIR` set to private `/tmp`. Create
+repositories and other writable state in `/tmp` or `tmp_path`, copying declared inputs
+there when needed; project source stays read-only. Host tools and system libraries are
+not part of the cache key, so mark a scoped test `cache=False` when its result depends on
+their version.
 
-```toml
-[tool.pytest_telescope.runtime]
-profile = "git-local-v1"
-requires = ["git-local"]
-```
-
-```sh
-python -m pytest_telescope runtime
-python -m pytest_telescope plan --require-capability git-local
-python -m pytest_telescope run --require-capability git-local
-```
-
-`python-v1` remains the default. `--runtime-profile` selects an invocation-only override
-for preparation, planning or execution. Requirements declared in configuration remain
-in force when a caller supplies an override; requesting Git with the default Python
-profile refuses before collection or cache reuse. See the
-[runtime interfaces](result-schema.md#runtime-profiles) for Python arguments
-and the distinct runtime identity in results.
-
-Create repositories and linked worktrees in private writable scratch, copying only
-declared input content when needed. Project source stays read-only, and host `.git`
-metadata remains excluded. The profile supports local-file origins and ordinary
-explicit-message commits, not remote-network helpers or executable hooks. Set author,
-committer dates and identity explicitly when tests rely on stable commit IDs. Selecting
-Git does not change resource limits, noexec scratch, case/batch fixture lifetime, or the
-meaning of `cache=False`.
-
-## Declared source in isolated Python children
-
-The opt-in [isolated-source profile](isolated-source.md) lets the pinned Python
-interpreter discover declared source and selected static metadata when a test launches
-`python -I`. It does not install the application. Add an ordered lookup root:
-
-```toml
-[tool.pytest_telescope.python]
-profile = "isolated-source-v1"
-source_roots = ["src"]
-```
-
-For `src/example_core.py` containing `value = 7`, a narrow test can use:
+`subprocess.run([sys.executable, ...])` starts the same host interpreter with the same
+installed packages. A child started with `-I` ignores `PYTHONPATH` and the working
+directory, so it cannot import declared project source. To import declared source in a
+child, start it without `-I` and pass the source location explicitly:
 
 ```python
+import os
 import subprocess
 import sys
+
 import pytest
 
 
 @pytest.mark.telescope(inputs=["src/example_core.py"])
-def test_isolated_child():
+def test_child_imports_declared_source():
+    environment = {**os.environ, "PYTHONPATH": os.path.abspath("src")}
     completed = subprocess.run(
-        [sys.executable, "-I", "-c", "import example_core; assert example_core.value == 7"],
-        capture_output=True,
+        [sys.executable, "-c", "import example_core; assert example_core.value == 7"],
+        env=environment,
         timeout=10,
     )
     assert completed.returncode == 0
 ```
 
-The root controls import lookup; the marker grants the file. Undeclared neighboring
-modules remain absent. Selected `distributions` metadata is discoverable by children,
-but an entry point can load only source in that same view. Empty source roots support
-metadata-only children. Namespace package portions and same-named modules follow the
-declared root order, so suite-specific complete replacements can keep independent roots.
-
-Without the table the profile is `default`, which accepts no roots and preserves existing
-behavior. `--python-profile` and repeated `--source-root`, or the corresponding Python
-API fields, override an invocation without editing configuration. See the
-[lookup interfaces and result identity](result-schema.md#isolated-child-source-lookup).
-System/runtime modules keep earlier lookup precedence. `-S` disables site initialization
-and has no source-discovery guarantee. Visible source-root startup hooks and installed
-metadata directories refuse before any worker; arbitrary source-root `.pth` files stay
-inert. Read-only source, noexec scratch, limits and case/batch scope boundaries are unchanged.
+The child sees the same view as its test: undeclared neighbouring modules stay absent.
+The unreleased `git-local-v1` runtime profile and `isolated-source-v1` lookup profile were
+withdrawn with the Docker runtime; their configuration tables are rejected.

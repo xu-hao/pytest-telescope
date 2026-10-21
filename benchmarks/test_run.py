@@ -1,175 +1,194 @@
-"""Behavioral checks for benchmark outcome validation and external accounting."""
+"""Harness checks that need no Bubblewrap: workload variants, accounting and summaries."""
 
-import copy
 import json
+import os
+import re
+import shutil
+import statistics
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from run import measure, result_from_log, safe_case_id, validate_result
-
-
-def result():
-    nodes = [
-        "tests/test_scoring.py::test_empty",
-        "tests/test_scoring.py::test_customer_scores",
-        "tests/test_demand.py::test_empty",
-        "tests/test_demand.py::test_demand_projection",
-        "tests/test_pricing.py::test_empty",
-        "tests/test_pricing.py::test_price_schedule",
-        "tests/test_broad.py::test_project_file",
-    ]
-    units = []
-    for node in nodes:
-        executed = node.startswith(("tests/test_scoring.py", "tests/test_broad.py"))
-        units.append(
-            {
-                "name": safe_case_id(node),
-                "file": node.split("::")[0],
-                "outcome": "executed" if executed else "reused",
-                "collected": 1,
-                "passed": 1,
-                "failed": 0,
-                "skipped": 0,
-                "worker_seconds": 0.2 if executed else 0,
-                "cpu_seconds": 0.1 if executed else 0,
-            }
-        )
-    return {
-        "counts": {
-            "executed": 3,
-            "reused": 4,
-            "failed": 0,
-            "infrastructure_error": 0,
-            "not-selected": 0,
-            "unsupported": 0,
-            "selected": 7,
-        },
-        "cases": {"collected": 7, "passed": 7, "failed": 0, "skipped": 0},
-        "case_outcomes": {
-            "fresh_passed": 3,
-            "cached_passed": 4,
-            "fresh_skipped": 0,
-            "cached_skipped": 0,
-        },
-        "collection": {
-            "outcome": "executed",
-            "collected": 7,
-            "failures": [],
-            "worker_seconds": 0.2,
-            "cpu_seconds": 0.1,
-        },
-        "worker_cpu_seconds": 0.4,
-        "units": units,
-    }
+import run
 
 
-class BenchmarkTests(unittest.TestCase):
-    def test_accepts_expected_selective_outcome(self):
-        validate_result(result(), "narrow_code")
-
-    def test_rejects_wrong_case_even_when_totals_match(self):
-        data = result()
-        data["units"][0]["outcome"] = "reused"
-        data["units"][2]["outcome"] = "executed"
-        with self.assertRaisesRegex(RuntimeError, "wrong case invalidated"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_missing_or_failed_cases(self):
-        for collected, passed, failed in ((6, 6, 0), (7, 6, 1)):
-            data = result()
-            data["cases"].update(collected=collected, passed=passed, failed=failed)
-            with self.subTest(data=data), self.assertRaisesRegex(RuntimeError, "case counts"):
-                validate_result(data, "narrow_code")
-
-    def test_rejects_cached_cases_reported_as_fresh(self):
-        data = result()
-        data["case_outcomes"].update(fresh_passed=7, cached_passed=0)
-        with self.assertRaisesRegex(RuntimeError, "executed/reused case counts"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_duplicate_inventory(self):
-        data = result()
-        data["units"].append(copy.deepcopy(data["units"][0]))
-        with self.assertRaisesRegex(RuntimeError, "case inventory"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_infrastructure_failure(self):
-        data = result()
-        data["counts"].update(executed=0, infrastructure_error=1)
-        with self.assertRaisesRegex(RuntimeError, "expected"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_same_file_wrong_case_resource_consumer(self):
-        data = result()
-        data["counts"].update(executed=2, reused=5)
-        data["case_outcomes"].update(fresh_passed=2, cached_passed=5)
-        data["units"][0].update(outcome="reused", cpu_seconds=0, worker_seconds=0)
-        data["worker_cpu_seconds"] = 0.3
-        validate_result(data, "case_resource")
-        data["units"][0].update(outcome="executed", cpu_seconds=0.1, worker_seconds=0.2)
-        data["units"][1].update(outcome="reused", cpu_seconds=0, worker_seconds=0)
-        with self.assertRaisesRegex(RuntimeError, "wrong case invalidated"):
-            validate_result(data, "case_resource")
-
-    def test_rejects_incorrect_case_file(self):
-        data = result()
-        data["units"][0]["file"] = "tests/test_other.py"
-        with self.assertRaisesRegex(RuntimeError, "identity or source file"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_aggregated_unit(self):
-        data = result()
-        data["units"][0].update(collected=2, passed=2)
-        with self.assertRaisesRegex(RuntimeError, "exactly one passing case"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_incomplete_collection(self):
-        data = result()
-        data["collection"]["collected"] = 6
-        with self.assertRaisesRegex(RuntimeError, "collection outcome or inventory"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_cached_worker_cpu(self):
-        data = result()
-        data["units"][2]["cpu_seconds"] = 1
-        with self.assertRaisesRegex(RuntimeError, "zero current worker accounting"):
-            validate_result(data, "narrow_code")
-
-    def test_rejects_missing_collection_cpu(self):
-        data = result()
-        data["worker_cpu_seconds"] = 0.3
-        with self.assertRaisesRegex(RuntimeError, "CPU must reconcile"):
-            validate_result(data, "narrow_code")
-
-    def test_requires_structured_result(self):
+class WorkloadVariants(unittest.TestCase):
+    def test_variants_differ_only_in_the_module_scope_lines(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "result.json"
-            path.write_text(json.dumps(result()))
-            self.assertEqual(result_from_log(path), result())
-            path.write_text("[]")
-            with self.assertRaisesRegex(RuntimeError, "JSON object"):
-                result_from_log(path)
-
-    def test_external_measurement_records_real_process(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)
-            row = measure(
-                [sys.executable, "-c", "print(sum(i*i for i in range(100_000)))"],
-                path,
-                path,
-                "computation",
+            ordinary = run.write_variant(Path(directory, "ordinary"), scoped=False)
+            scoped = run.write_variant(Path(directory, "scoped"), scoped=True)
+            files = sorted(path.relative_to(ordinary) for path in ordinary.rglob("*.py"))
+            self.assertEqual(
+                files, sorted(path.relative_to(scoped) for path in scoped.rglob("*.py"))
             )
-            self.assertGreater(row["elapsed_seconds"], 0)
-            self.assertGreater(row["controller_cpu_seconds"], 0)
-            self.assertEqual((path / row["log"]).read_text().strip(), "333328333350000")
+            changed = 0
+            for name in files:
+                before = (ordinary / name).read_text().splitlines()
+                after = (scoped / name).read_text().splitlines()
+                self.assertEqual(len(before), len(after))
+                differences = [pair for pair in zip(before, after) if pair[0] != pair[1]]
+                changed += len(differences)
+                for old, new in differences:
+                    self.assertTrue(old.startswith("# telescope-scope: "))
+                    self.assertTrue(new.startswith("pytestmark = pytest.mark.telescope(bundles="))
+            self.assertEqual(changed, 3)
+            for path in ordinary.rglob("test_*.py"):
+                self.assertNotIn("pytest.mark.telescope", path.read_text())
 
-    def test_failed_process_is_not_a_benchmark_result(self):
+
+class Accounting(unittest.TestCase):
+    def test_cpu_of_grandchildren_is_counted(self):
+        burn = "import time\nstarted = time.process_time()\nwhile time.process_time() - started < 0.3: pass\n"
+        parent = f"import subprocess, sys\nsubprocess.run([sys.executable, '-c', {burn!r}], check=True)\n"
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)
-            with self.assertRaisesRegex(RuntimeError, "exit 3"):
-                measure([sys.executable, "-c", "raise SystemExit(3)"], path, path, "failure")
+            measured = run.measure_tree(
+                [sys.executable, "-c", parent], directory, Path(directory, "out")
+            )
+        self.assertEqual(measured["exit_code"], 0)
+        self.assertGreaterEqual(measured["cpu_seconds"], 0.25)
+        self.assertGreaterEqual(measured["wall_seconds"], 0.25)
+
+    def test_wall_time_ends_when_the_invocation_exits_not_at_a_later_poll(self):
+        # A timed wait polls on a 50 ms cap, so it would end the interval up to 50 ms late.
+        # The sleeps spread the exits over most of one poll period, so no phase hides that.
+        script = (
+            "import os, sys, time\n"
+            "time.sleep(float(sys.argv[1]))\n"
+            "os.write(1, repr(time.monotonic()).encode())\n"
+            "os._exit(0)\n"
+        )
+        latencies = []
+        with tempfile.TemporaryDirectory() as directory:
+            stdout_path = Path(directory, "out")
+            for index in range(9):
+                arguments = [sys.executable, "-c", script, str(0.15 + 0.0055 * index)]
+                started = time.monotonic()
+                measured = run.measure_tree(arguments, directory, stdout_path)
+                exited = float(stdout_path.read_text())
+                latencies.append(started + measured["wall_seconds"] - exited)
+        self.assertLess(
+            statistics.median(latencies),
+            0.005,
+            "median latency between exit and the end of the wall time, in seconds: "
+            + ", ".join(f"{latency:.4f}" for latency in latencies),
+        )
+
+    def test_an_invocation_past_the_deadline_is_killed_and_reaped(self):
+        script = "import os, time\nos.write(1, str(os.getpid()).encode())\ntime.sleep(30)\n"
+        with tempfile.TemporaryDirectory() as directory:
+            stdout_path = Path(directory, "out")
+            started = time.monotonic()
+            with mock.patch.object(run, "INVOCATION_DEADLINE", 1.0):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    run.measure_tree([sys.executable, "-c", script], directory, stdout_path)
+            self.assertLess(time.monotonic() - started, 10)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(stdout_path.read_text()), 0)
+
+    def test_telescope_outcomes_require_fresh_cases_on_the_intended_route(self):
+        counts = {key: 0 for key in ("executed", "reused", "failed", "selected")}
+        report = {
+            "status": "passed",
+            "inventory_complete": True,
+            "route_counts": {
+                "scoped": counts | {"executed": run.CASES, "selected": run.CASES},
+                "ordinary": dict(counts),
+            },
+            "case_outcomes": {"fresh_passed": run.CASES},
+            "execution": {"mode": "case"},
+        }
+        self.assertTrue(run.telescope_outcome("scoped-case", report, 0)["valid"])
+        self.assertFalse(run.telescope_outcome("scoped-batch", report, 0)["valid"])
+        self.assertFalse(run.telescope_outcome("ordinary", report, 0)["valid"])
+        reused = json.loads(json.dumps(report))
+        reused["route_counts"]["scoped"].update(executed=run.CASES - 1, reused=1)
+        self.assertFalse(run.telescope_outcome("scoped-case", reused, 0)["valid"])
+        self.assertFalse(run.telescope_outcome("scoped-case", report, 1)["valid"])
+        self.assertFalse(run.telescope_outcome("scoped-case", {"status": "passed"}, 0)["valid"])
+
+
+class Measurements(unittest.TestCase):
+    """The plain and ordinary series never launch Bubblewrap."""
+
+    def setUp(self):
+        self.output = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.output)
+
+    def test_plain_and_ordinary_series_measure_the_whole_workload(self):
+        plain = run.measure(self.output, "plain", 1, 1)
+        self.assertTrue(plain["outcome"]["valid"], plain)
+        self.assertEqual(plain["outcome"]["counts"]["tests"], run.CASES)
+        self.assertGreater(plain["cpu_seconds"], 0.5)
+        ordinary = run.measure(self.output, "ordinary", 2, 1)
+        self.assertTrue(ordinary["outcome"]["valid"], ordinary)
+        self.assertEqual(ordinary["phases"]["scoped_sessions"], 0)
+        self.assertGreater(ordinary["phases"]["ordinary_session_seconds"], 0)
+        self.assertFalse(
+            (self.output / "projects").exists() and any((self.output / "projects").iterdir())
+        )
+        environment = run.environment(self.output, "harness check", "0" * 40)
+        self.assertEqual(environment["workload_cases"], run.CASES)
+        summary = run.summarize(self.output)
+        self.assertEqual(summary["invalid_rows"], [])
+        self.assertEqual([entry["series"] for entry in summary["results"]], ["plain", "ordinary"])
+        self.assertEqual(summary["results"][0]["wall_ratio_to_plain"], 1.0)
+        self.assertIn("| ordinary | 2 | 1 |", (self.output / "results.md").read_text())
+
+    def test_summary_reports_median_and_spread_and_flags_invalid_rows(self):
+        rows = self.output / "rows"
+        rows.mkdir()
+        for repetition, (wall, cpu) in enumerate([(1.0, 2.0), (3.0, 4.0), (2.0, 3.0)], 1):
+            row = {
+                "series": "plain",
+                "workers": 1,
+                "repetition": repetition,
+                "wall_seconds": wall,
+                "cpu_seconds": cpu,
+                "cgroup_cpu_seconds": None,
+                "outcome": {"valid": True},
+                "phases": None,
+            }
+            (rows / f"plain-w1-r{repetition}.json").write_text(json.dumps(row))
+        broken = dict(row, repetition=4, outcome={"valid": False})
+        (rows / "plain-w1-r4.json").write_text(json.dumps(broken))
+        summary = run.summarize(self.output)
+        (entry,) = summary["results"]
+        self.assertEqual(entry["wall_seconds"]["median"], 2.0)
+        self.assertEqual((entry["wall_seconds"]["min"], entry["wall_seconds"]["max"]), (1.0, 3.0))
+        self.assertEqual(entry["cpu_seconds"]["n"], 3)
+        self.assertEqual(summary["invalid_rows"], ["plain-w1-r4"])
+
+
+class Plan(unittest.TestCase):
+    def test_plan_interleaves_every_configuration_each_repetition(self):
+        lines = run.plan(Path("/results"), 3)
+        configurations = run.configurations()
+        self.assertEqual(len(lines), 3 * len(configurations))
+        self.assertEqual(len(configurations), 10)
+        firsts = [lines[index * len(configurations)] for index in range(3)]
+        self.assertEqual(len(set(firsts)), 3)
+        for series, workers in configurations:
+            matching = [
+                line
+                for line in lines
+                if re.search(rf"--series {series} --workers {workers} ", line + " ")
+            ]
+            self.assertEqual(len(matching), 3)
+
+    def test_plan_lines_run_the_measure_command(self):
+        line = run.plan(Path("/results"), 1)[0]
+        self.assertTrue(line.startswith("python benchmarks/run.py measure --output /results "))
+        completed = subprocess.run(
+            [sys.executable, str(Path(run.__file__)), "measure", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0)
 
 
 if __name__ == "__main__":

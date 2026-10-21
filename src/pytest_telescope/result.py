@@ -1,4 +1,4 @@
-"""Strict, distinct collection and single-case execution result protocols."""
+"""Strict, distinct collection, execution and ordinary-session result protocols."""
 
 import hashlib
 import json
@@ -13,7 +13,6 @@ COMMON = {
     "complete",
     "leaked_descendants",
     "worker_seconds",
-    "cpu_seconds",
     "failures",
 }
 FIELDS = COMMON | {"collected", "passed", "failed", "skipped", "case_ids"}
@@ -51,15 +50,14 @@ def _common(result, nonce, codes):
         return False
     if result["leaked_descendants"]:
         return False
-    for field in ("worker_seconds", "cpu_seconds"):
-        value = result[field]
-        if type(value) not in (int, float) or value < 0:
+    value = result["worker_seconds"]
+    if type(value) not in (int, float) or value < 0:
+        return False
+    try:
+        if not math.isfinite(value):
             return False
-        try:
-            if not math.isfinite(value):
-                return False
-        except OverflowError:
-            return False
+    except OverflowError:
+        return False
     failures = result["failures"]
     if type(failures) is not list or len(failures) > 64:
         return False
@@ -136,10 +134,22 @@ def validate_collection(result, nonce=None, successful_only=False):
     if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5)):
         return False
     items = result["items"]
+    if not _inventory(items):
+        return False
+    if result["exit_code"] == 0 and (not result["complete"] or result["failures"]):
+        return False
+    if result["exit_code"] == 5 and (
+        not result["complete"] or result["failures"] or any(item["selected"] for item in items)
+    ):
+        return False
+    return not successful_only or result["exit_code"] == 0
+
+
+def _inventory(items):
     if type(items) is not list or len(items) > 100_000:
         return False
     identities = set()
-    encoded_budget = len(json.dumps({**result, "items": []}, separators=(",", ":")).encode())
+    encoded_budget = 4096
     for index, item in enumerate(items):
         if type(item) is not dict or set(item) != {
             "case_id",
@@ -193,15 +203,73 @@ def validate_collection(result, nonce=None, successful_only=False):
         if encoded_budget > MAX_INVENTORY_BYTES:
             return False
     orders = [item["order"] for item in items if item["selected"]]
-    if sorted(orders) != list(range(len(orders))):
+    return sorted(orders) == list(range(len(orders)))
+
+
+def validate_ordinary(result, nonce=None):
+    """One ordinary session: its full collected inventory and its own ordinary outcomes."""
+    fields = FIELDS | {
+        "kind",
+        "inventory_complete",
+        "items",
+        "case_results",
+        "dispatch_started",
+        "declaration_error",
+    }
+    if type(result) is not dict or set(result) != fields:
         return False
-    if result["exit_code"] == 0 and (not result["complete"] or result["failures"]):
-        return False
-    if result["exit_code"] == 5 and (
-        not result["complete"] or result["failures"] or any(item["selected"] for item in items)
+    if (
+        type(result["protocol"]) is not int
+        or result["protocol"] != 1
+        or result["kind"] != "ordinary"
     ):
         return False
-    return not successful_only or result["exit_code"] == 0
+    if not _common(result, nonce, (0, 1, 2, 3, 4, 5)):
+        return False
+    if (
+        type(result["inventory_complete"]) is not bool
+        or type(result["dispatch_started"]) is not bool
+        or type(result["declaration_error"]) is not bool
+        or (result["declaration_error"] and result["exit_code"] != 4)
+        or not _inventory(result["items"])
+    ):
+        return False
+    ids, rows = result["case_ids"], result["case_results"]
+    if type(ids) is not list or type(rows) is not list or len(ids) != len(rows):
+        return False
+    if any(type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value) for value in ids):
+        return False
+    if len(set(ids)) != len(ids) or not set(ids).issubset(
+        {item["case_id"] for item in result["items"] if item["selected"]}
+    ):
+        return False
+    counts = dict(passed=0, failed=0, skipped=0, **{"not-run": 0})
+    for case, row in zip(ids, rows):
+        if type(row) is not dict or set(row) != {"case_id", "outcome", "complete"}:
+            return False
+        if row["case_id"] != case or type(row["complete"]) is not bool:
+            return False
+        if type(row["outcome"]) is not str or row["outcome"] not in counts:
+            return False
+        if row["outcome"] == "not-run" and row["complete"]:
+            return False
+        if not result["dispatch_started"] and row["outcome"] != "not-run":
+            return False
+        counts[row["outcome"]] += 1
+    for key in ("collected", "passed", "failed", "skipped"):
+        if type(result[key]) is not int or result[key] != (
+            len(ids) if key == "collected" else counts[key]
+        ):
+            return False
+    if result["complete"] and (
+        not result["inventory_complete"] or not all(row["complete"] for row in rows)
+    ):
+        return False
+    if result["exit_code"] in (0, 5) and (
+        not result["complete"] or counts["failed"] or counts["not-run"] or result["failures"]
+    ):
+        return False
+    return True
 
 
 def validate_batch(result, nonce=None, successful_only=False, group_id=None, case_ids=None):

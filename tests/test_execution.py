@@ -1,17 +1,16 @@
-"""Required real Docker integration tests; never skip missing enforcement."""
+"""Required real Bubblewrap integration tests; they fail rather than skip without it."""
 
 import concurrent.futures
 import json
 
 import pytest
 
-from pytest_telescope import controller, runtime
+from pytest_telescope import controller
 from pytest_telescope.model import DeclarationError, load, snapshot
 
 
 @pytest.fixture
 def project(tmp_path):
-    metadata = runtime.build_runtime(tmp_path)
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\npythonpath = ["."]\n'
         "[tool.pytest_telescope.bundles.unit]\n"
@@ -24,8 +23,7 @@ def project(tmp_path):
         "import json\nfrom pathlib import Path\nfrom helper import VALUE\n"
         'def test_unit():\n    assert json.loads(Path("data.json").read_text())["value"] == VALUE\n'
     )
-    yield tmp_path
-    runtime.command(["docker", "image", "rm", metadata["image"]])
+    return tmp_path
 
 
 def run(project, **options):
@@ -45,7 +43,7 @@ def test_real_cold_warm_force_and_no_cache(project):
 def test_boundaries_cover_collection_native_subprocess_fixtures_and_teardown(project):
     (project / "undeclared.txt").write_text("synthetic private project input")
     (project / "conftest.py").write_text(
-        "import ctypes, os, socket, subprocess, sys\nfrom pathlib import Path\nimport pytest\n"
+        "import ctypes, os, subprocess, sys\nfrom pathlib import Path\nimport pytest\n"
         "def verify():\n"
         '    assert not Path("undeclared.txt").exists()\n'
         '    assert ctypes.CDLL(None).open(b"/project/undeclared.txt", 0) == -1\n'
@@ -54,9 +52,6 @@ def test_boundaries_cover_collection_native_subprocess_fixtures_and_teardown(pro
         '    with pytest.raises(OSError): Path("/etc/blocked").write_text("blocked")\n'
         "    child = subprocess.run([sys.executable, '-I', '-c', 'from pathlib import Path; assert not Path(\\\"undeclared.txt\\\").exists()'], timeout=5)\n"
         "    assert child.returncode == 0\n"
-        "    connection = socket.socket(); connection.settimeout(1)\n"
-        '    with pytest.raises(OSError): connection.connect(("1.1.1.1", 443))\n'
-        "    connection.close()\n"
         "verify()\n"
         "@pytest.fixture(autouse=True)\n"
         "def boundary():\n    verify()\n    yield\n    verify()\n"
@@ -97,7 +92,10 @@ def test_failed_and_corrupt_records_execute_again(project):
     record = next((project / ".pytest-telescope/cache").glob("*.json"))
     record.write_text('{"incomplete":')
     assert run(project)["counts"]["executed"] == 1
-    (project / "test_unit.py").write_text("def test_unit(): assert False\n")
+    (project / "test_unit.py").write_text(
+        'import pytest\npytestmark = pytest.mark.telescope(bundles=["unit"])\n'
+        "def test_unit(): assert False\n"
+    )
     first, second = run(project), run(project)
     assert first["counts"]["failed"] == second["counts"]["failed"] == 1
     assert second["counts"]["reused"] == 0
@@ -143,18 +141,6 @@ def test_glob_membership_absence_and_symlinks(project):
     (project / "alias.py").unlink()
     (project / "alias.py").symlink_to("data.json")
     assert run(project)["counts"]["executed"] == 1
-
-
-def test_runtime_identity_and_noncacheable_target(project):
-    run(project)
-    metadata = project / ".pytest-telescope/runtime.json"
-    content = json.loads(metadata.read_text())
-    content["worker"] = "0" * 64
-    metadata.write_text(json.dumps(content))
-    report = controller.run(project)
-    assert report["status"] == "infrastructure_error"
-    assert report["collection"]["outcome"] == "infrastructure_error"
-    assert report["units"] == []
 
 
 def test_noncacheable_target_always_runs(project):
@@ -212,10 +198,13 @@ def test_session_fixture_is_fresh_for_every_case(project):
     (project / "conftest.py").write_text(
         'import pytest\nstate = []\n@pytest.fixture(scope="session")\ndef shared():\n    return state\n'
     )
+    scope = "import pytest\n@pytest.mark.telescope(inputs=[])\n"
     (project / "test_first.py").write_text(
-        'def test_first(shared):\n    assert shared == []\n    shared.append("first")\n'
+        scope + 'def test_first(shared):\n    assert shared == []\n    shared.append("first")\n'
     )
-    (project / "test_second.py").write_text("def test_second(shared):\n    assert shared == []\n")
+    (project / "test_second.py").write_text(
+        scope + "def test_second(shared):\n    assert shared == []\n"
+    )
     (project / "test_unit.py").unlink()
     (project / "pyproject.toml").write_text(
         '[tool.pytest_telescope.defaults]\ninputs = ["conftest.py"]\n'

@@ -34,11 +34,13 @@ def group_jobs(jobs, mode, state):
     )
 
 
-def group_row(job):
+def group_row(job, mode):
     return dict(
         group_id=job["key"],
         suite=job["suite"].name,
-        file=job["item"]["file"],
+        files=[job["item"]["file"]],
+        route="scoped",
+        profile=mode + "-v1",
         case_ids=job["case_ids"],
         outcome="infrastructure_error",
         complete=False,
@@ -48,7 +50,6 @@ def group_row(job):
         attempt_seconds=0,
         timing_complete=True,
         worker_seconds=0,
-        cpu_seconds=0,
         passed=0,
         failed=0,
         skipped=0,
@@ -60,7 +61,7 @@ def group_row(job):
 
 def project_result(job, result, mode, *, attempts=0, reused=False, reason="", attempt_seconds=0):
     """Keep observed member outcomes separate from the whole session's eligibility."""
-    group = group_row(job)
+    group = group_row(job, mode)
     group.update(attempts=attempts, attempt_seconds=attempt_seconds, timing_complete=attempts <= 1)
     if result is None:
         if attempts:
@@ -94,7 +95,6 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
             if result["exit_code"] in (1, 2)
             else "infrastructure",
             worker_seconds=0 if reused else result["worker_seconds"],
-            cpu_seconds=0 if reused else result["cpu_seconds"],
             passed=result["passed"],
             failed=result["failed"],
             skipped=result["skipped"],
@@ -123,6 +123,7 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
                     case_id=item["case_id"],
                     suite=job["suite"].name,
                     file=item["file"],
+                    route="scoped",
                     selected=True,
                     group_id=job["key"],
                     result_status=status,
@@ -135,7 +136,6 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
                     failed=int(status == "failed"),
                     skipped=int(status == "skipped"),
                     worker_seconds=None if mode == "batch" else group["worker_seconds"],
-                    cpu_seconds=None if mode == "batch" else group["cpu_seconds"],
                     failures=[]
                     if result is None
                     else [

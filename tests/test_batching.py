@@ -1,11 +1,15 @@
-"""Observable restricted-Docker controls for the optional identical-scope batch profile."""
+"""Observable real-Bubblewrap controls for the optional identical-scope batch profile.
+
+These controls launch bwrap and are never skipped.
+"""
 
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
-from pytest_telescope import controller, runtime
+from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError, fingerprint
 from pytest_telescope.plan import make_plan
 
@@ -38,16 +42,13 @@ def case_id(node, suite="default"):
 
 @pytest.fixture
 def project(tmp_path):
-    image = runtime.build_runtime(tmp_path)["image"]
-    yield tmp_path
-    runtime._image_info(image, runtime._project(tmp_path))
-    runtime.command(["docker", "image", "rm", image])
+    return tmp_path
 
 
 def run(root, *, status="passed", **options):
     report = controller.run(root, explain=True, **options)
     assert report["status"] == status, report
-    assert report["schema"] == 2 and report["kind"] == "run"
+    assert report["schema"] == 3 and report["kind"] == "run"
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True
     selected = {row["case_id"]: row for row in report["units"] if row["selected"]}
@@ -66,13 +67,8 @@ def run(root, *, status="passed", **options):
     assert all(row["group_id"] is None for row in report["units"] if not row["selected"])
     if report["execution"]["mode"] == "batch":
         assert report["execution"]["profile"] == "batch-v1"
-        assert all(
-            row["worker_seconds"] is None and row["cpu_seconds"] is None for row in report["units"]
-        )
-    assert report["worker_cpu_seconds"] == pytest.approx(
-        report["collection"]["cpu_seconds"]
-        + sum(group["cpu_seconds"] for group in report["groups"])
-    )
+        assert all(row["worker_seconds"] is None for row in report["units"])
+    assert all("cpu_seconds" not in group for group in report["groups"])
     return report
 
 
@@ -146,15 +142,15 @@ class TestShared:
     assert warm["counts"]["reused"] == 3
     assert warm["groups"][0]["outcome"] == "reused"
     assert warm["groups"][0]["attempts"] == 0
-    assert warm["groups"][0]["worker_seconds"] == warm["groups"][0]["cpu_seconds"] == 0
+    assert warm["groups"][0]["worker_seconds"] == 0
 
 
 def test_default_case_mode_and_singleton_batch_profiles_are_mutually_ineligible(project):
     configure(project, mode="case")
     simple_module(project, count=1)
-    assert make_plan(project)["execution"] == {"mode": "case", "profile": "case-v1"}
+    assert make_plan(project)["execution"] == {"mode": "case", "profile": "case-v1", "workers": 1}
     first = run(project)
-    assert first["execution"] == {"mode": "case", "profile": "case-v1"}
+    assert first["execution"] == {"mode": "case", "profile": "case-v1", "workers": 1}
     assert len(first["groups"]) == 1
     batch = run(project, execution_mode="batch")
     assert batch["counts"]["executed"] == 1 and batch["counts"]["reused"] == 0
@@ -189,7 +185,11 @@ def test_right():
 """,
     )
     cold = run(project)
-    assert sorted(len(group["case_ids"]) for group in cold["groups"]) == [1, 2]
+    # The mixed file is collected by an ordinary session that selects no ordinary case.
+    ordinary = [group for group in cold["groups"] if group["route"] == "ordinary"]
+    assert [(group["case_ids"], group["profile"]) for group in ordinary] == [([], "ordinary-v1")]
+    scoped = [group for group in cold["groups"] if group["route"] == "scoped"]
+    assert sorted(len(group["case_ids"]) for group in scoped) == [1, 2]
     assert run(project)["counts"]["reused"] == 3
     put(project, "left.txt", "left changed")
     changed = run(project)
@@ -225,14 +225,16 @@ test_roots = ["tests"]
         put(
             project,
             filename,
+            "import pytest\npytestmark = pytest.mark.telescope(inputs=['conftest.py'])\n"
             "def test_first(shared):\n    assert shared == []\n    shared.append(1)\ndef test_second(shared):\n    assert shared == [1]\n",
         )
     report = run(project)
     assert len(report["groups"]) == 4
-    assert [(group["suite"], group["file"]) for group in report["groups"]] == sorted(
-        (group["suite"], group["file"]) for group in report["groups"]
+    assert all(len(group["files"]) == 1 for group in report["groups"])
+    assert [(group["suite"], group["files"][0]) for group in report["groups"]] == sorted(
+        (group["suite"], group["files"][0]) for group in report["groups"]
     )
-    assert {(group["suite"], group["file"]) for group in report["groups"]} == {
+    assert {(group["suite"], group["files"][0]) for group in report["groups"]} == {
         (suite, filename)
         for suite in ("first", "second")
         for filename in ("tests/test_one.py", "tests/test_two.py")
@@ -332,7 +334,7 @@ def test_last(): pass
     assert run(project, force=True)["counts"]["executed"] == 3
 
 
-def test_metadata_and_runtime_identity_invalidate_whole_batch(project, monkeypatch):
+def test_metadata_and_sandbox_identity_invalidate_whole_batch(project, monkeypatch):
     configure(
         project,
         extra="""
@@ -357,13 +359,9 @@ def test_second(): assert version("example-batch") in ("1.0", "2.0")
     assert run(project)["counts"]["reused"] == 2
     put(project, "package/pyproject.toml", '[project]\nname="example-batch"\nversion="2.0"\n')
     assert run(project)["counts"]["executed"] == 2
-    original = runtime.identity
-
-    def identity(root, **kwargs):
-        value = original(root, **kwargs)
-        return value | {"execution": value["execution"] | {"synthetic_identity_revision": 1}}
-
-    monkeypatch.setattr(runtime, "identity", identity)
+    original = sandbox.prepare
+    # A different interpreter or set of installed distributions changes this identity.
+    monkeypatch.setattr(sandbox, "prepare", lambda root: replace(original(root), identity="0" * 64))
     assert run(project)["counts"]["executed"] == 2
 
 
@@ -461,11 +459,12 @@ def test_cli_execution_mode_and_api_validation(project, monkeypatch, capsys):
     monkeypatch.chdir(project)
     assert controller.main(["run", "--execution-mode", "batch"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["schema"] == 2 and report["execution"] == {"mode": "batch", "profile": "batch-v1"}
+    assert report["schema"] == 3
+    assert report["execution"] == {"mode": "batch", "profile": "batch-v1", "workers": 1}
     assert len(report["groups"]) == 1 and report["counts"]["executed"] == 2
     assert controller.main(["run", "--execution-mode", "invalid"]) == 4
     refused = json.loads(capsys.readouterr().out)
-    assert refused["schema"] == 2 and refused["status"] == "declaration_error"
+    assert refused["schema"] == 3 and refused["status"] == "declaration_error"
     with pytest.raises(DeclarationError):
         controller.run(project, execution_mode="invalid")
 
@@ -485,7 +484,7 @@ pytestmark=pytest.mark.telescope(inputs=[])
 def test_large(number): pass
 """,
     )
-    original = runtime.execute
+    original = sandbox.execute
     collections = []
 
     def collection_only(*args, request, **kwargs):
@@ -495,43 +494,9 @@ def test_large(number): pass
         collections.append(1)
         return original(*args, request=request, **kwargs)
 
-    monkeypatch.setattr(runtime, "execute", collection_only)
+    monkeypatch.setattr(sandbox, "execute", collection_only)
     with pytest.raises(UnsupportedCapability) as raised:
         controller.run(project)
     assert raised.value.capability == "execution:batch-size"
     assert collections
     assert not list((project / ".pytest-telescope/cache").glob("*.json"))
-
-
-def test_batch_protocol_and_shared_fixture_on_supported_pytest8(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        runtime,
-        "DEFAULT_REQUIREMENTS",
-        runtime.DEFAULT_REQUIREMENTS.replace("pytest==9.1.1", "pytest==8.3.5"),
-    )
-    put(tmp_path, "pyproject.toml", '[tool.pytest_telescope.execution]\nmode="batch"\n')
-    put(
-        tmp_path,
-        "test_compatibility.py",
-        """
-import pytest
-pytestmark = pytest.mark.telescope(inputs=[])
-@pytest.fixture(scope="session")
-def state():
-    values=[]
-    yield values
-    assert values == [0,1]
-@pytest.mark.parametrize("number", [0,1])
-def test_shared(number,state):
-    assert pytest.__version__ == "8.3.5"
-    assert len(state) == number
-    state.append(number)
-""",
-    )
-    image = runtime.build_runtime(tmp_path)["image"]
-    try:
-        cold = run(tmp_path)
-        assert cold["counts"]["executed"] == 2 and len(cold["groups"]) == 1
-        assert run(tmp_path)["counts"]["reused"] == 2
-    finally:
-        runtime.command(["docker", "image", "rm", image])

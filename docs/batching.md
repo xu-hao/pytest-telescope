@@ -1,13 +1,14 @@
 # Optional identical-scope batches
 
-This is the execution contract for the optional 0.1.0a3 batching profile.
-The [scoped execution contract](scoped-execution.md)
-continues to own source, metadata, suite and resource boundaries.
+This is the execution contract for the optional batching profile of scoped cases. The
+[ordinary and Bubblewrap execution contract](bubblewrap.md) owns routing and the sandbox
+view; the [metadata and suite contract](scoped-execution.md) owns metadata and suites.
+Batching never applies to ordinary cases, which always share one ordinary session per suite.
 
 ## Choose fixture lifetime explicitly
 
-The default remains `case`: every selected case owns a fresh pytest session, restricted
-worker and private scratch. Opt into `batch` when ordinary pytest fixture sharing within
+The default remains `case`: every selected scoped case owns a fresh sandbox, pytest
+session and private scratch. Opt into `batch` when ordinary pytest fixture sharing within
 an exactly equal scope is appropriate:
 
 ```toml
@@ -21,10 +22,10 @@ omission uses configured mode, defaulting to `case`. An override changes executi
 identity without rewriting project configuration. `plan` reports the configured mode but
 cannot predict dynamically collected group membership.
 
-The versioned execution profiles are `case-v1` and `batch-v1`. Budget dimensions and
-per-worker resource limits retain their current meanings: a batch occupies one worker
-slot and has one worker's limits, regardless of member count. Parallelism never infers
-host CPU capacity. Batch mode never changes readable source or metadata permissions.
+The versioned execution profiles are `case-v1` and `batch-v1`. A batch occupies one
+worker slot regardless of member count; `workers` bounds how many cases or batches run at
+once. Parallelism never infers host CPU capacity. Batch mode never changes readable source
+or metadata permissions.
 
 ## Exact scope and deterministic membership
 
@@ -44,10 +45,10 @@ module and validates its complete inventory and the requested ordered selected s
 changed, missing, additional or reordered members refuse rather than guessing.
 
 A group's SHA-256 identity binds profile, suite/context, source module, expanded scope,
-ordered selected membership, containing-file inventory, arguments, explicit plugin and
-runtime identity, environment and worker policy. Its members retain their stable
+ordered selected membership, containing-file inventory, arguments, explicit plugins,
+sandbox identity (policy, interpreter and installed distributions) and environment. Its members retain their stable
 suite-aware case digests. Selection additions/removals, order changes and relevant input
-or runtime changes cannot reuse another group's evidence. Case and batch records are
+or environment changes cannot reuse another group's evidence. Case and batch records are
 mutually ineligible, including singleton batches.
 
 A batch contains at most 4,096 selected members. An oversized group refuses the entire
@@ -83,13 +84,13 @@ pass remains an observed pass even when its group cannot be cached. Skips are co
 but skip reason text and arbitrary captured output are not supported diagnostics.
 
 Infrastructure retries remain bounded at two attempts per group. Only the final valid
-attempt supplies member results and worker measurements. Controller wall time spans all
+attempt supplies member results and worker time. Controller wall time spans all
 attempts; `timing_complete` is false after retries or unavailable results, because worker
-CPU/time from an opaque failed attempt is unknown. These measurements are separate from
+time from an opaque failed attempt is unknown. These measurements are separate from
 member counts. Invalid worker output, collection drift, cancellation,
-failed descendant/container cleanup and outer lifecycle failure cannot mint successes.
+failed descendant cleanup and outer lifecycle failure cannot mint successes.
 Cancellation stops new submissions and drains all owned active groups. Unstarted
-members remain explicitly accounted. No fallback widens runtime capabilities or source.
+members remain explicitly accounted. No fallback widens the view or runs ordinary.
 
 The main controller retains the global cache lock and pending-record staging. A group
 record is staged only for a complete successful group, then becomes eligible only after
@@ -98,7 +99,7 @@ prevents publication of all new records, including other groups' successes.
 
 ## Machine accounting
 
-The public result schema becomes **2** for both execution modes and typed refusals.
+The public result schema is **3** for both execution modes and typed refusals.
 Existing inventory/case digest rules and count spellings remain unchanged. The
 [run result reference](result-schema.md) remains the authority for those fields.
 
@@ -111,14 +112,14 @@ if planning was interrupted before completion. A group row contains:
 | Field | Meaning |
 | --- | --- |
 | `group_id` | Opaque lowercase SHA-256 identity bound to the exact execution context above. |
-| `suite`, `file` | Public structural membership. |
+| `suite`, `files`, `route` | Public structural membership: one file and route `scoped` for case and batch groups. |
 | `case_ids` | Ordered selected opaque member identities. |
 | `outcome` | `executed`, `reused`, `failed`, `incomplete`, or `infrastructure_error`. |
 | `complete` | Every requested member produced a validated final teardown outcome. |
 | `cache_eligible` | Complete successful evidence accepted after lifecycle and enabled reuse policy; false for `--no-cache` or `cache=False`. |
 | `attempts` | Worker attempts for this group; zero on reuse or before worker start. |
 | `attempt_seconds` | Controller wall time across group attempts and retries. |
-| `worker_seconds`, `cpu_seconds` | Final valid attempt worker measurements, counted once; zero on reuse or when unavailable. |
+| `worker_seconds` | Final valid attempt worker wall time, counted once; zero on reuse or when unavailable. |
 | `timing_complete` | False when retries or unavailable worker measurements prevent complete timing accounting. |
 | `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Final-attempt member totals; distinguish known unrun members from attempted members without a valid result. |
 
@@ -126,17 +127,16 @@ Each case row adds `group_id`, `result_status` (`passed`, `failed`, `skipped`, `
 or `null` for unselected/unresolved infrastructure), and `complete`. Case `attempts`
 reports its group's attempt count; do not sum member attempts to count workers. In batch
 mode every case row, including unselected and unresolved members, has `worker_seconds`
-and `cpu_seconds` set to `null`: shared fixture and worker costs
-cannot honestly be attributed to individual cases. Case mode retains singleton timings.
+set to `null`: shared fixture and worker costs cannot honestly be attributed to
+individual cases. Case mode retains singleton timings.
 Group `failures` retains bounded phase/location/type/opaque-ID evidence, including
 collection errors whose IDs do not identify a requested member. A nonzero pytest
 session verdict fails the group/run even if every member report passed; those observed
 passes do not become reusable evidence. See the result reference for the preserved
 case-profile collection-failure verdict and separate not-run member counts.
 
-Group timings are the authority for execution totals and `worker_cpu_seconds` counts each
-group once plus collection. Per-worker limits and aggregate concurrency remain in
-`resources` and apply equally to either profile.
+Group timings are the authority for execution totals. pytest-telescope reports no CPU
+usage; measure it for the whole invocation in the job that runs pytest.
 
 Case `outcome` keeps the existing vocabulary. Observed passed/skipped members are
 `executed` even in a failed/incomplete group; observed failures are `failed`; missing
@@ -158,22 +158,16 @@ the whole membership without claiming that missing evidence proves no execution.
 
 All persistent membership uses opaque case/group identities. Raw collected node IDs,
 parameter values, skip reasons and exception messages do not enter group records or
-summaries. Explicit caller selector expressions still reach isolated workers unchanged.
+summaries. Explicit caller selector expressions still reach sandboxes unchanged.
 The existing bounded inventories, output and cache storage remain bounded; groups are
 limited by the same 100,000-case invocation bound and validated serialized record limits.
 
-## Decisive proof and qualification
+## Qualification
 
-The synthetic installed-runtime Docker proof in `scripts/probe_batching.py` checks
-ordinary shared session/module/class setup and teardown, distinct function `tmp_path`,
-shared scratch, denied undeclared reads, equal-scope eligibility, unequal-scope separation,
-and honest partial execution for `-x`/`--maxfail` and shared teardown failure. It proves
-pytest/runtime mechanisms, not production cache correctness.
-
-Production behavioral controls additionally cover suite/module/context boundaries,
-selection/membership/order and all source/resource/metadata/runtime invalidation,
-partial/corrupt records, noncacheable groups, bounded retries, cancellation and cleanup.
-Qualification uses installed distributions and real restricted Docker execution, followed
-by proportionate Python/pytest matrix coverage and ordinary/cold/warm/selective timings
-at the same synthetic scale as the retained 128-case per-case trial. Report overhead and
-fixture-lifetime tradeoffs without universal speedup claims.
+Behavioral controls run real Bubblewrap sandboxes and cover ordinary shared
+session/module/class setup and teardown within a group, distinct function `tmp_path`,
+shared scratch, absent undeclared files, equal-scope eligibility, unequal-scope
+separation, honest partial execution for `-x`/`--maxfail` and shared teardown failure,
+selection/membership/order changes, partial or corrupt records, noncacheable groups,
+bounded retries and cleanup. Report overhead and fixture-lifetime tradeoffs without
+universal speedup claims.

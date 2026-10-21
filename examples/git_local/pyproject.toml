@@ -1,6 +1,0 @@
-[tool.pytest_telescope]
-test_roots = ["tests"]
-
-[tool.pytest_telescope.runtime]
-profile = "git-local-v1"
-requires = ["git-local"]

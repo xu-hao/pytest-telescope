@@ -28,6 +28,8 @@ def main() -> None:
     if len(wheels) != 1:
         raise RuntimeError("expected exactly one built wheel")
     run("-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheels[0]))
+    # Tests that launch Bubblewrap are required; they fail rather than skip on hosts that
+    # deny its namespaces.
     run("-m", "pytest", "-q", "--basetemp", str(output / "tests"), timeout=900)
     run("-m", "unittest", "discover", "-s", "benchmarks", "-p", "test_*.py")
 

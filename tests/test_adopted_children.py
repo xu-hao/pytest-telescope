@@ -1,24 +1,23 @@
-"""Completed children are reaped; surviving descendants always refuse evidence."""
+"""Completed children are reaped; surviving descendants always refuse evidence.
 
-import json
+The sandboxed worker is PID 1 of its namespace and adopts orphaned descendants. These
+controls launch bwrap and are never skipped.
+"""
 
 import pytest
 
-from pytest_telescope import controller, runtime
+from pytest_telescope import controller, sandbox
 
 
 @pytest.fixture
 def project(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "pyproject.toml").write_text('[tool.pytest_telescope]\ntest_roots=["tests"]\n')
-    metadata = runtime.build_runtime(tmp_path)
     try:
         yield tmp_path
     finally:
-        runtime.recover(tmp_path)
-        for image in json.loads((tmp_path / ".pytest-telescope/images.json").read_text()):
-            runtime.command(["docker", "image", "rm", image], timeout=30)
-        assert metadata["image"]
+        sandbox.recover(tmp_path)
+        assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
 
 
 CHILD = r"""
@@ -32,11 +31,6 @@ def adopted_child(live):
         if grandchild == 0:
             if live:
                 time.sleep(30)
-            else:
-                # Charge measurable child CPU before exiting.
-                started = time.process_time()
-                while time.process_time() - started < 0.03:
-                    pass
             os._exit(0)
         marker.write_text(str(grandchild))
         os._exit(0)
@@ -72,7 +66,6 @@ def test_completed_adopted_child_vs_live_descendant(project, mode, phase, live):
     else:
         assert result["status"] == "passed", result
         assert result["counts"]["executed"] == 1
-        assert result["worker_cpu_seconds"] >= 0.03
         warm = controller.run(project, execution_mode=mode)
         assert warm["status"] == "passed" and warm["counts"]["reused"] == 1
 

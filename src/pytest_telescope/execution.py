@@ -1,9 +1,9 @@
-"""Explicit worker envelopes and independent pytest suite configuration."""
+"""Execution settings and independent pytest suite configuration."""
 
 import configparser
 import shlex
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .model import (
@@ -16,47 +16,32 @@ from .model import (
     sequence,
 )
 
-DEFAULT_WORKER = dict(cpus=1, memory_bytes=536870912, processes=128, scratch_bytes=67108864)
 MAX_SUITES = 64
 MAX_WORKERS = 32
+REMOVED_EXECUTION = {
+    "worker": "per-worker resource limits were removed; limit resources in the job that "
+    "runs pytest and set execution.workers for parallel sandboxes",
+    "budget": "aggregate resource budgets were removed; limit resources in the job that "
+    "runs pytest and set execution.workers for parallel sandboxes",
+}
 
 
-@dataclass(frozen=True)
-class Envelope:
-    worker: dict
-    budget: dict
-    concurrency: int
+def execution_config(config):
+    config = mapping(config, "execution")
+    for name, message in REMOVED_EXECUTION.items():
+        if name in config:
+            raise DeclarationError(message)
+    return mapping(config, "execution", {"mode", "workers"})
 
 
-def envelope(config, override=None):
-    config = mapping(config, "execution", {"worker", "budget", "mode"})
+def worker_count(config, override=None):
+    """Concurrent scoped sandboxes; a count, never a resource budget."""
+    config = execution_config(config)
     execution_mode(config)
-
-    def dimensions(value, label):
-        value = mapping(value, label, set(DEFAULT_WORKER))
-        if set(value) != set(DEFAULT_WORKER) or any(
-            type(n) is not int or n <= 0 for n in value.values()
-        ):
-            raise DeclarationError(
-                label + " requires positive integer cpus, memory_bytes, processes and scratch_bytes"
-            )
-        if (
-            value["cpus"] > 1024
-            or value["memory_bytes"] > 2**50
-            or value["processes"] > 1_000_000
-            or value["scratch_bytes"] > 2**50
-        ):
-            raise DeclarationError(label + " exceeds supported resource dimensions")
-        return dict(value)
-
-    worker = dimensions(config.get("worker", DEFAULT_WORKER), "execution.worker")
-    budget = dimensions(
-        override if override is not None else config.get("budget", worker), "execution.budget"
-    )
-    count = min(MAX_WORKERS, *(budget[key] // worker[key] for key in worker))
-    if count < 1:
-        raise DeclarationError("aggregate budget cannot fit one worker in every dimension")
-    return Envelope(worker, budget, count)
+    count = config.get("workers", 1) if override is None else override
+    if type(count) is not int or not 1 <= count <= MAX_WORKERS:
+        raise DeclarationError(f"workers must be an integer from 1 to {MAX_WORKERS}")
+    return count
 
 
 def execution_mode(config, override=None):
@@ -82,7 +67,6 @@ class Suite:
     raw: bytes
     inventory: list
     structural_files: list | None = None
-    python: dict = field(default_factory=lambda: {"profile": "default", "source_roots": []})
 
     def identity(self):
         result = {
@@ -98,7 +82,6 @@ class Suite:
                 "args",
                 "config_args",
                 "plugins",
-                "python",
             )
         }
         if self.structural_files is not None:
@@ -141,10 +124,7 @@ def config_options(root, name):
         raise DeclarationError("invalid suite pytest configuration") from exc
 
 
-def suites(root, spec, selected=None, python_profile=None, source_roots=None):
-    from . import python_source
-
-    inherited = python_source.normalize(root, spec.get("python", {}))
+def suites(root, spec, selected=None):
     entries = spec.get("suites")
     if entries is None:
         for name in ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg"):
@@ -175,6 +155,12 @@ def suites(root, spec, selected=None, python_profile=None, source_roots=None):
             raise DeclarationError(
                 "suite names require 1 to 128 alphanumeric, underscore or hyphen characters"
             )
+        entry = mapping(entry, "suite")
+        if "python" in entry:
+            raise DeclarationError(
+                "suite python source lookup was removed; scoped tests use the invoking "
+                "interpreter and child interpreters need an explicit PYTHONPATH"
+            )
         entry = mapping(
             entry,
             "suite",
@@ -188,16 +174,7 @@ def suites(root, spec, selected=None, python_profile=None, source_roots=None):
                 "args",
                 "plugins",
                 "capabilities",
-                "python",
             },
-        )
-        source_settings = (
-            python_source.normalize(root, entry["python"], complete=True)
-            if "python" in entry
-            else inherited
-        )
-        source_settings = python_source.normalize(
-            root, source_settings, python_profile, source_roots
         )
         sequence(
             [
@@ -225,9 +202,11 @@ def suites(root, spec, selected=None, python_profile=None, source_roots=None):
             ):
                 raise DeclarationError("suite root/cwd must be existing project directories")
         for capability in sequence(entry.get("capabilities", []), "capabilities"):
-            if capability not in {"python", "project:readonly", "scratch:noexec", "network:none"}:
+            if capability not in {"python", "project:readonly"}:
                 raise UnsupportedCapability(
-                    capability, "runtime profile does not qualify requested capability"
+                    capability,
+                    "the Bubblewrap sandbox controls only the filesystem view and does not "
+                    "provide this capability",
                 )
         raw, args, patterns = config_options(root, configuration)
         roots = [
@@ -265,7 +244,6 @@ def suites(root, spec, selected=None, python_profile=None, source_roots=None):
                 patterns,
                 raw,
                 [],
-                python=source_settings,
             )
         )
     return result

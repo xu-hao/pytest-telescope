@@ -1,10 +1,13 @@
-"""Invocation-only file narrowing before source parsing and restricted collection."""
+"""Invocation-only file narrowing before source parsing and collection.
+
+Controls that run scoped cases launch bwrap and are never skipped.
+"""
 
 import os
 
 import pytest
 
-from pytest_telescope import controller, runtime
+from pytest_telescope import controller, ordinary, sandbox
 from pytest_telescope.model import DeclarationError
 from pytest_telescope.plan import make_plan
 
@@ -55,19 +58,17 @@ test_roots = ["tests/addon"]
 
 def block_backend(monkeypatch):
     def forbidden(*args, **kwargs):
-        pytest.fail("static validation must not contact Docker or execute a worker")
+        pytest.fail("static validation must not start a sandbox or a pytest session")
 
-    for name in ("identity", "recover", "execute", "command", "build_runtime"):
-        monkeypatch.setattr(runtime, name, forbidden)
+    for name in ("prepare", "recover", "execute", "capture"):
+        monkeypatch.setattr(sandbox, name, forbidden)
+    monkeypatch.setattr(ordinary, "session", forbidden)
 
 
 @pytest.fixture
 def project(tmp_path):
     configure(tmp_path)
-    image = runtime.build_runtime(tmp_path)["image"]
-    yield tmp_path
-    runtime._image_info(image, runtime._project(tmp_path))
-    runtime.command(["docker", "image", "rm", image])
+    return tmp_path
 
 
 def run(root, *, status="passed", **kwargs):
@@ -75,12 +76,15 @@ def run(root, *, status="passed", **kwargs):
     assert report["status"] == status, report
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True
-    assert report["schema"] == 2
+    assert report["schema"] == 3
     return report
 
 
 def suite_files(report):
-    return {row["name"]: row["files"] for row in report["collection"]["suites"]}
+    files = {name: [] for name in report["suites"]}
+    for row in report["collection"]["suites"]:
+        files[row["name"]] = sorted(files[row["name"]] + row["files"])
+    return files
 
 
 def test_static_plan_narrows_before_ast_and_never_imports_or_contacts_backend(
@@ -104,7 +108,7 @@ def test_static_plan_narrows_before_ast_and_never_imports_or_contacts_backend(
     result = make_plan(tmp_path, suites=["core"], structural_files={"core": selected})
     assert result["inventory"] == sorted(selected)
     assert result["suites"][0]["inventory"] == sorted(selected)
-    assert result["case_inventory"] == "requires isolated pytest collection"
+    assert result["case_inventory"] == "requires pytest collection"
     assert not list(tmp_path.rglob("*.imported"))
     assert selected == ["tests/core/test_beta.py", "tests/core/test_alpha.py"]
 
@@ -314,12 +318,12 @@ def test_configured_python_file_patterns_still_constrain_overrides(tmp_path, mon
 
 
 @pytest.mark.parametrize("mode", ["case", "batch"])
-def test_structural_narrowing_preserves_broad_input_visibility_and_identity(project, mode):
+def test_structural_narrowing_keeps_unmarked_cases_ordinary(project, mode):
     put(
         project,
         "tests/core/test_alpha.py",
         "from pathlib import Path\n"
-        "def test_broad():\n"
+        "def test_ordinary():\n"
         '    assert Path("private.txt").read_text() == "synthetic undeclared input"\n'
         '    assert Path("tests/core/test_beta.py").is_file()\n',
     )
@@ -330,9 +334,10 @@ def test_structural_narrowing_preserves_broad_input_visibility_and_identity(proj
     }
     first = run(project, **options)
     assert first["counts"]["executed"] == 1
+    assert first["units"][0]["route"] == "ordinary"
     assert suite_files(first) == {"core": ["tests/core/test_alpha.py"]}
-    assert run(project, **options)["counts"]["reused"] == 1
-    put(project, "tests/core/test_beta.py", "# Changed broad input outside inventory.\n")
+    assert run(project, **options)["counts"]["executed"] == 1
+    put(project, "tests/core/test_beta.py", "# Changed file outside the inventory.\n")
     changed = run(project, **options)
     assert changed["counts"]["executed"] == 1
     assert changed["counts"]["not-selected"] == 0
