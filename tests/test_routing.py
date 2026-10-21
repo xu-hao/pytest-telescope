@@ -272,3 +272,28 @@ def test_removed_cli_command_and_flags_are_rejected(project, capsys, monkeypatch
     ):
         assert controller.main(arguments) == 4
         assert json.loads(capsys.readouterr().out)["status"] == "declaration_error"
+
+
+def test_ordinary_sessions_have_no_telescope_timeout(project):
+    """Normal pytest has no session deadline; the caller's job bounds ordinary sessions."""
+    put(
+        project,
+        "tests/test_slow.py",
+        "import time\n"
+        "\n"
+        "def test_slower_than_the_scoped_timeout():\n"
+        "    time.sleep(1)\n"
+        "\n"
+        "def test_real_failure_is_still_reported():\n"
+        "    time.sleep(0.2)\n"
+        "    assert False\n",
+    )
+    report = controller.run(project, timeout=0.2)
+    assert report["status"] == "failed", report
+    assert report["collection"]["outcome"] == "executed"
+    assert report["inventory_complete"] is True
+    assert report["counts"]["executed"] == 1 and report["counts"]["failed"] == 1
+    assert report["counts"]["infrastructure_error"] == 0
+    (group,) = report["groups"]
+    assert group["route"] == "ordinary" and group["complete"]
+    assert group["worker_seconds"] > 0.2
