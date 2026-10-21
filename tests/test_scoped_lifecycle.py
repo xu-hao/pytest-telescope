@@ -166,3 +166,35 @@ def test_workers_are_validated_before_the_sandbox_is_prepared(tmp_path, monkeypa
     for value in (True, 0, -1, 1.5, 33):
         with pytest.raises(controller.DeclarationError):
             controller.run(tmp_path, workers=value)
+
+
+def test_failed_collection_is_a_failure_even_with_parked_scoped_cases(
+    tmp_path, sandbox_double, module_rows
+):
+    """Known scoped cases left unexecuted by a failed collection are not an outage."""
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+    rows = module_rows(tmp_path, [("test_scoped.py", ["scoped"])])
+    (tmp_path / "test_broken.py").write_text('raise RuntimeError("synthetic import failure")\n')
+
+    def execute(*args, request, **kwargs):
+        assert request["mode"] == "collection", "no scoped case may run after a failed collection"
+        return dict(
+            protocol=4,
+            kind="collection",
+            nonce="a" * 32,
+            exit_code=0,
+            complete=True,
+            leaked_descendants=False,
+            items=rows,
+            worker_seconds=0.1,
+            failures=[],
+        )
+
+    sandbox_double(execute)
+    report = controller.run(tmp_path)
+    assert report["status"] == "failed", report
+    assert report["collection"]["outcome"] == "failed"
+    assert report["inventory_complete"] is False
+    (parked,) = report["units"]
+    assert parked["route"] == "scoped" and parked["reason"] == "execution not started"
+    assert parked["result_status"] is None and parked["group_id"] is None

@@ -512,7 +512,9 @@ def run(
     )
     results, groups, eligible_groups = [], [], set()
     scoped = []  # (suite, item, containing collection inventory), in deterministic order
-    progress = dict(grouping_complete=False, published=False, setup=None, scoped_rows=False)
+    progress = dict(
+        grouping_complete=False, published=False, setup=None, scoped_rows=False, parked=0
+    )
 
     def observation(suite, route):
         return next(
@@ -537,6 +539,7 @@ def run(
                         item, suite, "scoped", "infrastructure_error", "execution not started"
                     )
                 )
+                progress["parked"] += item["selected"]
             progress["scoped_rows"] = True
         if mode == "batch":
             for row in results:
@@ -552,7 +555,10 @@ def run(
             if all(row["outcome"] == "reused" for row in observations):
                 collection["outcome"] = "reused"
         status = "passed"
-        if counts["infrastructure_error"] or collection["outcome"] == "infrastructure_error":
+        # Parked cases share the infrastructure_error count but are not an outage: the
+        # run stopped for the collection outcome that parked them.
+        outages = counts["infrastructure_error"] - progress["parked"]
+        if outages or collection["outcome"] == "infrastructure_error":
             status = "infrastructure_error"
         elif counts["failed"] or collection["outcome"] == "failed":
             status = "failed"

@@ -62,7 +62,10 @@ opaque case identity. `route` is `ordinary` or `scoped`. An ordinary case is nev
 `reused`; its `worker_seconds` is null because it shares its session.
 Outcomes are `executed`, `reused`, `failed`, `infrastructure_error`, or `not-selected`;
 `counts` also reserves `unsupported`. `counts.selected` includes every selected known
-case, including work parked after a terminal failure. `counts.not-selected` accounts for
+case, including work parked after a terminal failure. A scoped case left unexecuted because
+a collection stopped the run keeps outcome `infrastructure_error`, reason `execution not
+started` and a null `group_id`, but the run status follows the collection outcome: a
+failed collection is `failed`, not an infrastructure outage. `counts.not-selected` accounts for
 current cases excluded by ordinary pytest selectors. A complete inventory can accompany
 an infrastructure failure: failed worker or outer cleanup prevents publication of new
 records without erasing the known inventory.
