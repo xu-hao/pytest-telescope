@@ -71,19 +71,40 @@ def test_inactive_plugin_preserves_test_failure(project):
     assert "1 failed" in result.stdout
 
 
-@pytest.mark.parametrize("source", ["argument", "config", "environment"])
-def test_execution_request_refuses_before_imports(project, source):
+@pytest.mark.parametrize("source", ["config", "environment"])
+def test_hidden_execution_request_refuses_before_imports(project, source):
     forbid_imports(project)
-    args = ("--telescope",) if source == "argument" else ()
     env = {"PYTEST_ADDOPTS": "--telescope"} if source == "environment" else {}
     if source == "config":
         (project / "pyproject.toml").write_text(
             '[tool.pytest.ini_options]\naddopts = "--telescope"\n'
         )
-    result = invoke(project, *args, extra_env=env)
-    assert result.returncode == (3 if source == "argument" else 4)
+    result = invoke(project, extra_env=env)
+    assert result.returncode == 4
     assert "error" in (result.stdout + result.stderr).lower()
     assert_not_imported(project)
+
+
+def test_telescope_flag_runs_an_ordinary_project_as_one_ordinary_session(project):
+    (project / "test_subject.py").write_text(
+        "from pathlib import Path\ndef test_ordinary():\n    Path('ran').write_text('host')\n"
+    )
+    result = invoke(project, "--telescope")
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["route_counts"]["ordinary"]["executed"] == 1
+    assert report["sandbox"]["required"] is False
+    assert (project / "ran").read_text() == "host"
+
+
+def test_telescope_flag_reports_an_ordinary_conftest_failure(project):
+    forbid_imports(project)
+    result = invoke(project, "--telescope")
+    assert result.returncode == 1, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "failed"
+    assert report["collection"]["outcome"] == "failed"
+    assert report["inventory_complete"] is False
 
 
 def manifest(project):
@@ -111,16 +132,15 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {
         "mode": "plan-only",
-        "runtime": {"profile": "python-v1", "required_capabilities": [], "identity": None},
-        "python": {
-            "suites": [
-                {"suite": "default", "profile": "default", "source_roots": [], "identity": None}
-            ]
+        "sandbox": {
+            "backend": "bubblewrap",
+            "policy": "bubblewrap-view-v1",
+            "required": True,
+            "identity": None,
         },
-        "execution": {"mode": "case", "profile": "case-v1"},
-        "case_inventory": "requires isolated pytest collection",
+        "execution": {"mode": "case", "profile": "case-v1", "workers": 1},
+        "case_inventory": "requires pytest collection",
         "inventory": ["test_another.py", "test_subject.py"],
-        "discovery_scope": "declared-union",
         "distributions": [],
         "suites": [
             {
@@ -134,8 +154,9 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
                 "args": [],
                 "config_args": [],
                 "plugins": [],
-                "python": {"profile": "default", "source_roots": []},
                 "inventory": ["test_another.py", "test_subject.py"],
+                "ordinary_files": [],
+                "scoped_files": ["test_another.py", "test_subject.py"],
             }
         ],
         "inputs": [
@@ -151,6 +172,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
                 "file": name,
                 "line": 2,
                 "scope": [],
+                "route": "scoped",
                 "inputs": ["conftest.py", "data.json", "helper.py"],
                 "absent": [],
                 "cache": True,
@@ -164,15 +186,17 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
     assert_not_imported(project)
 
 
-def test_unmarked_plan_includes_broad_project_without_imports(project):
+def test_unmarked_plan_is_ordinary_and_hashes_nothing_without_imports(project):
     forbid_imports(project)
     (project / ".hidden.json").write_text("{}")
     result = invoke(project, "--telescope-plan")
     assert result.returncode == 0, result.stdout + result.stderr
     plan = json.loads(result.stdout)
     assert plan["inventory"] == ["test_subject.py"]
-    assert plan["discovery_scope"] == "broad-potential"
-    assert plan["inputs"] == [".hidden.json", "conftest.py", "pyproject.toml", "test_subject.py"]
+    assert plan["sandbox"]["required"] is False
+    assert plan["suites"][0]["ordinary_files"] == ["test_subject.py"]
+    assert plan["suites"][0]["scoped_files"] == []
+    assert plan["inputs"] == []
     assert plan["declarations"] == []
     assert_not_imported(project)
 

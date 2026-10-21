@@ -1,4 +1,7 @@
-"""Required real-worker controls for scoped metadata and independent suites."""
+"""Required real-Bubblewrap controls for scoped metadata and independent suites.
+
+These controls launch bwrap and are never skipped.
+"""
 
 import hashlib
 import json
@@ -9,10 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from pytest_telescope import controller, runtime
+from pytest_telescope import controller, ordinary, sandbox
 from pytest_telescope.model import DeclarationError, UnsupportedCapability
-
-BUDGET = dict(cpus=2, memory_bytes=1073741824, processes=256, scratch_bytes=134217728)
 
 
 def put(root, path, text):
@@ -23,16 +24,13 @@ def put(root, path, text):
 
 @pytest.fixture
 def project(tmp_path):
-    image = runtime.build_runtime(tmp_path)["image"]
-    yield tmp_path
-    runtime._image_info(image, runtime._project(tmp_path))
-    runtime.command(["docker", "image", "rm", image])
+    return tmp_path
 
 
 def passed(root, **kwargs):
     report = controller.run(root, explain=True, **kwargs)
     assert report["status"] == "passed", report
-    assert report["schema"] == 2 and report["kind"] == "run"
+    assert report["schema"] == 3 and report["kind"] == "run"
     assert report["inventory_complete"] is True
     assert len(report["inventory_digest"]) == 64
     assert report["counts"]["selected"] == sum(row["selected"] for row in report["units"])
@@ -251,8 +249,9 @@ test_roots = ["test_shared.py"]
 """,
     )
     put(project, "test_shared.py", "def test_shared(): pass\n")
-    report = passed(project, budget=BUDGET)
+    report = passed(project)
     assert report["cases"]["passed"] == 2
+    assert [group["profile"] for group in report["groups"]] == ["ordinary-v1"] * 2
     assert len({row["case_id"] for row in report["units"]}) == 2
     assert {row["file"] for row in report["units"]} == {"test_shared.py"}
 
@@ -272,18 +271,24 @@ def test_private_parameter_ids_stay_out_of_requests_cache_and_summaries(project,
     put(
         project,
         "test_parameters.py",
-        f'import pytest\n@pytest.mark.parametrize("value", [pytest.param(1, id="{sensitive}")])\ndef test_value(value): assert value == 1\n',
+        "import pytest\n"
+        "@pytest.mark.telescope(inputs=[])\n"
+        f'@pytest.mark.parametrize("value", [pytest.param(1, id="{sensitive}")])\n'
+        "def test_value(value): assert value == 1\n",
     )
-    original = runtime._owned_capture
+    original = sandbox.capture
     captured = []
 
-    def capture(directory, data, args, timeout, **kwargs):
-        request = Path(directory) / "control/request.json"
-        if request.exists():
-            captured.append(request.read_bytes())
-        return original(directory, data, args, timeout, **kwargs)
+    def capture(args, timeout, **kwargs):
+        # Sandboxed requests are bound into the view; ordinary ones are the last argument.
+        if sandbox.REQUEST in args:
+            captured.append(Path(args[args.index(sandbox.REQUEST) - 1]).read_bytes())
+        elif args[-1].endswith("request.json"):
+            captured.append(Path(args[-1]).read_bytes())
+        return original(args, timeout, **kwargs)
 
-    monkeypatch.setattr(runtime, "_owned_capture", capture)
+    monkeypatch.setattr(sandbox, "capture", capture)
+    monkeypatch.setattr(ordinary, "capture", capture)
     selector = f"test_parameters.py::test_value[{sensitive}]"
     report = passed(project, arguments=[selector])
     expected = hashlib.sha256(
@@ -299,7 +304,7 @@ def test_private_parameter_ids_stay_out_of_requests_cache_and_summaries(project,
         assert sensitive.encode() not in data
 
 
-def test_real_parallel_workers_are_fresh_and_resource_bounded(project):
+def test_real_parallel_workers_are_fresh_and_ordered(project):
     put(project, "pyproject.toml", "[tool.pytest_telescope]\n")
     put(
         project,
@@ -307,17 +312,17 @@ def test_real_parallel_workers_are_fresh_and_resource_bounded(project):
         """
 import pytest
 from pathlib import Path
+pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.mark.parametrize("number", range(4))
 def test_private_scratch(number):
     assert not Path("/tmp/unique").exists()
     Path("/tmp/unique").write_text(str(number))
-    assert Path("/sys/fs/cgroup/memory.max").read_text().strip() == "536870912"
-    assert Path("/sys/fs/cgroup/pids.max").read_text().strip() == "128"
-    assert Path("/sys/fs/cgroup/cpu.max").read_text().split() == ["100000", "100000"]
+    # No resource limits are set by the sandbox itself.
+    assert not Path("/sys/fs/cgroup").exists()
 """,
     )
-    report = passed(project, budget=BUDGET)
-    assert report["resources"]["concurrency"] == 2
+    report = passed(project, workers=2)
+    assert report["execution"]["workers"] == 2
     assert report["cases"]["passed"] == 4
     assert [row["case_id"] for row in report["units"]] == [
         hashlib.sha256(
@@ -328,48 +333,37 @@ def test_private_scratch(number):
         ).hexdigest()
         for number in range(4)
     ]
-    assert passed(project, budget=BUDGET)["counts"]["reused"] == 4
-    with pytest.raises(DeclarationError, match="cannot fit"):
-        controller.run(project, budget=BUDGET | {"memory_bytes": 1})
+    assert passed(project, workers=2)["counts"]["reused"] == 4
 
 
-def test_explicit_async_plugin_and_independent_suite_configuration(tmp_path):
-    put(tmp_path, "requirements.txt", "pytest-asyncio==1.3.0\ntyping_extensions==4.15.0\n")
-    image = runtime.build_runtime(tmp_path, tmp_path / "requirements.txt")["image"]
-    try:
-        put(
-            tmp_path,
-            "pyproject.toml",
-            """
-[tool.pytest_telescope.suites.asyncio]
-root = "tests/asyncio"
-config = "tests/asyncio/pytest.ini"
-test_roots = ["tests/asyncio"]
-plugins = ["pytest_asyncio.plugin"]
+def test_explicit_suite_plugin_loads_with_autoload_disabled(project):
+    put(
+        project,
+        "pyproject.toml",
+        """
+[tool.pytest_telescope.suites.plugins]
+root = "tests/plugins"
+config = "tests/plugins/pytest.ini"
+test_roots = ["tests/plugins"]
+plugins = ["pytester"]
 """,
-        )
-        put(
-            tmp_path,
-            "tests/asyncio/pytest.ini",
-            "[pytest]\nasyncio_mode = strict\nasyncio_default_fixture_loop_scope = function\n",
-        )
-        put(
-            tmp_path,
-            "tests/asyncio/test_async.py",
-            """
+    )
+    put(project, "tests/plugins/pytest.ini", "[pytest]\n")
+    put(
+        project,
+        "tests/plugins/test_plugin.py",
+        """
+import os
 import pytest
-import pytest_asyncio
-@pytest_asyncio.fixture
-async def number(): return 7
-@pytest.mark.asyncio
-async def test_async(number): assert number == 7
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_plugin(pytestconfig):
+    assert pytestconfig.pluginmanager.hasplugin("pytester")
+    assert not pytestconfig.pluginmanager.hasplugin("telescope")
+    assert os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
 """,
-        )
-        assert passed(tmp_path)["cases"]["passed"] == 1
-        assert passed(tmp_path)["counts"]["reused"] == 1
-    finally:
-        runtime._image_info(image, runtime._project(tmp_path))
-        runtime.command(["docker", "image", "rm", image])
+    )
+    assert passed(project)["cases"]["passed"] == 1
+    assert passed(project)["counts"]["reused"] == 1
 
 
 def test_empty_structural_suite_never_falls_back_to_implicit_discovery(project):
@@ -391,7 +385,8 @@ test_roots = ["tests/empty"]
     assert report["status"] == "no_tests", report
     assert report["inventory_complete"] is True
     assert report["units"] == []
-    assert report["collection"]["suites"][0]["files"] == []
+    assert report["suites"] == ["empty"]
+    assert report["collection"]["suites"] == []
 
 
 @pytest.mark.parametrize("cwd", [None, ".", "empty/work"])
@@ -457,15 +452,17 @@ def test_suite_preserves_ordinary_nodeid_root_and_working_directory(project, cwd
     assert passed(project, arguments=[nodeid])["counts"]["reused"] == 1
 
 
-def test_broad_metadata_and_explicit_empty_metadata_scope(project):
+def test_ordinary_cases_get_no_generated_metadata_and_empty_metadata_scope(project):
     configure_metadata(project)
     put(
         project,
-        "tests/test_broad.py",
+        "tests/test_ordinary.py",
         """
-def test_broad():
-    from importlib.metadata import version
-    assert version("example-core") == version("example-addon") == "1.0"
+import pytest
+def test_ordinary():
+    from importlib.metadata import version, PackageNotFoundError
+    for name in ("example-core", "example-addon"):
+        with pytest.raises(PackageNotFoundError): version(name)
 """,
     )
     put(

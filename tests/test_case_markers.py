@@ -1,11 +1,12 @@
-"""Public CLI behavior of real per-case marker collection and Docker execution."""
+"""Public CLI behavior of real per-case marker collection and Bubblewrap execution.
 
-import hashlib
+Scoped cases launch bwrap; these controls are never skipped.
+"""
+
 import json
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime
 
 import pytest
 
@@ -13,7 +14,6 @@ import pytest
 class Project:
     def __init__(self, root):
         self.root = root
-        self.image = None
         root.mkdir()
 
     def write(self, name, content):
@@ -28,40 +28,13 @@ class Project:
             env={**os.environ, "PYTEST_ADDOPTS": ""},
             text=True,
             capture_output=True,
-            timeout=120 if command != "runtime" else 360,
+            timeout=120,
         )
         assert completed.returncode == expected, completed.stdout + completed.stderr
         return json.loads(completed.stdout)
 
     def run(self, *arguments, expected=0):
         return self.cli("run", *arguments, expected=expected)
-
-    def creates_since(self, started):
-        owner = hashlib.sha256(os.fsencode(self.root.resolve())).hexdigest()
-        finished = datetime.now(UTC).isoformat()
-        response = subprocess.run(
-            [
-                "docker",
-                "events",
-                "--since",
-                started,
-                "--until",
-                finished,
-                "--filter",
-                "type=container",
-                "--filter",
-                "event=create",
-                "--filter",
-                "label=org.pytest-telescope.project=" + owner,
-                "--format",
-                "{{json .}}",
-            ],
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=10,
-        )
-        return [json.loads(line) for line in response.stdout.splitlines()]
 
     def prepare(self, files, configuration=""):
         self.write(
@@ -71,37 +44,12 @@ class Project:
         )
         for name, content in files.items():
             self.write(name, content)
-        self.image = self.cli("runtime")["image"]
         return self
-
-    def cleanup(self):
-        if self.image is None:
-            return
-        inspected = subprocess.run(
-            ["docker", "image", "inspect", self.image],
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=20,
-        )
-        image = json.loads(inspected.stdout)[0]
-        owner = hashlib.sha256(os.fsencode(self.root.resolve())).hexdigest()
-        assert image["Config"]["Labels"]["org.pytest-telescope.project"] == owner
-        subprocess.run(
-            ["docker", "image", "rm", self.image],
-            capture_output=True,
-            check=True,
-            timeout=20,
-        )
 
 
 @pytest.fixture
 def project(tmp_path):
-    value = Project(tmp_path / "project")
-    try:
-        yield value
-    finally:
-        value.cleanup()
+    return Project(tmp_path / "project")
 
 
 def assert_outcomes(summary, *, executed=0, reused=0, failed=0, unselected=0):
@@ -128,6 +76,7 @@ def test_same_file_literal_markers_are_independent_case_cache_units(project):
             "tests/test_subject.py": """
 import pytest
 from pathlib import Path
+pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.mark.telescope(inputs=["a.txt"])
 def test_a():
     assert Path('a.txt').read_text() in ('old-a', 'new-a')
@@ -141,17 +90,16 @@ def test_b():
             "b.txt": "b",
         }
     )
-    before = datetime.now(UTC).isoformat()
     cold = project.run()
     assert_outcomes(cold, executed=2)
     assert cold["collection"]["outcome"] == "executed"
-    assert len(project.creates_since(before)) == 3
-    before = datetime.now(UTC).isoformat()
+    assert [group["attempts"] for group in cold["groups"]] == [1, 1]
     warm = project.run()
     assert_outcomes(warm, reused=2)
+    # A warm inventory and result hit starts no sandbox at all.
     assert warm["collection"]["outcome"] == "reused"
-    assert warm["collection"]["worker_seconds"] == warm["collection"]["cpu_seconds"] == 0
-    assert project.creates_since(before) == []
+    assert warm["collection"]["worker_seconds"] == 0
+    assert [group["attempts"] for group in warm["groups"]] == [0, 0]
     project.write("a.txt", "new-a")
     assert_outcomes(project.run(), executed=1, reused=1)
 
@@ -160,18 +108,18 @@ def test_b():
     "marker",
     ["", "@pytest.mark.telescope(cache=False)", "@pytest.mark.telescope(absent=['absent.txt'])"],
 )
-def test_unmarked_and_policy_only_cases_keep_broad_project_scope(project, marker):
+def test_unmarked_and_policy_only_cases_run_ordinary_every_time(project, marker):
     project.prepare(
         {
             "tests/test_subject.py": f"""
 import pytest
 from pathlib import Path
 {marker}
-def test_broad():
+def test_ordinary():
     for name in ('default.txt', '.hidden', 'ignored.txt', 'build/data', 'dist/data', 'node_modules/data'):
         assert Path(name).read_text() in ('first', 'second')
-    for name in ('.git', '.venv', 'venv', '.pytest-telescope', '.pytest_cache', '__pycache__'):
-        assert not Path(name).exists()
+    for name in ('.git', '.venv', 'venv', '.pytest_cache', '__pycache__'):
+        assert Path(name).exists()
 """,
             "default.txt": "first",
             ".hidden": "first",
@@ -188,19 +136,16 @@ def test_broad():
         },
         '[tool.pytest_telescope.defaults]\ninputs = ["default.txt"]\n',
     )
-    assert_outcomes(project.run(), executed=1)
-    if "cache=False" in marker:
-        assert_outcomes(project.run(), executed=1)
-    else:
-        assert_outcomes(project.run(), reused=1)
-    project.write(".hidden", "second")
-    assert_outcomes(project.run(), executed=1)
-    project.write("ignored.txt", "second")
-    assert_outcomes(project.run(), executed=1)
+    for _ in range(2):
+        summary = project.run()
+        assert_outcomes(summary, executed=1)
+        assert summary["units"][0]["route"] == "ordinary"
+        assert summary["sandbox"]["required"] is False
+    assert not (project.root / ".pytest-telescope").exists()
 
 
 @pytest.mark.parametrize("field", ["inputs", "bundles"])
-def test_explicit_empty_scope_replaces_broad_scope_and_adds_defaults(project, field):
+def test_explicit_empty_scope_is_scoped_and_adds_defaults(project, field):
     project.prepare(
         {
             "tests/test_subject.py": f"""
@@ -218,7 +163,9 @@ def test_explicit():
         },
         '[tool.pytest_telescope.defaults]\ninputs = ["default.txt"]\n',
     )
-    assert_outcomes(project.run(), executed=1)
+    summary = project.run()
+    assert_outcomes(summary, executed=1)
+    assert summary["units"][0]["route"] == "scoped"
     project.write("unrelated.txt", "second")
     assert_outcomes(project.run(), reused=1)
 
@@ -394,6 +341,7 @@ def test_each_case_gets_fresh_session_module_and_class_fixtures(project):
         {
             "tests/test_subject.py": """
 import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.fixture(scope='session')
 def session_state(): return []
 @pytest.fixture(scope='module')
@@ -510,11 +458,13 @@ def pytest_collection_modifyitems(items):
     assert project.run(expected=4)["status"] == "declaration_error"
 
 
-def test_in_project_selected_cache_directory_is_excluded_from_broad_scope(project):
+def test_in_project_selected_cache_directory_is_never_visible_to_scoped_cases(project):
     project.prepare(
         {
             "tests/test_subject.py": """
+import pytest
 from pathlib import Path
+@pytest.mark.telescope(inputs=['visible.txt'])
 def test_cache_is_not_an_input():
     assert Path('visible.txt').read_text() == 'visible'
     assert not Path('saved-results').exists()

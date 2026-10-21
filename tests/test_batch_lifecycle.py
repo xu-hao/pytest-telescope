@@ -1,20 +1,15 @@
-"""Atomic batch lifecycle and strict result controls with an explicit backend double."""
+"""Atomic batch lifecycle and strict result controls with an explicit sandbox stand-in."""
 
-import contextlib
 import copy
 import hashlib
-import shutil
 import threading
 from collections import Counter
 
 import pytest
 
-from pytest_telescope import controller
-from pytest_telescope.execution import DEFAULT_WORKER
-from pytest_telescope.model import InfrastructureError, fingerprint
+from pytest_telescope import controller, sandbox
+from pytest_telescope.model import InfrastructureError
 from pytest_telescope.result import validate_batch, validate_collection
-
-BUDGET = {key: value * 2 for key, value in DEFAULT_WORKER.items()}
 
 
 def result_for(request):
@@ -32,50 +27,14 @@ def result_for(request):
         complete=True,
         leaked_descendants=False,
         worker_seconds=0.2,
-        cpu_seconds=0.1,
         failures=[],
         case_results=[dict(case_id=case, outcome="passed", complete=True) for case in ids],
     )
 
 
-def backend(root, monkeypatch, behavior, *, count=3, fail_outer=False):
+def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=False):
     (root / "pyproject.toml").write_text('[tool.pytest_telescope.execution]\nmode="batch"\n')
-    rows = []
-    for module in range(count):
-        filename = f"test_{module}.py"
-        (root / filename).write_text("def test_a(): pass\ndef test_b(): pass\n")
-        for function in ("a", "b"):
-            case = fingerprint(["default", f"{filename}::test_{function}"])
-            rows.append(
-                dict(
-                    case_id=case,
-                    file=filename,
-                    origins=[],
-                    selected=True,
-                    order=len(rows),
-                    aliases=sorted([case, hashlib.sha256(filename.encode()).hexdigest()]),
-                )
-            )
-    ordinal = 0
-    lock = threading.Lock()
-    active = set()
-
-    @contextlib.contextmanager
-    def invocation(project):
-        nonlocal ordinal
-        with lock:
-            ordinal += 1
-            number = ordinal
-        directory = project / ".pytest-telescope" / "synthetic" / str(number)
-        directory.mkdir(parents=True)
-        active.add(directory)
-        try:
-            yield directory
-        finally:
-            active.remove(directory)
-            shutil.rmtree(directory)
-        if fail_outer and number == 1:
-            raise controller.runtime.CleanupError("synthetic outer cleanup failure")
+    rows = module_rows(root, [(f"test_{module}.py", ["a", "b"]) for module in range(count)])
 
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
@@ -88,7 +47,6 @@ def backend(root, monkeypatch, behavior, *, count=3, fail_outer=False):
                 leaked_descendants=False,
                 items=rows,
                 worker_seconds=0.1,
-                cpu_seconds=0.1,
                 failures=[],
             )
         assert request["mode"] == "batch"
@@ -97,23 +55,12 @@ def backend(root, monkeypatch, behavior, *, count=3, fail_outer=False):
         assert validate_batch(result, group_id=request["group_id"], case_ids=request["case_ids"])
         return result
 
-    monkeypatch.setattr(controller.runtime, "recover", lambda root: None)
-    monkeypatch.setattr(
-        controller.runtime,
-        "identity",
-        lambda root, *, runtime_profile=None: {
-            "image": "synthetic",
-            "execution": {"fixture": True},
-        },
-    )
-    monkeypatch.setattr(controller.runtime, "invocation", invocation)
-    monkeypatch.setattr(controller.runtime, "execute", execute)
-    return rows, active
+    return rows, sandbox_double(execute, fail_outer=fail_outer)
 
 
 @pytest.mark.parametrize("exhaust", [False, True])
 def test_retry_is_bounded_once_per_group_and_never_counts_members_as_workers(
-    tmp_path, monkeypatch, exhaust
+    tmp_path, sandbox_double, module_rows, exhaust
 ):
     attempts = Counter()
 
@@ -122,8 +69,8 @@ def test_retry_is_bounded_once_per_group_and_never_counts_members_as_workers(
         if exhaust or attempts[request["group_id"]] == 1:
             raise InfrastructureError("synthetic unavailable worker")
 
-    _, active = backend(tmp_path, monkeypatch, behavior)
-    report = controller.run(tmp_path, budget=BUDGET)
+    _, active = backend(tmp_path, sandbox_double, module_rows, behavior)
+    report = controller.run(tmp_path, workers=2)
     assert len(attempts) == 3 and set(attempts.values()) == {2}
     assert not active
     assert len(report["groups"]) == 3 and len(report["units"]) == 6
@@ -138,14 +85,15 @@ def test_retry_is_bounded_once_per_group_and_never_counts_members_as_workers(
         assert not list((tmp_path / ".pytest-telescope/cache").glob("*.json"))
     else:
         assert report["counts"]["executed"] == 6
-        assert report["worker_cpu_seconds"] == pytest.approx(0.4)
-        warm = controller.run(tmp_path, budget=BUDGET)
+        assert "worker_cpu_seconds" not in report
+        assert all("cpu_seconds" not in group for group in report["groups"])
+        warm = controller.run(tmp_path, workers=2)
         assert warm["counts"]["reused"] == 6
         assert all(group["attempts"] == 0 and group["cache_eligible"] for group in warm["groups"])
 
 
 def test_group_cleanup_failure_cancels_drains_and_accounts_unscheduled_members(
-    tmp_path, monkeypatch
+    tmp_path, sandbox_double, module_rows
 ):
     barrier = threading.Barrier(2, timeout=5)
     attempts = Counter()
@@ -157,12 +105,12 @@ def test_group_cleanup_failure_cancels_drains_and_accounts_unscheduled_members(
             first = len(attempts) == 1
         barrier.wait()
         if first:
-            raise controller.runtime.CleanupError("synthetic cleanup failure")
+            raise sandbox.CleanupError("synthetic cleanup failure")
         assert kwargs["cancellation"].wait(5)
-        raise controller.runtime.InvocationInterrupted("synthetic cancellation")
+        raise sandbox.InvocationInterrupted("synthetic cancellation")
 
-    _, active = backend(tmp_path, monkeypatch, behavior)
-    report = controller.run(tmp_path, budget=BUDGET)
+    _, active = backend(tmp_path, sandbox_double, module_rows, behavior)
+    report = controller.run(tmp_path, workers=2)
     assert len(attempts) == 2 and set(attempts.values()) == {1}
     assert not active
     assert report["inventory_complete"] is True
@@ -174,9 +122,11 @@ def test_group_cleanup_failure_cancels_drains_and_accounts_unscheduled_members(
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
 
 
-def test_outer_cleanup_does_not_publish_otherwise_successful_groups(tmp_path, monkeypatch):
-    _, active = backend(tmp_path, monkeypatch, lambda *args: None, fail_outer=True)
-    report = controller.run(tmp_path, budget=BUDGET)
+def test_outer_cleanup_does_not_publish_otherwise_successful_groups(
+    tmp_path, sandbox_double, module_rows
+):
+    _, active = backend(tmp_path, sandbox_double, module_rows, lambda *args: None, fail_outer=True)
+    report = controller.run(tmp_path, workers=2)
     assert not active
     assert report["status"] == "infrastructure_error"
     assert report["counts"]["executed"] == 6
@@ -184,7 +134,9 @@ def test_outer_cleanup_does_not_publish_otherwise_successful_groups(tmp_path, mo
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
 
 
-def test_execution_collection_failure_remains_distinct_from_pytest_stop(tmp_path, monkeypatch):
+def test_execution_collection_failure_remains_distinct_from_pytest_stop(
+    tmp_path, sandbox_double, module_rows
+):
     def behavior(request, kwargs, result):
         result.update(
             exit_code=2,
@@ -204,7 +156,7 @@ def test_execution_collection_failure_remains_distinct_from_pytest_stop(tmp_path
             dict(case_id=case, outcome="not-run", complete=False) for case in request["case_ids"]
         ]
 
-    _, active = backend(tmp_path, monkeypatch, behavior, count=1)
+    _, active = backend(tmp_path, sandbox_double, module_rows, behavior, count=1)
     report = controller.run(tmp_path)
     assert not active and report["status"] == "failed"
     assert report["inventory_complete"] is True
@@ -277,7 +229,6 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
         complete=True,
         leaked_descendants=False,
         worker_seconds=0,
-        cpu_seconds=0,
         failures=[],
         items=items,
     )
@@ -287,9 +238,9 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
 
 
 def test_later_suite_collection_failure_preserves_known_cases_without_claiming_a_plan(
-    tmp_path, monkeypatch
+    tmp_path, sandbox_double, module_rows, monkeypatch
 ):
-    backend(tmp_path, monkeypatch, lambda *args: None, count=1)
+    backend(tmp_path, sandbox_double, module_rows, lambda *args: None, count=1)
     (tmp_path / "pyproject.toml").write_text("""[tool.pytest_telescope.execution]
 mode="batch"
 [tool.pytest_telescope.suites.first]
@@ -297,7 +248,7 @@ test_roots=["test_0.py"]
 [tool.pytest_telescope.suites.second]
 test_roots=["test_0.py"]
 """)
-    original = controller.runtime.execute
+    original = sandbox.execute
 
     def execute(*args, request, **kwargs):
         assert request["mode"] == "collection"
@@ -306,7 +257,7 @@ test_roots=["test_0.py"]
             result.update(exit_code=2, complete=False, items=[])
         return result
 
-    monkeypatch.setattr(controller.runtime, "execute", execute)
+    monkeypatch.setattr(sandbox, "execute", execute)
     report = controller.run(tmp_path)
     assert report["inventory_complete"] is False
     assert report["grouping_complete"] is False
