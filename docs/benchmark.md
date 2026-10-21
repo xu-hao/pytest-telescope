@@ -34,6 +34,10 @@ wait for, the worker reaps its own descendants as PID 1 of its sandbox, and no w
 in services outside the tree. When the measuring process runs in its own cgroup v2, the
 cgroup's `cpu.stat` usage over the same interval is recorded as a cross-check.
 
+The measuring process blocks on the invocation's exit rather than polling for it, so the
+wall time carries no polling granularity. An invocation that exceeds the deadline is killed
+and its measurement fails.
+
 pytest-telescope's report adds the product's own phases where it exposes them: the
 controller's elapsed and setup time, sandboxed collection time, ordinary session time,
 scoped session time and the number of sandboxes started.

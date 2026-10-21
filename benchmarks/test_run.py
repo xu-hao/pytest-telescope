@@ -1,13 +1,17 @@
 """Harness checks that need no Bubblewrap: workload variants, accounting and summaries."""
 
 import json
+import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import run
 
@@ -47,6 +51,43 @@ class Accounting(unittest.TestCase):
         self.assertEqual(measured["exit_code"], 0)
         self.assertGreaterEqual(measured["cpu_seconds"], 0.25)
         self.assertGreaterEqual(measured["wall_seconds"], 0.25)
+
+    def test_wall_time_ends_when_the_invocation_exits_not_at_a_later_poll(self):
+        # A timed wait polls on a 50 ms cap, so it would end the interval up to 50 ms late.
+        # The sleeps spread the exits over most of one poll period, so no phase hides that.
+        script = (
+            "import os, sys, time\n"
+            "time.sleep(float(sys.argv[1]))\n"
+            "os.write(1, repr(time.monotonic()).encode())\n"
+            "os._exit(0)\n"
+        )
+        latencies = []
+        with tempfile.TemporaryDirectory() as directory:
+            stdout_path = Path(directory, "out")
+            for index in range(9):
+                arguments = [sys.executable, "-c", script, str(0.15 + 0.0055 * index)]
+                started = time.monotonic()
+                measured = run.measure_tree(arguments, directory, stdout_path)
+                exited = float(stdout_path.read_text())
+                latencies.append(started + measured["wall_seconds"] - exited)
+        self.assertLess(
+            statistics.median(latencies),
+            0.005,
+            "median latency between exit and the end of the wall time, in seconds: "
+            + ", ".join(f"{latency:.4f}" for latency in latencies),
+        )
+
+    def test_an_invocation_past_the_deadline_is_killed_and_reaped(self):
+        script = "import os, time\nos.write(1, str(os.getpid()).encode())\ntime.sleep(30)\n"
+        with tempfile.TemporaryDirectory() as directory:
+            stdout_path = Path(directory, "out")
+            started = time.monotonic()
+            with mock.patch.object(run, "INVOCATION_DEADLINE", 1.0):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    run.measure_tree([sys.executable, "-c", script], directory, stdout_path)
+            self.assertLess(time.monotonic() - started, 10)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(stdout_path.read_text()), 0)
 
     def test_telescope_outcomes_require_fresh_cases_on_the_intended_route(self):
         counts = {key: 0 for key in ("executed", "reused", "failed", "selected")}

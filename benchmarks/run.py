@@ -27,6 +27,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -82,20 +83,36 @@ def measure_tree(arguments, cwd, stdout_path):
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     cgroup_before = own_cgroup_usage()
     started = time.perf_counter()
+    expired = threading.Event()
     with open(stdout_path, "wb") as stdout:
-        completed = subprocess.run(
+        with subprocess.Popen(
             arguments,
             cwd=cwd,
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=subprocess.STDOUT,
-            timeout=INVOCATION_DEADLINE,
-        )
-    wall = time.perf_counter() - started
+        ) as process:
+
+            def enforce_deadline():
+                expired.set()
+                process.kill()
+
+            # A timed wait polls on sleeps of up to 50 ms and would end the wall time on the
+            # next poll after the exit; block on the exit and enforce the deadline from a timer.
+            timer = threading.Timer(INVOCATION_DEADLINE, enforce_deadline)
+            timer.daemon = True
+            timer.start()
+            try:
+                process.wait()
+                wall = time.perf_counter() - started
+            finally:
+                timer.cancel()
+    if expired.is_set():
+        raise subprocess.TimeoutExpired(arguments, INVOCATION_DEADLINE)
     after = resource.getrusage(resource.RUSAGE_CHILDREN)
     cgroup_after = own_cgroup_usage()
     return {
-        "exit_code": completed.returncode,
+        "exit_code": process.returncode,
         "wall_seconds": wall,
         "cpu_seconds": (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime),
         "cgroup_cpu_seconds": None
