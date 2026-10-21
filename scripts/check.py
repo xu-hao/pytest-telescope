@@ -31,6 +31,7 @@ def main() -> None:
     # Tests that launch Bubblewrap are required; they fail rather than skip on hosts that
     # deny its namespaces.
     run("-m", "pytest", "-q", "--basetemp", str(output / "tests"), timeout=900)
+    run("-m", "unittest", "discover", "-s", "benchmarks", "-p", "test_*.py")
 
 
 if __name__ == "__main__":

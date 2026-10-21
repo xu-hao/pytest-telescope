@@ -38,7 +38,7 @@ packages = ["src/pytest_telescope"]
 [tool.hatch.build.targets.sdist]
 core-metadata-version = "2.4"
 include = [
-  "/src", "/tests", "/scripts", "/docs", "/examples", "/README.md", "/CONTRIBUTING.md",
+  "/src", "/tests", "/scripts", "/docs", "/examples", "/benchmarks", "/README.md", "/CONTRIBUTING.md",
   "/LICENSE", "/pyproject.toml", "/.readthedocs.yaml",
 ]
 
