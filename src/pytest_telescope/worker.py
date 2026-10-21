@@ -1,10 +1,13 @@
-"""Collection and per-case execution inside the prepared restricted runtime."""
+"""Collection and execution inside a Bubblewrap view, or one ordinary pytest session.
+
+This module is loaded by path in its sessions and imports only the standard library and
+pytest, so it never adds pytest-telescope's package directory to a session's import path.
+"""
 
 import hashlib
 import json
 import os
 import re
-import resource
 import sys
 import time
 from pathlib import Path
@@ -12,10 +15,14 @@ from pathlib import Path
 import pytest
 
 MAX_INVENTORY = 67_108_864
+REQUEST_PATH = "/telescope/request.json"
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions"})
+PROJECT_ROOT = Path("/project")
 
 
 def reap_completed_children():
-    # PID1 adopts orphaned children. Reap only those already exited after all teardown.
+    # The sandboxed worker is PID 1 and adopts orphaned children. Reap only those
+    # already exited after all teardown.
     # Both bounds prevent a concurrently forking live child from extending this phase.
     reap_deadline = time.monotonic() + 0.05
     for _ in range(4096):
@@ -38,7 +45,7 @@ def identity(value):
 
 
 def project_file(filename):
-    path = Path(os.path.abspath(Path("/project") / filename)).relative_to(Path("/project"))
+    path = Path(os.path.abspath(PROJECT_ROOT / filename)).relative_to(PROJECT_ROOT)
     text = path.as_posix()
     if (
         not text
@@ -51,35 +58,37 @@ def project_file(filename):
     return text
 
 
-def main():
-    started = time.monotonic()
-    request_path = os.environ.pop("TELESCOPE_REQUEST")
-    if request_path != "/telescope-request.json":
-        raise ValueError("invalid request location")
-    with open(request_path, "rb") as stream:
+def read_request(path):
+    with open(path, "rb") as stream:
         encoded = stream.read(MAX_INVENTORY + 1)
     if len(encoded) > MAX_INVENTORY:
         raise ValueError("request limit exceeded")
-    request = json.loads(encoded)
-    if request["source_projection"] is not None:
-        with open(
-            "/usr/local/lib/python3.12/site-packages/zz_telescope_source_view.pth", "rb"
-        ) as source_projection:
-            projected = source_projection.read(256 * 1024 + 1)
-        if (
-            len(projected) > 256 * 1024
-            or hashlib.sha256(projected).hexdigest() != request["source_projection"]
-        ):
-            raise ValueError("source projection does not match the declared view")
+    return json.loads(encoded)
+
+
+def ordinary_main(path):
+    """Entry for one ordinary suite session on the host, without a sandbox."""
+    return main(read_request(path), ordinary=True)
+
+
+def main(request=None, *, ordinary=False):
+    global PROJECT_ROOT
+    started = time.monotonic()
+    if ordinary:
+        PROJECT_ROOT = Path(request["project_root"])
+        if not PROJECT_ROOT.is_absolute():
+            raise ValueError("ordinary sessions require an absolute project root")
+    else:
+        if os.environ.pop("TELESCOPE_REQUEST", None) != REQUEST_PATH:
+            raise ValueError("invalid request location")
+        request = read_request(REQUEST_PATH)
     if request.get("metadata"):
         from importlib import metadata
 
         def normalize(name):
             return re.sub(r"[-_.]+", "-", name).lower()
 
-        runtime_paths = [
-            path for path in sys.path if path != "/metadata" and path not in request["python_paths"]
-        ]
+        runtime_paths = [path for path in sys.path if path != "/metadata"]
         installed = {
             normalize(dist.metadata["Name"]) for dist in metadata.distributions(path=runtime_paths)
         }
@@ -102,11 +111,14 @@ def main():
 
     def canonical_nodeid(value):
         filename, separator, suffix = value.partition("::")
-        path = (Path("/project") / suite_root / filename).resolve()
+        path = (PROJECT_ROOT / suite_root / filename).resolve()
         return project_file(path) + (separator + suffix if separator else "")
 
     mode = request["mode"]
-    if mode not in ("collection", "execution", "batch"):
+    if (
+        mode not in ("collection", "execution", "batch", "ordinary")
+        or (mode == "ordinary") != ordinary
+    ):
         raise ValueError("invalid request mode")
     cases, finished, selected_ids, failures = {}, set(), [], []
     origins, positions_cache, source_calls, required_origins = {}, {}, {}, {}
@@ -121,7 +133,7 @@ def main():
     registry = request["registry"]
     if type(registry) is not list or len(registry) > 100_000:
         raise ValueError("invalid declaration registry")
-    registry_ids = set()
+    registry_ids, scoped_origins = set(), set()
     for row in registry:
         if type(row) is not dict or set(row) != {
             "id",
@@ -153,6 +165,8 @@ def main():
             raise ValueError("duplicate declaration position")
         registry_ids.add(row["id"])
         source_calls[key] = (row["id"], canonical(row["kwargs"]))
+        if SCOPE_FIELDS.intersection(row["kwargs"]):
+            scoped_origins.add(row["id"])
         if row["kind"] != "parameter":
             required_origins.setdefault((filename, tuple(row["owner"])), set()).add(row["id"])
 
@@ -201,15 +215,27 @@ def main():
         def __init__(self):
             self.captured = {}
             self.selection = None
+            self.actual_selection = None
             self.session = None
             self.checkpoint = False
+            self.dispatch_started = False
             self.bytes = 1024
 
         @pytest.hookimpl(tryfirst=True)
         def pytest_configure(self, config):
-            if any(
-                getattr(plugin, "__name__", "").split(".")[0] == "xdist"
-                for _, plugin in config.pluginmanager.list_name_plugin()
+            # Ordinary sessions autoload installed plugins; only active scheduling refuses.
+            if (
+                ordinary
+                and (
+                    config.getoption("numprocesses", default=None) not in (None, 0)
+                    or config.getoption("dist", default="no") != "no"
+                )
+            ) or (
+                not ordinary
+                and any(
+                    getattr(plugin, "__name__", "").split(".")[0] == "xdist"
+                    for _, plugin in config.pluginmanager.list_name_plugin()
+                )
             ):
                 invalid("nested distributed scheduling is unsupported")
             config.addinivalue_line(
@@ -307,7 +333,7 @@ def main():
             self.unchanged(session)
             if collection_failed:
                 return
-            if mode == "collection":
+            if mode in ("collection", "ordinary"):
                 selectors = request["selectors"]
                 if type(selectors) is not list or any(
                     type(value) is not str for value in selectors
@@ -343,6 +369,14 @@ def main():
                 chosen = [item for item in items if case_identity(item.nodeid) in wanted]
                 if [case_identity(item.nodeid) for item in chosen] != requested:
                     invalid("execution membership or order differs from discovery")
+            self.actual_selection = tuple(chosen)
+            if ordinary:
+                # Scoped cases of mixed files never reach fixture setup on the host.
+                chosen = [
+                    item
+                    for item in chosen
+                    if scoped_origins.isdisjoint(self.captured[item.nodeid][1]["origins"])
+                ]
             chosen_set = set(chosen)
             deselected = [item for item in items if item not in chosen_set]
             items[:] = chosen
@@ -363,6 +397,7 @@ def main():
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_runtestloop(self, session):
             self.unchanged(session)
+            self.dispatch_started = True
             yield
             self.unchanged(session)
 
@@ -420,16 +455,18 @@ def main():
             pytest.mark.telescope = original_marker
     if declaration_error:
         exit_code = 4
-    reap_completed_children()
-    leaked = [name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()]
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    children = resource.getrusage(resource.RUSAGE_CHILDREN)
+    leaked = []
+    if not ordinary:
+        # PID 1 of the sandbox: any other process left after teardown is a descendant.
+        reap_completed_children()
+        leaked = [
+            name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()
+        ]
     common = {
         "nonce": request["nonce"],
         "exit_code": exit_code,
         "leaked_descendants": bool(leaked),
         "worker_seconds": time.monotonic() - started,
-        "cpu_seconds": usage.ru_utime + usage.ru_stime + children.ru_utime + children.ru_stime,
         "failures": failures,
     }
     if mode == "collection":
@@ -477,6 +514,29 @@ def main():
             ],
         )
         result["complete"] = result["complete"] and selected_ids == requested
+    if ordinary:
+        selected = {
+            item.nodeid: order for order, item in enumerate(observer.actual_selection or ())
+        }
+        result.update(
+            protocol=1,
+            kind="ordinary",
+            dispatch_started=observer.dispatch_started,
+            declaration_error=declaration_error,
+            inventory_complete=observer.checkpoint
+            and not declaration_error
+            and not collection_failed,
+            items=[
+                {**row, "selected": nodeid in selected, "order": selected.get(nodeid)}
+                for nodeid, (_, row) in sorted(observer.captured.items())
+            ]
+            if observer.actual_selection is not None
+            else [],
+            case_results=[
+                dict(case_id=case, outcome=cases.get(case, "not-run"), complete=case in finished)
+                for case in selected_ids
+            ],
+        )
     print("TELESCOPE_RESULT " + canonical(result), flush=True)
     return exit_code
 

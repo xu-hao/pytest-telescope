@@ -1,4 +1,4 @@
-"""Complete-inventory, cache-first execution without importing project code."""
+"""Complete-inventory execution: ordinary sessions and cache-first Bubblewrap views."""
 
 import argparse
 import contextlib
@@ -19,7 +19,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import runtime, runtime_profiles
+from . import sandbox
 from .model import (
     DeclarationError,
     InfrastructureError,
@@ -32,7 +32,11 @@ from .model import (
     snapshot,
 )
 
-SCHEMA = 4
+# Cache record format; records from earlier backends are never eligible.
+SCHEMA = 5
+RESULT_SCHEMA = 3
+OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
+ROUTES = ("ordinary", "scoped")
 
 
 def suite_directories(snapshot, suite):
@@ -51,7 +55,7 @@ def suite_directories(snapshot, suite):
 @contextlib.contextmanager
 def lock(path, timeout):
     if fcntl is None:
-        raise InfrastructureError("execution requires Linux with file locking and Docker")
+        raise InfrastructureError("scoped execution requires Linux with file locking")
     with path.open("a+b") as stream:
         deadline = time.monotonic() + timeout
         while True:
@@ -224,7 +228,7 @@ class PendingRecords:
             for path in self.paths:
                 path.unlink(missing_ok=True)
         except OSError as error:
-            raise runtime.CleanupError(
+            raise sandbox.CleanupError(
                 "pending result cleanup failed; no new records were eligible"
             ) from error
 
@@ -333,83 +337,103 @@ def inventory_matches_manifest(result, manifest):
     return True
 
 
-def _unit_result(item, outcome, reason="", result=None, attempts=0):
-    row = {
-        "name": item["case_id"],
-        "case_id": item["case_id"],
-        "selected": outcome != "not-selected",
-        "file": item["file"],
-        "outcome": outcome,
-        "reason": reason,
-        "attempts": attempts,
-        "collected": 0,
-        "passed": 0,
-        "failed": 0,
-        "skipped": 0,
-        "worker_seconds": 0,
-        "cpu_seconds": 0,
-        "failures": [],
-        "group_id": None,
-        "result_status": None,
-        "complete": False,
-    }
-    if result is not None:
-        for name in (
-            "collected",
-            "passed",
-            "failed",
-            "skipped",
-            "worker_seconds",
-            "cpu_seconds",
-            "failures",
-        ):
-            row[name] = result[name]
-    return row
+def _counts(rows):
+    counts = {name: sum(row["outcome"] == name for row in rows) for name in OUTCOMES}
+    counts["selected"] = sum(row["selected"] for row in rows)
+    return counts
 
 
-def _summary(results, collection, started, setup_seconds):
-    counts = {
-        name: sum(row["outcome"] == name for row in results)
-        for name in (
-            "executed",
-            "reused",
-            "failed",
-            "unsupported",
-            "infrastructure_error",
-            "not-selected",
+def _row(item, suite, route, outcome, reason=""):
+    return dict(
+        name=item["case_id"],
+        case_id=item["case_id"],
+        suite=suite.name,
+        file=item["file"],
+        route=route,
+        selected=outcome != "not-selected",
+        outcome=outcome,
+        reason=reason,
+        attempts=0,
+        collected=0,
+        passed=0,
+        failed=0,
+        skipped=0,
+        worker_seconds=None if route == "ordinary" else 0,
+        failures=[],
+        group_id=None,
+        result_status=None,
+        complete=False,
+    )
+
+
+def _session_arguments(suite, options, files):
+    """Arguments of one sandboxed pytest session, rooted at the frozen /project view."""
+    return [
+        "-c",
+        "/project/" + suite.config,
+        "--rootdir=/project/" + suite.root,
+        "-o",
+        "addopts=",
+        "-p",
+        "no:cacheprovider",
+        *[part for plugin in suite.plugins for part in ("-p", plugin)],
+        *options,
+        *files,
+    ]
+
+
+def _file_digest(inventory, filename):
+    """Containing-file inventory that every scoped execution must collect again."""
+    return fingerprint(
+        sorted(
+            (
+                {"case_id": entry["case_id"], "origins": entry["origins"]}
+                for entry in inventory
+                if entry["file"] == filename
+            ),
+            key=lambda entry: entry["case_id"],
         )
-    }
-    cases = {
-        name: sum(row[name] for row in results)
-        for name in ("collected", "passed", "failed", "skipped")
-    }
-    status = "passed"
-    if counts["infrastructure_error"] or collection["outcome"] == "infrastructure_error":
-        status = "infrastructure_error"
-    elif counts["failed"] or collection["outcome"] == "failed":
-        status = "failed"
-    elif not cases["collected"]:
-        status = "no_tests"
-    return {
-        "status": status,
-        "counts": counts,
-        "cases": cases,
-        "collection": collection,
-        "case_outcomes": {
-            label: sum(row[field] for row in results if row["outcome"] == outcome)
-            for label, field, outcome in (
-                ("fresh_passed", "passed", "executed"),
-                ("cached_passed", "passed", "reused"),
-                ("fresh_skipped", "skipped", "executed"),
-                ("cached_skipped", "skipped", "reused"),
-            )
-        },
-        "units": results,
-        "elapsed_seconds": time.monotonic() - started,
-        "setup_seconds": setup_seconds,
-        "worker_cpu_seconds": collection["cpu_seconds"]
-        + sum(row["cpu_seconds"] or 0 for row in results),
-    }
+    )
+
+
+def _ordinary_group(suite, files, result, effective, attempt_seconds):
+    """One ordinary suite session; never cache eligible and never retried."""
+    complete, code = result["complete"], result["exit_code"]
+    return dict(
+        group_id=fingerprint(
+            {
+                "profile": "ordinary-v1",
+                "suite": suite.identity(),
+                "case_ids": result["case_ids"],
+                "args": effective,
+            }
+        ),
+        suite=suite.name,
+        files=sorted(files),
+        route="ordinary",
+        profile="ordinary-v1",
+        case_ids=result["case_ids"],
+        outcome="executed"
+        if complete and code in (0, 5)
+        else "failed"
+        if complete and code in (1, 2)
+        else "incomplete"
+        if code in (1, 2)
+        else "infrastructure_error",
+        complete=complete,
+        cache_eligible=False,
+        stop_reason=None if complete else "pytest-stop" if code in (1, 2) else "infrastructure",
+        attempts=1,
+        attempt_seconds=attempt_seconds,
+        timing_complete=True,
+        worker_seconds=result["worker_seconds"],
+        passed=result["passed"],
+        failed=result["failed"],
+        skipped=result["skipped"],
+        not_run=sum(row["outcome"] == "not-run" for row in result["case_results"]),
+        unresolved=0,
+        failures=result["failures"],
+    )
 
 
 def run(
@@ -421,108 +445,119 @@ def run(
     cache_dir=None,
     timeout=60,
     arguments=(),
-    budget=None,
+    workers=None,
     suites=None,
     execution_mode=None,
     structural_files=None,
-    runtime_profile=None,
-    required_capabilities=None,
-    python_profile=None,
-    source_roots=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-    from . import python_source
+    from . import ordinary
     from .batching import group_jobs, project_result
     from .execution import effective_arguments as suite_arguments
-    from .execution import envelope
     from .execution import execution_mode as choose_mode
-    from .model import Unit
+    from .execution import worker_count
+    from .model import Unit, scoped_item
     from .project_metadata import materialize_metadata, metadata_records
 
     started = time.monotonic()
     if not math.isfinite(timeout) or not 0.1 <= timeout <= 3600:
         raise DeclarationError("timeout must be between 0.1 and 3600 seconds")
-    if fcntl is None or os.name != "posix":
-        raise InfrastructureError("execution requires Linux with file locking and Docker")
+    if os.name != "posix":
+        raise InfrastructureError("execution requires Linux")
     state = (
         Path(cache_dir).resolve() if cache_dir else Path(root).resolve() / ".pytest-telescope/cache"
     )
-    manifest = load(
-        root,
-        cache_dir=state,
-        suite_names=suites,
-        structural_files=structural_files,
-        python_profile=python_profile,
-        source_roots=source_roots,
-    )
-    selection = runtime_profiles.normalize(manifest.runtime, runtime_profile, required_capabilities)
-    runtime_profiles.validate_environment(selection, manifest.env)
-    resources = envelope(manifest.execution, budget)
+    manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
     mode = choose_mode(manifest.execution, execution_mode)
+    concurrency = worker_count(manifest.execution, workers)
     profile = mode + "-v1"
-    chosen_suites = set(suites) if suites is not None else {suite.name for suite in manifest.suites}
-    if not chosen_suites or chosen_suites - {suite.name for suite in manifest.suites}:
-        raise DeclarationError("suite selection must name configured suites")
-    configured = [
-        (suite, unit)
-        for suite, unit in zip(manifest.suites, manifest.units)
-        if suite.name in chosen_suites
-    ]
+    configured = list(zip(manifest.suites, manifest.units))
     all_tests = set().union(*(set(suite.inventory) for suite, _ in configured))
     all_unit = Unit("all", sorted(all_tests), [], [], True)
-    invocations = []
-    for suite, unit in configured:
+    invocations, requested_selectors, seen_aliases = {}, set(), set()
+    for suite, _ in configured:
         effective = suite_arguments(suite, arguments)
         parsed = selected_arguments(effective, all_unit, all_tests) or []
         options, selectors = split_arguments(parsed)
-        own_selectors = [
-            selector for selector in selectors if selector.split("::", 1)[0] in suite.inventory
-        ]
-        invocations.append(
-            (suite, unit, effective, options, own_selectors, bool(selectors and not own_selectors))
-        )
+        own = [selector for selector in selectors if selector.split("::", 1)[0] in suite.inventory]
+        hashed = [hashlib.sha256(selector.encode()).hexdigest() for selector in own]
+        requested_selectors.update(hashed)
+        invocations[suite.name] = (effective, options, hashed, bool(selectors and not own))
     environment = {name: os.environ.get(name) for name in manifest.env}
-    collection = dict(
-        outcome="infrastructure_error",
-        collected=0,
-        worker_seconds=0,
-        cpu_seconds=0,
-        failures=[],
-        suites=[
-            dict(
-                name=suite.name,
-                files=suite.inventory,
-                outcome="not-started",
-                collected=None,
-                inventory_digest=None,
-                worker_seconds=0,
-                cpu_seconds=0,
-            )
-            for suite, _ in configured
-        ],
+    observations = [
+        dict(
+            name=suite.name,
+            route=route,
+            files=files,
+            outcome="not-started",
+            collected=None,
+            inventory_digest=None,
+            worker_seconds=None if route == "ordinary" else 0,
+        )
+        for suite, _ in configured
+        for route, files in (
+            ("scoped", manifest.scoped_files[suite.name]),
+            ("ordinary", manifest.ordinary_files[suite.name]),
+        )
+        if files
+    ]
+    collection = dict(outcome="executed", collected=0, worker_seconds=0, failures=[])
+    sandbox_report = dict(
+        backend=sandbox.BACKEND,
+        policy=sandbox.POLICY,
+        required=manifest.scope_possible,
+        identity=None,
     )
-    results, groups = [], []
-    published = False
-    grouping_complete = False
-    python_validated = False
+    results, groups, eligible_groups = [], [], set()
+    scoped = []  # (suite, item, containing collection inventory), in deterministic order
+    progress = dict(grouping_complete=False, published=False, setup=None, scoped_rows=False)
 
-    def summary(setup):
+    def observation(suite, route):
+        return next(
+            row for row in observations if row["name"] == suite.name and row["route"] == route
+        )
+
+    def stop(outcome, reason, failures=()):
+        collection.update(outcome=outcome, reason=reason, failures=list(failures))
+
+    def session_started():
+        if progress["setup"] is None:
+            progress["setup"] = time.monotonic() - started
+
+    def summary():
+        if not progress["scoped_rows"]:
+            # Known scoped cases stay accounted when planning stopped before their groups.
+            for suite, item, _ in scoped:
+                results.append(
+                    _row(item, suite, "scoped", "not-selected")
+                    if not item["selected"]
+                    else _row(
+                        item, suite, "scoped", "infrastructure_error", "execution not started"
+                    )
+                )
+            progress["scoped_rows"] = True
         if mode == "batch":
             for row in results:
-                row["worker_seconds"] = row["cpu_seconds"] = None
-        report = _summary(results, collection, started, setup)
-        report["schema"] = 2
-        report["kind"] = "run"
-        report["execution"] = dict(mode=mode, profile=profile)
-        report["runtime"] = dict(selection)
-        report["python"] = python_source.envelope(manifest.suites, validated=python_validated)
-        report["groups"] = groups
-        report["grouping_complete"] = grouping_complete
-        report["worker_cpu_seconds"] = collection["cpu_seconds"] + sum(
-            group["cpu_seconds"] for group in groups
-        )
+                if row["route"] == "scoped":
+                    row["worker_seconds"] = None
+        counts = _counts(results)
+        cases = {
+            name: sum(row[name] for row in results)
+            for name in ("collected", "passed", "failed", "skipped")
+        }
+        inventory_complete = all(row["outcome"] in {"reused", "executed"} for row in observations)
+        if collection["outcome"] == "executed" and observations:
+            if all(row["outcome"] == "reused" for row in observations):
+                collection["outcome"] = "reused"
+        status = "passed"
+        if counts["infrastructure_error"] or collection["outcome"] == "infrastructure_error":
+            status = "infrastructure_error"
+        elif counts["failed"] or collection["outcome"] == "failed":
+            status = "failed"
+        elif not cases["collected"]:
+            status = "no_tests"
         if (
             collection["outcome"] != "infrastructure_error"
             and any(
@@ -532,58 +567,186 @@ def run(
             )
             and not any(group["stop_reason"] in {"infrastructure", "cancelled"} for group in groups)
         ):
-            report["status"] = "failed"
-        if published:
+            status = "failed"
+        if progress["published"]:
             for group in groups:
                 if group["group_id"] in eligible_groups:
                     group["cache_eligible"] = True
-        report["inventory_complete"] = all(
-            row["outcome"] in {"reused", "executed"} for row in collection["suites"]
+        collection.update(
+            collected=len(results),
+            worker_seconds=sum(
+                row["worker_seconds"] or 0 for row in observations if row["route"] == "scoped"
+            ),
+            suites=observations,
         )
-        report["inventory_digest"] = (
-            fingerprint(sorted([row["suite"], row["case_id"], row["file"]] for row in results))
-            if report["inventory_complete"]
-            else None
+        return dict(
+            schema=RESULT_SCHEMA,
+            kind="run",
+            status=status,
+            execution=dict(mode=mode, profile=profile, workers=concurrency),
+            sandbox=sandbox_report,
+            suites=[suite.name for suite, _ in configured],
+            inventory_complete=inventory_complete,
+            inventory_digest=fingerprint(
+                sorted([row["suite"], row["case_id"], row["file"], row["route"]] for row in results)
+            )
+            if inventory_complete
+            else None,
+            grouping_complete=progress["grouping_complete"],
+            counts=counts,
+            route_counts={
+                route: _counts([row for row in results if row["route"] == route])
+                for route in ROUTES
+            },
+            cases=cases,
+            case_outcomes={
+                label: sum(row[field] for row in results if row["outcome"] == outcome)
+                for label, field, outcome in (
+                    ("fresh_passed", "passed", "executed"),
+                    ("cached_passed", "passed", "reused"),
+                    ("fresh_skipped", "skipped", "executed"),
+                    ("cached_skipped", "skipped", "reused"),
+                )
+            },
+            collection=collection,
+            units=results,
+            groups=groups,
+            elapsed_seconds=time.monotonic() - started,
+            setup_seconds=progress["setup"]
+            if progress["setup"] is not None
+            else time.monotonic() - started,
         )
-        report["counts"]["selected"] = sum(row["selected"] for row in results)
-        report["resources"] = {
-            "worker": resources.worker,
-            "budget": resources.budget,
-            "concurrency": resources.concurrency,
-        }
-        report["suites"] = [suite.name for suite, _ in configured]
-        return report
+
+    def ordinary_sessions(scoped):
+        """Run each suite's ordinary session once; False when its inventory failed."""
+        for suite, _ in configured:
+            files = manifest.ordinary_files[suite.name]
+            if not files:
+                continue
+            row = observation(suite, "ordinary")
+            effective, options, selectors, disabled = invocations[suite.name]
+            session_started()
+            attempt_started = time.monotonic()
+            try:
+                result = ordinary.session(
+                    manifest, suite, files, options, selectors, disabled, timeout
+                )
+            except InfrastructureError as exc:
+                if isinstance(exc, sandbox.CleanupError):
+                    raise
+                row["outcome"] = "infrastructure_error"
+                stop("infrastructure_error", str(exc))
+                return False
+            if result["declaration_error"]:
+                raise DeclarationError(
+                    "unsupported or changed declarations during ordinary collection"
+                )
+            if not result["inventory_complete"]:
+                # Includes pytest's own startup errors, such as a failing conftest import.
+                row["outcome"] = "failed"
+                stop(
+                    "failed",
+                    "ordinary pytest collection failed",
+                    [failure for failure in result["failures"] if failure["phase"] == "collect"],
+                )
+                return False
+            if not inventory_matches_manifest(result, manifest):
+                raise InfrastructureError("ordinary inventory disagrees with literal declarations")
+            if len(results) + len(scoped) + len(result["items"]) > 100_000:
+                raise DeclarationError("combined suite inventory exceeds 100000 cases")
+            group = _ordinary_group(
+                suite, files, result, effective, time.monotonic() - attempt_started
+            )
+            outcomes = {case["case_id"]: case for case in result["case_results"]}
+            # Keep selected order unique within the suite across both collections.
+            offset = 1 + max(
+                (item["order"] for entry, item, _ in scoped if entry is suite and item["selected"]),
+                default=-1,
+            )
+            for item in result["items"]:
+                seen_aliases.update(item["aliases"])
+                if scoped_item(manifest, item):
+                    if item["selected"]:
+                        item = {**item, "order": item["order"] + offset}
+                    scoped.append((suite, item, result["items"]))
+                    continue
+                if not item["selected"]:
+                    results.append(
+                        _row(
+                            item,
+                            suite,
+                            "ordinary",
+                            "not-selected",
+                            "not selected by pytest arguments" if explain else "",
+                        )
+                    )
+                    continue
+                status = outcomes[item["case_id"]]["outcome"]
+                unit = _row(
+                    item,
+                    suite,
+                    "ordinary",
+                    "executed"
+                    if status in ("passed", "skipped")
+                    else "failed"
+                    if status == "failed"
+                    else "infrastructure_error",
+                    "ordinary: always fresh" if explain else "",
+                )
+                unit.update(
+                    attempts=1,
+                    collected=1,
+                    passed=int(status == "passed"),
+                    failed=int(status == "failed"),
+                    skipped=int(status == "skipped"),
+                    failures=[f for f in result["failures"] if f["case_id"] == item["case_id"]],
+                    group_id=group["group_id"],
+                    result_status=status,
+                    complete=outcomes[item["case_id"]]["complete"],
+                )
+                results.append(unit)
+            groups.append(group)
+            row.update(
+                outcome="executed",
+                collected=len(result["items"]),
+                inventory_digest=fingerprint(
+                    sorted([suite.name, item["case_id"], item["file"]] for item in result["items"])
+                ),
+            )
+        return True
+
+    if not manifest.scope_possible:
+        # All-ordinary: no sandbox, frozen copy, cache directory or lock.
+        if ordinary_sessions(scoped):
+            if requested_selectors - seen_aliases:
+                raise DeclarationError("selector does not identify a collected case")
+            progress["grouping_complete"] = True
+        return summary()
 
     try:
-        identity = runtime._inspect(manifest.root, selection)
-        selection = runtime.runtime_envelope(selection, identity)
+        box = sandbox.prepare(manifest.root)
+        for attempt in range(2):
+            try:
+                sandbox.recover(manifest.root)
+                break
+            except InfrastructureError as exc:
+                if attempt == 1 or isinstance(exc, sandbox.CleanupError):
+                    raise
     except InfrastructureError as exc:
-        collection["reason"] = str(exc)
-        return summary(time.monotonic() - started)
-    for attempt in range(2):
-        try:
-            runtime.recover(manifest.root)
-            break
-        except InfrastructureError as exc:
-            if attempt == 1 or isinstance(exc, runtime.CleanupError):
-                collection["reason"] = str(exc)
-                return summary(time.monotonic() - started)
+        stop("infrastructure_error", str(exc))
+        return summary()
+    sandbox_report["identity"] = box.identity
     common = {
-        "runtime_selection": selection,
         "schema": SCHEMA,
-        "runtime": identity["execution"],
+        "sandbox": box.identity,
         "runner": runner_identity(),
         "environment": environment,
         "snapshot_owner": [os.getuid(), os.getgid()],
-        "policy": runtime.POLICY,
-        "worker_limits": resources.worker,
         "profile": profile,
     }
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     cancellation = threading.Event()
     blocked = None
-    eligible_groups = set()
-    setup_seconds = time.monotonic() - started
     try:
         with lock(state / ".lock", timeout * 2 + 30):
             store = CacheStore(state)
@@ -593,27 +756,13 @@ def run(
                 inventory_state, count=max(8, len(configured)), size=64 * 1024 * 1024
             )
             with PendingRecords(store, inventory_store) as pending:
-                with runtime.invocation(manifest.root) as pool_directory:
+                with sandbox.invocation(manifest.root) as pool_directory:
                     pool = pool_directory / "project"
-                    pool_unit = Unit(
-                        "pool",
-                        sorted(all_tests),
-                        sorted(set().union(*(set(unit.inputs) for _, unit in configured))),
-                        sorted(set().union(*(set(unit.absent) for _, unit in configured))),
-                        True,
-                    )
-                    records = snapshot(manifest, pool_unit, pool)
+                    records = snapshot(manifest, manifest.pool, pool)
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
-                    for suite, unit in configured:
-                        python_source.validate_view(
-                            suite.python, [name for name in unit.inputs if name in record_map]
-                        )
-                    python_validated = True
-                    pool_is_broad = pool_unit.inputs == manifest.broad_inputs
-                    frozen_scope_hashes = {}
-                    metadata_hashes = {}
+                    frozen_scope_hashes, metadata_hashes = {}, {}
 
                     def metadata_identity(names):
                         key = tuple(names)
@@ -621,39 +770,26 @@ def run(
                             metadata_hashes[key] = metadata_records(manifest.distributions, names)
                         return metadata_hashes[key]
 
-                    jobs = []
-                    all_selected_aliases = set()
-                    requested_selectors = set()
-                    for (
-                        suite,
-                        collection_unit,
-                        effective,
-                        options,
-                        selectors,
-                        selection_disabled,
-                    ) in invocations:
-                        active_collection = next(
-                            row for row in collection["suites"] if row["name"] == suite.name
-                        )
-                        active_collection["outcome"] = "infrastructure_error"
-                        requested_selectors.update(
-                            hashlib.sha256(selector.encode()).hexdigest() for selector in selectors
-                        )
+                    for suite, collection_unit in configured:
+                        if collection_unit is None:
+                            continue
+                        row = observation(suite, "scoped")
+                        effective, options, selectors, disabled = invocations[suite.name]
                         registry = [
-                            row for row in manifest.registry if row["file"] in suite.inventory
+                            entry
+                            for entry in manifest.registry
+                            if entry["file"] in collection_unit.tests
                         ]
-                        suite_common = {**common, "suite": suite.identity(), "all_args": effective}
                         inventory_key = fingerprint(
                             {
-                                **suite_common,
+                                **common,
+                                "suite": suite.identity(),
+                                "all_args": effective,
                                 "kind": "collection",
                                 "inputs": [record_map[name] for name in collection_unit.inputs],
                                 "absent": collection_unit.absent,
                                 "metadata": metadata_identity(collection_unit.distributions),
-                                "python_projection": python_source.key(
-                                    suite.python, bool(collection_unit.distributions)
-                                ),
-                                "files": suite.inventory,
+                                "files": collection_unit.tests,
                                 "registry": registry,
                             }
                         )
@@ -669,206 +805,167 @@ def run(
                         ):
                             collected = None
                         reused = collected is not None
-                        if collected is None and not suite.inventory:
-                            collected = dict(
-                                protocol=4,
-                                kind="collection",
-                                nonce="0" * 32,
-                                items=[],
-                                complete=True,
-                                exit_code=5,
-                                leaked_descendants=False,
-                                worker_seconds=0,
-                                cpu_seconds=0,
-                                failures=[],
+                        session_started()
+                        for attempt in range(0 if reused else 2):
+                            try:
+                                with sandbox.invocation(manifest.root) as directory:
+                                    frozen = directory / "project"
+                                    materialize(pool, collection_unit, frozen, record_map)
+                                    suite_directories(frozen, suite)
+                                    metadata = directory / "metadata"
+                                    materialize_metadata(
+                                        manifest.distributions,
+                                        collection_unit.distributions,
+                                        metadata,
+                                    )
+                                    collected = sandbox.execute(
+                                        box,
+                                        frozen,
+                                        _session_arguments(
+                                            suite,
+                                            options,
+                                            ["/project/" + name for name in collection_unit.tests],
+                                        ),
+                                        environment,
+                                        timeout,
+                                        root=manifest.root,
+                                        invocation_directory=directory,
+                                        suite_root=suite.root,
+                                        suite_cwd=suite.cwd,
+                                        suite=suite.name,
+                                        metadata_directory=metadata,
+                                        selection_disabled=disabled,
+                                        allow_unknown_selectors=True,
+                                        request={
+                                            "mode": "collection",
+                                            "registry": registry,
+                                            "selectors": selectors,
+                                        },
+                                    )
+                                break
+                            except InfrastructureError as exc:
+                                if attempt == 1 or isinstance(exc, sandbox.CleanupError):
+                                    row["outcome"] = "infrastructure_error"
+                                    stop("infrastructure_error", str(exc))
+                                    return summary()
+                        if collected["exit_code"] == 4:
+                            raise DeclarationError(
+                                "unsupported or changed declarations during sandboxed collection"
                             )
-                        if collected is None:
-                            for attempt in range(2):
-                                try:
-                                    with runtime.invocation(manifest.root) as directory:
-                                        frozen = directory / "project"
-                                        materialize(pool, collection_unit, frozen, record_map)
-                                        suite_directories(frozen, suite)
-                                        metadata = directory / "metadata"
-                                        materialize_metadata(
-                                            manifest.distributions,
-                                            collection_unit.distributions,
-                                            metadata,
-                                        )
-                                        collected = runtime.execute(
-                                            identity["image"],
-                                            frozen,
-                                            [
-                                                "-c",
-                                                "/project/" + suite.config,
-                                                "--rootdir=/project/" + suite.root,
-                                                "-o",
-                                                "addopts=",
-                                                "-p",
-                                                "no:cacheprovider",
-                                                *[
-                                                    part
-                                                    for plugin in suite.plugins
-                                                    for part in ("-p", plugin)
-                                                ],
-                                                *options,
-                                                *["/project/" + name for name in suite.inventory],
-                                            ],
-                                            environment,
-                                            timeout,
-                                            root=manifest.root,
-                                            invocation_directory=directory,
-                                            suite_root=suite.root,
-                                            suite_cwd=suite.cwd,
-                                            suite=suite.name,
-                                            metadata_directory=metadata,
-                                            python_settings=suite.python,
-                                            limits=resources.worker,
-                                            selection_disabled=selection_disabled,
-                                            allow_unknown_selectors=True,
-                                            request={
-                                                "mode": "collection",
-                                                "registry": registry,
-                                                "selectors": [
-                                                    hashlib.sha256(selector.encode()).hexdigest()
-                                                    for selector in selectors
-                                                ],
-                                            },
-                                        )
-                                    break
-                                except InfrastructureError as exc:
-                                    if attempt == 1 or isinstance(exc, runtime.CleanupError):
-                                        collection["reason"] = str(exc)
-                                        return summary(time.monotonic() - started)
-                            if collected["exit_code"] == 4:
-                                raise DeclarationError(
-                                    "unsupported or changed declarations during isolated collection"
-                                )
-                            if collected["exit_code"] not in (0, 5):
-                                active_collection["outcome"] = "failed"
-                                collection.update(
-                                    outcome="failed",
-                                    failures=collected["failures"],
-                                    worker_seconds=collected["worker_seconds"],
-                                    cpu_seconds=collected["cpu_seconds"],
-                                )
-                                return summary(time.monotonic() - started)
-                            if not inventory_matches_manifest(collected, manifest):
-                                raise InfrastructureError(
-                                    "collected inventory disagrees with frozen declarations"
-                                )
-                            if enabled_inventory and collected["exit_code"] == 0:
-                                pending.stage(
-                                    inventory_path, inventory_key, collected, kind="collection"
-                                )
-                        suite_collection = dict(
-                            name=suite.name,
+                        if collected["exit_code"] not in (0, 5):
+                            row.update(outcome="failed", worker_seconds=collected["worker_seconds"])
+                            stop("failed", "sandboxed collection failed", collected["failures"])
+                            return summary()
+                        if not inventory_matches_manifest(collected, manifest) or not all(
+                            scoped_item(manifest, item) for item in collected["items"]
+                        ):
+                            raise InfrastructureError(
+                                "collected inventory disagrees with frozen declarations"
+                            )
+                        if enabled_inventory and collected["exit_code"] == 0 and not reused:
+                            pending.stage(
+                                inventory_path, inventory_key, collected, kind="collection"
+                            )
+                        row.update(
                             outcome="reused" if reused else "executed",
                             collected=len(collected["items"]),
                             worker_seconds=0 if reused else collected["worker_seconds"],
-                            cpu_seconds=0 if reused else collected["cpu_seconds"],
+                            inventory_digest=fingerprint(
+                                sorted(
+                                    [suite.name, item["case_id"], item["file"]]
+                                    for item in collected["items"]
+                                )
+                            ),
                         )
-                        suite_collection["inventory_digest"] = fingerprint(
-                            sorted(
-                                [suite.name, item["case_id"], item["file"]]
-                                for item in collected["items"]
-                            )
-                        )
-                        active_collection.update(suite_collection)
-                        if len(results) + len(collected["items"]) > 100_000:
+                        if len(results) + len(scoped) + len(collected["items"]) > 100_000:
                             raise DeclarationError("combined suite inventory exceeds 100000 cases")
-                        for key in ("collected", "worker_seconds", "cpu_seconds"):
-                            collection[key] += suite_collection[key]
-                        files = {}
                         for item in collected["items"]:
                             if item["file"] not in suite.inventory:
                                 raise DeclarationError(
                                     "collected item is outside its structural suite"
                                 )
-                            all_selected_aliases.update(item["aliases"])
-                            files.setdefault(item["file"], []).append(
-                                {"case_id": item["case_id"], "origins": item["origins"]}
+                            seen_aliases.update(item["aliases"])
+                            scoped.append((suite, item, collected["items"]))
+                    if not ordinary_sessions(scoped):
+                        return summary()
+                    if requested_selectors - seen_aliases:
+                        raise DeclarationError("selector does not identify a collected case")
+
+                    jobs, scopes, digests = [], {}, {}
+                    progress["scoped_rows"] = True
+                    for suite, item, inventory in scoped:
+                        index = len(results)
+                        if not item["selected"]:
+                            results.append(
+                                _row(
+                                    item,
+                                    suite,
+                                    "scoped",
+                                    "not-selected",
+                                    "not selected by pytest arguments" if explain else "",
+                                )
                             )
-                        digests = {
-                            name: fingerprint(sorted(rows, key=lambda row: row["case_id"]))
-                            for name, rows in files.items()
-                        }
-                        registry_files = {}
-                        for row in registry:
-                            registry_files.setdefault(row["file"], []).append(row)
-                        scopes = {}
-                        for item in collected["items"]:
-                            index = len(results)
-
-                            def row(outcome, reason="", result=None, attempts=0):
-                                return {
-                                    **_unit_result(item, outcome, reason, result, attempts),
-                                    "suite": suite.name,
-                                    "name": item["case_id"],
-                                    "case_id": item["case_id"],
-                                }
-
-                            if not item["selected"]:
-                                results.append(
-                                    row(
-                                        "not-selected",
-                                        "not selected by pytest arguments" if explain else "",
-                                    )
+                            continue
+                        signature = (suite.name, item["file"], tuple(item["origins"]))
+                        if signature not in scopes:
+                            unit = case_unit(manifest, item, suite)
+                            inputs = tuple(unit.inputs)
+                            if inputs not in frozen_scope_hashes:
+                                frozen_scope_hashes[inputs] = fingerprint(
+                                    [record_map[name] for name in unit.inputs]
                                 )
-                                continue
-                            signature = (item["file"], tuple(item["origins"]))
-                            if signature not in scopes:
-                                unit = case_unit(manifest, item, suite)
-                                file_scope = (
-                                    "broad"
-                                    if unit.inputs is manifest.broad_inputs
-                                    else tuple(unit.inputs)
-                                )
-                                if file_scope not in frozen_scope_hashes:
-                                    frozen_scope_hashes[file_scope] = fingerprint(
-                                        [record_map[name] for name in unit.inputs]
-                                    )
-                                scope_key = fingerprint(
+                            scopes[signature] = (
+                                unit,
+                                fingerprint(
                                     {
-                                        "inputs": frozen_scope_hashes[file_scope],
+                                        "inputs": frozen_scope_hashes[inputs],
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
-                                        "python_projection": python_source.key(
-                                            suite.python, bool(unit.distributions)
-                                        ),
                                         "cache": unit.cache,
                                     }
-                                )
-                                scopes[signature] = unit, scope_key
-                            unit, scope_key = scopes[signature]
-                            results.append(row("infrastructure_error", "execution not started"))
-                            jobs.append(
-                                dict(
-                                    index=index,
-                                    item=item,
-                                    unit=unit,
-                                    suite=suite,
-                                    options=options,
-                                    registry=registry_files.get(item["file"], []),
-                                    digest=digests[item["file"]],
-                                    scope=scope_key,
-                                    enabled=unit.cache and not no_cache,
-                                    identity={
-                                        **suite_common,
-                                        "kind": "execution",
-                                        "scope": scope_key,
-                                        "inventory": digests[item["file"]],
-                                    },
-                                )
+                                ),
                             )
-                    if requested_selectors - all_selected_aliases:
-                        raise DeclarationError("selector does not identify a collected case")
-                    collection["outcome"] = (
-                        "reused"
-                        if all(row["outcome"] == "reused" for row in collection["suites"])
-                        else "executed"
-                    )
-                    setup_seconds = time.monotonic() - started - collection["worker_seconds"]
+                        unit, scope_key = scopes[signature]
+                        if (suite.name, item["file"]) not in digests:
+                            digests[suite.name, item["file"]] = _file_digest(
+                                inventory, item["file"]
+                            )
+                        digest = digests[suite.name, item["file"]]
+                        effective, options, _, _ = invocations[suite.name]
+                        results.append(
+                            _row(
+                                item,
+                                suite,
+                                "scoped",
+                                "infrastructure_error",
+                                "execution not started",
+                            )
+                        )
+                        jobs.append(
+                            dict(
+                                index=index,
+                                item=item,
+                                unit=unit,
+                                suite=suite,
+                                options=options,
+                                registry=[
+                                    entry
+                                    for entry in manifest.registry
+                                    if entry["file"] == item["file"]
+                                ],
+                                digest=digest,
+                                scope=scope_key,
+                                enabled=unit.cache and not no_cache,
+                                identity={
+                                    **common,
+                                    "suite": suite.identity(),
+                                    "all_args": effective,
+                                    "kind": "execution",
+                                    "scope": scope_key,
+                                    "inventory": digest,
+                                },
+                            )
+                        )
 
                     candidates = group_jobs(jobs, mode, state)
                     jobs = []
@@ -878,7 +975,7 @@ def run(
                         groups.append(group)
                         for index, row in projected:
                             results[index] = row
-                    grouping_complete = True
+                    progress["grouping_complete"] = True
                     for candidate in candidates:
                         previous = (
                             read_record(
@@ -915,16 +1012,13 @@ def run(
                         for attempt in range(2):
                             try:
                                 if cancellation.is_set():
-                                    raise runtime.InvocationInterrupted(
-                                        "run cancelled before worker start"
+                                    raise sandbox.InvocationInterrupted(
+                                        "run cancelled before sandbox start"
                                     )
-                                with runtime.invocation(manifest.root) as directory:
-                                    if unit.inputs is manifest.broad_inputs and pool_is_broad:
-                                        frozen = pool
-                                    else:
-                                        frozen = directory / "project"
-                                        materialize(pool, unit, frozen, record_map)
-                                        suite_directories(frozen, suite)
+                                with sandbox.invocation(manifest.root) as directory:
+                                    frozen = directory / "project"
+                                    materialize(pool, unit, frozen, record_map)
+                                    suite_directories(frozen, suite)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
@@ -940,25 +1034,12 @@ def run(
                                         )
                                     else:
                                         request["case_id"] = item["case_id"]
-                                    result = runtime.execute(
-                                        identity["image"],
+                                    result = sandbox.execute(
+                                        box,
                                         frozen,
-                                        [
-                                            "-c",
-                                            "/project/" + suite.config,
-                                            "--rootdir=/project/" + suite.root,
-                                            "-o",
-                                            "addopts=",
-                                            "-p",
-                                            "no:cacheprovider",
-                                            *[
-                                                part
-                                                for plugin in suite.plugins
-                                                for part in ("-p", plugin)
-                                            ],
-                                            *job["options"],
-                                            "/project/" + item["file"],
-                                        ],
+                                        _session_arguments(
+                                            suite, job["options"], ["/project/" + item["file"]]
+                                        ),
                                         environment,
                                         timeout,
                                         root=manifest.root,
@@ -967,8 +1048,6 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
-                                        python_settings=suite.python,
-                                        limits=resources.worker,
                                         cancellation=cancellation,
                                         request=request,
                                     )
@@ -986,7 +1065,7 @@ def run(
                                 )
                                 return projected, group, result, False
                             except (InfrastructureError, OSError) as exc:
-                                terminal = isinstance(exc, runtime.CleanupError)
+                                terminal = isinstance(exc, sandbox.CleanupError)
                                 if terminal:
                                     cancellation.set()
                                 if attempt == 1 or terminal:
@@ -1001,7 +1080,7 @@ def run(
                                         attempt_seconds=time.monotonic() - attempt_started,
                                     )
                                     group["timing_complete"] = False
-                                    if isinstance(exc, runtime.InvocationInterrupted):
+                                    if isinstance(exc, sandbox.InvocationInterrupted):
                                         group["stop_reason"] = "cancelled"
                                     return projected, group, None, terminal
 
@@ -1011,13 +1090,13 @@ def run(
                             results[index] = row
 
                     active, cursor = {}, 0
-                    executor = ThreadPoolExecutor(max_workers=resources.concurrency)
+                    executor = ThreadPoolExecutor(max_workers=concurrency)
                     try:
                         while cursor < len(jobs) or active:
                             while (
                                 not cancellation.is_set()
                                 and cursor < len(jobs)
-                                and len(active) < resources.concurrency
+                                and len(active) < concurrency
                             ):
                                 job = jobs[cursor]
                                 cursor += 1
@@ -1030,7 +1109,9 @@ def run(
                                 projected, group, result, terminal = future.result()
                                 accept(job, projected, group)
                                 if terminal:
-                                    blocked = "run stopped after owned-resource cleanup failure or cancellation"
+                                    blocked = (
+                                        "run stopped after owned cleanup failure or cancellation"
+                                    )
                                 if (
                                     result is not None
                                     and result["exit_code"] == 0
@@ -1039,8 +1120,10 @@ def run(
                                 ):
                                     pending.stage(job["path"], job["key"], result)
                                     eligible_groups.add(job["key"])
-                    except (runtime.InvocationInterrupted, KeyboardInterrupt):
-                        blocked = "run cancelled; active workers drained before result publication"
+                    except (sandbox.InvocationInterrupted, KeyboardInterrupt):
+                        blocked = (
+                            "run cancelled; active sandboxes drained before result publication"
+                        )
                         cancellation.set()
                     except BaseException:
                         cancellation.set()
@@ -1052,7 +1135,9 @@ def run(
                                 projected, group, _, terminal = future.result()
                                 accept(job, projected, group)
                                 if terminal:
-                                    blocked = "run stopped after owned-resource cleanup failure or cancellation"
+                                    blocked = (
+                                        "run stopped after owned cleanup failure or cancellation"
+                                    )
                         if cancellation.is_set():
                             blocked = blocked or "run cancelled"
                             for job in jobs[cursor:]:
@@ -1061,20 +1146,19 @@ def run(
                                     results[index]["reason"] = blocked
                 if blocked is None:
                     pending.publish()
-                    published = True
+                    progress["published"] = True
                 else:
-                    # Even a completed successful worker is not a reusable result until outer cleanup.
-                    collection["reason"] = blocked
-                    collection["outcome"] = "infrastructure_error"
+                    # A completed success is not reusable until every owned copy is removed.
+                    stop("infrastructure_error", blocked)
     except (InfrastructureError, OSError) as exc:
-        collection["outcome"] = "infrastructure_error"
-        collection["reason"] = (
-            str(exc) if isinstance(exc, InfrastructureError) else "owned storage operation failed"
+        stop(
+            "infrastructure_error",
+            str(exc) if isinstance(exc, InfrastructureError) else "owned storage operation failed",
         )
         for row in results:
             if row["outcome"] == "infrastructure_error":
                 row["reason"] = collection["reason"]
-    return summary(setup_seconds)
+    return summary()
 
 
 def split_arguments(arguments):
@@ -1099,7 +1183,7 @@ def split_arguments(arguments):
 def error_result(error):
     """Versioned refusal envelope when no complete inventory can be established."""
     result = {
-        "schema": 2,
+        "schema": RESULT_SCHEMA,
         "kind": "refusal",
         "inventory_complete": False,
         "inventory_digest": None,
@@ -1122,53 +1206,29 @@ def main(argv=None):
 
     parser = Parser(prog="pytest-telescope")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    preparation = subparsers.add_parser("runtime", help="build the clean Docker runtime")
-    preparation.add_argument("--requirements", type=Path)
-    planning = subparsers.add_parser(
-        "plan", help="preview literal declarations without collecting tests"
+    subparsers.add_parser("plan", help="preview routes and literal declarations without collecting")
+    execution = subparsers.add_parser(
+        "run", help="run ordinary cases and execute or reuse each scoped case"
     )
-    execution = subparsers.add_parser("run", help="execute or reuse each selected pytest case")
-    for command_parser in (preparation, planning, execution):
-        command_parser.add_argument("--runtime-profile")
-    for command_parser in (planning, execution):
-        command_parser.add_argument("--python-profile")
-        command_parser.add_argument("--source-root", action="append", dest="source_roots")
-        command_parser.add_argument(
-            "--require-capability", action="append", dest="required_capabilities"
-        )
     execution.add_argument("--force", action="store_true")
     execution.add_argument("--no-cache", action="store_true")
     execution.add_argument("--explain", action="store_true")
     execution.add_argument("--cache-dir", type=Path)
     execution.add_argument("--timeout", type=float, default=60)
     execution.add_argument("--execution-mode", choices=("case", "batch"))
+    execution.add_argument("--workers", type=int)
     execution.add_argument("--suite", action="append", dest="suites")
-    for dimension in ("cpus", "memory-bytes", "processes", "scratch-bytes"):
-        execution.add_argument("--budget-" + dimension, type=int)
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
     try:
         options = parser.parse_args(argv)
-        if options.command == "runtime":
-            result = runtime.build_runtime(
-                Path.cwd(), options.requirements, runtime_profile=options.runtime_profile
-            )
-        elif options.command == "plan":
+        if options.command == "plan":
             from .plan import make_plan
 
-            result = make_plan(
-                Path.cwd(),
-                runtime_profile=options.runtime_profile,
-                required_capabilities=options.required_capabilities,
-                python_profile=options.python_profile,
-                source_roots=options.source_roots,
-            )
+            result = make_plan(Path.cwd())
         else:
             arguments = (
                 options.arguments[1:] if options.arguments[:1] == ["--"] else options.arguments
             )
-            dimensions = ("cpus", "memory_bytes", "processes", "scratch_bytes")
-            budget = {name: getattr(options, "budget_" + name) for name in dimensions}
-            budget = budget if any(value is not None for value in budget.values()) else None
             result = run(
                 Path.cwd(),
                 force=options.force,
@@ -1177,13 +1237,9 @@ def main(argv=None):
                 cache_dir=options.cache_dir,
                 timeout=options.timeout,
                 arguments=arguments,
-                budget=budget,
+                workers=options.workers,
                 suites=options.suites,
                 execution_mode=options.execution_mode,
-                runtime_profile=options.runtime_profile,
-                required_capabilities=options.required_capabilities,
-                python_profile=options.python_profile,
-                source_roots=options.source_roots,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
@@ -1198,9 +1254,6 @@ def main(argv=None):
     except KeyboardInterrupt:
         print(json.dumps(error_result(InfrastructureError("invocation interrupted"))))
         return 3
-    except UnsupportedCapability as exc:
-        print(json.dumps(error_result(exc)))
-        return 4
     except DeclarationError as exc:
         print(json.dumps(error_result(exc)))
         return 4

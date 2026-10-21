@@ -29,6 +29,7 @@ class InfrastructureError(RuntimeError):
 
 
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions"})
 
 
 def render_json(value):
@@ -57,23 +58,38 @@ class Unit:
 class Manifest:
     root: Path
     raw: bytes
-    units: list[Unit]
+    units: list[Unit | None]
     env: list[str]
     inventory: list[str]
     pytest_args: list[str]
     registry: list[dict]
     declarations: dict[str, Unit]
     defaults: Unit
-    broad_inputs: list[str]
     source_hashes: dict[str, str]
     suites: list = field(default_factory=list)
     distributions: dict = field(default_factory=dict)
     execution: dict = field(default_factory=dict)
-    runtime: dict = field(default_factory=dict)
+    scoped_files: dict = field(default_factory=dict)
+    ordinary_files: dict = field(default_factory=dict)
+    pool: Unit | None = None
 
     @cached_property
     def registry_by_id(self):
         return {row["id"]: row for row in self.registry}
+
+    @property
+    def scope_possible(self):
+        """Any scope declaration in the effective structural boundary needs the sandbox."""
+        return self.pool is not None
+
+
+def scoping(row):
+    return bool(SCOPE_FIELDS.intersection(row["kwargs"]))
+
+
+def module_scoped(rows):
+    """Only an unconditional module-level scope keeps a whole file off the host."""
+    return any(row["kind"] == "scope" and not row["owner"] and scoping(row) for row in rows)
 
 
 def sequence(value, label):
@@ -289,15 +305,15 @@ def _with_first(first, rest):
     yield from rest
 
 
-def load(
-    root,
-    *,
-    cache_dir=None,
-    suite_names=None,
-    structural_files=None,
-    python_profile=None,
-    source_roots=None,
-):
+REMOVED_SETTINGS = {
+    "runtime": "runtime profiles were removed; scoped tests use the invoking interpreter "
+    "and environment read-only",
+    "python": "Python source lookup profiles were removed; give child interpreters an "
+    "explicit PYTHONPATH",
+}
+
+
+def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
@@ -320,20 +336,13 @@ def load(
         raise DeclarationError(
             "central targets are unsupported; migrate inputs to literal pytest.mark.telescope markers"
         )
+    for name, message in REMOVED_SETTINGS.items():
+        if name in spec:
+            raise DeclarationError(message)
     mapping(
         spec,
         "pytest_telescope",
-        {
-            "defaults",
-            "bundles",
-            "test_roots",
-            "env",
-            "suites",
-            "distributions",
-            "execution",
-            "runtime",
-            "python",
-        },
+        {"defaults", "bundles", "test_roots", "env", "suites", "distributions", "execution"},
     )
     bundles = mapping(spec.get("bundles", {}), "bundles")
     if len(bundles) > 256 or any(not name or len(name) > 128 for name in bundles):
@@ -350,11 +359,11 @@ def load(
             )
         return expansions[key]
 
-    from .execution import envelope
     from .execution import suites as parse_suites
+    from .execution import worker_count
     from .project_metadata import load_distributions
 
-    configured_suites = parse_suites(root, spec, suite_names, python_profile, source_roots)
+    configured_suites = parse_suites(root, spec, suite_names)
     overrides = mapping({} if structural_files is None else structural_files, "structural_files")
     if set(overrides) - {suite.name for suite in configured_suites}:
         raise DeclarationError("structural_files keys must name selected configured suites")
@@ -388,7 +397,7 @@ def load(
                 ) from exc
         suite.structural_files = sorted(names)
     execution = spec.get("execution", {})
-    envelope(execution)
+    worker_count(execution)
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
 
     def declaration(item, label):
@@ -480,7 +489,6 @@ def load(
     for distribution in distributions.values():
         hashes.update(distribution.source_hashes)
     total_bytes = total_nodes = 0
-    broad_possible = False
     for filename in sorted(inventory):
         content, _ = regular_bytes(root, filename, 4 * 1024 * 1024)
         total_bytes += len(content)
@@ -495,54 +503,59 @@ def load(
             raise DeclarationError("test declaration syntax exceeds total node/marker limits")
         hashes[filename] = hashlib.sha256(content).hexdigest()
         registry.extend(found)
-        if not any(
-            row["kind"] == "scope"
-            and not row["owner"]
-            and {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
-            for row in found
-        ):
-            broad_possible = True
         for row in found:
             declarations[row["id"]] = declaration(row["kwargs"], row["id"])
-    broad = project_paths(root, excluded=excluded, budget=budget) if broad_possible else []
-    collections = []
-    for suite in configured_suites:
-        suite_rows = [row for row in registry if row["file"] in suite.inventory]
-        suite_broad = any(
-            not any(
-                row["kind"] == "scope"
-                and not row["owner"]
-                and {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
-                for row in suite_rows
-                if row["file"] == filename
-            )
-            for filename in suite.inventory
-        )
-        inputs = (
-            set(broad if suite_broad else [])
-            | set(suite.inventory)
-            | {"pyproject.toml", suite.config}
-            | set(defaults.inputs)
-        )
-        absent, metadata, cache = set(defaults.absent), set(defaults.distributions), defaults.cache
-        if suite_broad:
-            metadata.update(distributions)
-        for row in suite_rows:
-            unit = declarations[row["id"]]
-            inputs.update(unit.inputs)
-            absent.update(unit.absent)
-            metadata.update(unit.distributions)
-            cache = cache and unit.cache
+    rows_by_file = {}
+    for row in registry:
+        rows_by_file.setdefault(row["file"], []).append(row)
+
+    def support(files):
+        """Every file a scoped case of these files could see, plus its expected absence."""
+        inputs = set(files) | set(defaults.inputs)
+        absent, metadata = set(defaults.absent), set(defaults.distributions)
+        cache = defaults.cache
+        for filename in files:
+            for row in rows_by_file.get(filename, []):
+                unit = declarations[row["id"]]
+                inputs.update(unit.inputs)
+                absent.update(unit.absent)
+                metadata.update(unit.distributions)
+                cache = cache and unit.cache
         for name in metadata:
             inputs.update(distributions[name].inputs)
+        return inputs, absent, metadata, cache
+
+    collections, scoped_files, ordinary_files = [], {}, {}
+    pool_inputs, pool_absent = set(), set()
+    for suite in configured_suites:
+        wholly = [name for name in suite.inventory if module_scoped(rows_by_file.get(name, []))]
+        scoped_files[suite.name] = wholly
+        ordinary_files[suite.name] = [name for name in suite.inventory if name not in wholly]
+        with_scope = [
+            name
+            for name in suite.inventory
+            if any(scoping(row) for row in rows_by_file.get(name, []))
+        ]
+        configuration = {"pyproject.toml", suite.config}
+        if with_scope:
+            inputs, absent, _, _ = support(with_scope)
+            pool_inputs.update(inputs | configuration)
+            pool_absent.update(absent)
+        if not wholly:
+            collections.append(None)
+            continue
+        inputs, absent, metadata, cache = support(wholly)
         collection = Unit(
-            suite.name, suite.inventory, sorted(inputs), sorted(absent), cache, sorted(metadata)
+            suite.name,
+            wholly,
+            sorted(inputs | configuration),
+            sorted(absent),
+            cache,
+            sorted(metadata),
         )
         validate_scope(root, collection)
-        from .python_source import validate_view
-
-        validate_view(suite.python, collection.inputs)
         collections.append(collection)
+    pool = Unit("pool", [], sorted(pool_inputs), sorted(pool_absent), True) if pool_inputs else None
     env = sequence(spec.get("env", []), "env")
     forbidden = {
         "PYTHONPATH",
@@ -568,12 +581,13 @@ def load(
         registry,
         declarations,
         defaults,
-        broad,
         hashes,
         configured_suites,
         distributions,
         execution,
-        mapping(spec.get("runtime", {}), "runtime", {"profile", "requires"}),
+        scoped_files,
+        ordinary_files,
+        pool,
     )
 
 
@@ -596,22 +610,22 @@ def validate_scope(root, unit):
                 )
 
 
-def case_unit(manifest, item, suite=None):
-    origins = item["origins"]
+def scoped_item(manifest, item):
+    """A collected case is scoped when any inherited literal origin declares a scope."""
     registry = manifest.registry_by_id
     if any(
-        origin not in registry or registry[origin]["file"] != item["file"] for origin in origins
+        origin not in registry or registry[origin]["file"] != item["file"]
+        for origin in item["origins"]
     ):
         raise InfrastructureError("collected marker origin disagrees with static declarations")
-    narrow = any(
-        {"inputs", "bundles", "distributions"}.intersection(registry[origin]["kwargs"])
-        for origin in origins
-    )
-    if not narrow and not manifest.broad_inputs:
-        raise DeclarationError("collected item invalidates the module's declared narrow scope")
-    inputs = set(manifest.defaults.inputs) | {item["file"], "pyproject.toml"}
-    if suite is not None:
-        inputs.add(suite.config)
+    return any(scoping(registry[origin]) for origin in item["origins"])
+
+
+def case_unit(manifest, item, suite):
+    origins = item["origins"]
+    if not scoped_item(manifest, item):
+        raise InfrastructureError("an ordinary case has no scoped execution unit")
+    inputs = set(manifest.defaults.inputs) | {item["file"], "pyproject.toml", suite.config}
     metadata = set(manifest.defaults.distributions)
     absent = set(manifest.defaults.absent)
     cache = manifest.defaults.cache
@@ -621,42 +635,13 @@ def case_unit(manifest, item, suite=None):
         absent.update(declaration.absent)
         metadata.update(declaration.distributions)
         cache = cache and declaration.cache
-    if not narrow:
-        metadata.update(manifest.distributions)
     for name in metadata:
         inputs.update(manifest.distributions[name].inputs)
-    effective_inputs = sorted(inputs) if narrow else manifest.broad_inputs
     unit = Unit(
-        item["case_id"],
-        [item["file"]],
-        effective_inputs,
-        sorted(absent),
-        cache,
-        sorted(metadata),
+        item["case_id"], [item["file"]], sorted(inputs), sorted(absent), cache, sorted(metadata)
     )
-    if narrow:
-        validate_scope(manifest.root, unit)
+    validate_scope(manifest.root, unit)
     return unit
-
-
-def project_paths(root, *, excluded=(), budget=None):
-    paths = []
-    for path in walk_bounded(root, root, excluded=excluded, budget=budget):
-        if path.is_symlink():
-            if (
-                path.is_dir()
-                or Path(os.readlink(path)).is_absolute()
-                or not path.resolve().is_relative_to(root)
-            ):
-                raise UnsupportedCapability(
-                    "project:links", "broad project scope contains an unsupported symlink"
-                )
-        elif not path.is_file() and not path.is_dir():
-            raise DeclarationError("broad project scope contains a special file")
-        paths.append(path.relative_to(root).as_posix())
-        if len(paths) > 100_000:
-            raise DeclarationError("broad project scope exceeds 100000 paths")
-    return sorted(paths)
 
 
 def snapshot(manifest, unit, destination):
