@@ -120,8 +120,9 @@ pytest-telescope's own phases, as medians over the same five repetitions:
   two and 1.36 s at four (1.59 times plain).
 - Batch mode (opt-in) starts one sandbox per group of cases with exactly equal scope,
   three here, one per test module. Its CPU is about 1.9 times plain. Wall time is 1.62 s at
-  one worker and about 1.27 s at two and four: with three batches, the largest batch
-  bounds the wall time once there are two workers.
+  one worker and about 1.27 s at two and four. Wall time stops falling after two workers,
+  which suggests that one of the three batches takes most of the scoped time. The rows do
+  not record per-batch durations.
 - These are fixed per-case and per-sandbox costs, so they matter most for short tests.
   For tests that do substantial work, the relative overhead should shrink; that follows
   from the per-case cost above and was not measured.
