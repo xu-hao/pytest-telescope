@@ -164,7 +164,7 @@ def test_scratch_and_processes_are_private_to_each_sandbox(project):
     )
     report = passed(project)
     assert report["counts"]["executed"] == 2
-    assert len(report["groups"]) == 2
+    assert [group["route"] for group in report["groups"]].count("scoped") == 2
     assert not Path("/tmp", marker).exists()
 
 
@@ -267,16 +267,21 @@ def test_independent_cases_overlap_up_to_the_worker_count(project):
         "    mine.listen()\n"
         "    other = 'right' if name == 'left' else 'left'\n"
         "    deadline = time.monotonic() + 20\n"
-        "    while time.monotonic() < deadline:\n"
+        "    while True:\n"
         "        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
         "        try:\n"
         f"            probe.connect('\\0{token}-' + other)\n"
-        "            return\n"
+        "            break\n"
         "        except OSError:\n"
-        "            time.sleep(0.05)\n"
-        "        finally:\n"
         "            probe.close()\n"
-        "    pytest.fail('the other sandbox never ran concurrently')\n",
+        "            if time.monotonic() > deadline:\n"
+        "                pytest.fail('the other sandbox never ran concurrently')\n"
+        "            time.sleep(0.05)\n"
+        "    # Stay alive until the other case has connected here too.\n"
+        "    mine.settimeout(max(0.1, deadline - time.monotonic()))\n"
+        "    peer, _ = mine.accept()\n"
+        "    peer.close()\n"
+        "    probe.close()\n",
     )
     report = passed(project, workers=2, no_cache=True, timeout=60)
     assert report["execution"]["workers"] == 2

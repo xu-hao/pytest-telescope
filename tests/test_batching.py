@@ -185,7 +185,11 @@ def test_right():
 """,
     )
     cold = run(project)
-    assert sorted(len(group["case_ids"]) for group in cold["groups"]) == [1, 2]
+    # The mixed file is collected by an ordinary session that selects no ordinary case.
+    ordinary = [group for group in cold["groups"] if group["route"] == "ordinary"]
+    assert [(group["case_ids"], group["profile"]) for group in ordinary] == [([], "ordinary-v1")]
+    scoped = [group for group in cold["groups"] if group["route"] == "scoped"]
+    assert sorted(len(group["case_ids"]) for group in scoped) == [1, 2]
     assert run(project)["counts"]["reused"] == 3
     put(project, "left.txt", "left changed")
     changed = run(project)

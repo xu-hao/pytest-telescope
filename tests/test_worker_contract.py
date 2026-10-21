@@ -395,7 +395,7 @@ def run_worker(root, box, source, *, arguments=(), timeout=10, registry=None):
         project.mkdir(mode=0o755)
         (project / "test_subject.py").write_text(source)
         (project / "test_subject.py").chmod(0o444)
-        args = ["-p", "no:cacheprovider", *arguments, "test_subject.py"]
+        args = ["-p", "no:cacheprovider", "-s", *arguments, "test_subject.py"]
         with sandbox.invocation(root) as directory:
             inventory = sandbox.execute(
                 box,
