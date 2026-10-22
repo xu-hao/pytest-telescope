@@ -46,7 +46,8 @@ changed, missing, additional or reordered members refuse rather than guessing.
 
 A group's SHA-256 identity binds profile, suite/context, source module, expanded scope,
 ordered selected membership, containing-file inventory, arguments, explicit plugins,
-sandbox identity (policy, interpreter and installed distributions) and environment. Its members retain their stable
+sandbox identity (policy, interpreter, installed distributions and the environment's
+references into the project) and environment. Its members retain their stable
 suite-aware case digests. Selection additions/removals, order changes and relevant input
 or environment changes cannot reuse another group's evidence. Case and batch records are
 mutually ineligible, including singleton batches.

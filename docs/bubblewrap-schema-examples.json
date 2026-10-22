@@ -166,7 +166,7 @@
       "sandbox": {
         "backend": "bubblewrap",
         "identity": "05b7e237ccdc9daee8ec492e79dcb3a7ee2c2b84998b6e30cd1070128a5c1429",
-        "policy": "bubblewrap-view-v1",
+        "policy": "bubblewrap-view-v2",
         "required": true
       },
       "schema": 3,
@@ -403,7 +403,7 @@
       "sandbox": {
         "backend": "bubblewrap",
         "identity": "05b7e237ccdc9daee8ec492e79dcb3a7ee2c2b84998b6e30cd1070128a5c1429",
-        "policy": "bubblewrap-view-v1",
+        "policy": "bubblewrap-view-v2",
         "required": true
       },
       "schema": 3,
@@ -586,7 +586,7 @@
       "sandbox": {
         "backend": "bubblewrap",
         "identity": null,
-        "policy": "bubblewrap-view-v1",
+        "policy": "bubblewrap-view-v2",
         "required": false
       },
       "schema": 3,

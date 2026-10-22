@@ -25,13 +25,16 @@ weaken the host policy to work around that; run the gate on a host that permits
 Bubblewrap. Ordinary routing, declarations, planning, the interpreter probe and refusal
 classification are tested without launching Bubblewrap and pass on any Linux host.
 
-Behavioral tests cover what a scoped test can observe: declared files present, undeclared
-project files and host paths absent, the host interpreter and installed packages usable
-but read-only, writes outside private scratch refused, fresh scratch per sandbox, and
-descendants. They also cover ordinary routing staying fresh and unsandboxed, case and
-batch modes, parallel workers, exact cache invalidation (declared inputs, interpreter and
-installed distributions), new test inventory, corrupt/concurrent records, deadlines,
-retry exhaustion and cleanup. Every test owns and cleans up its projects. A test that
+Behavioral tests cover what a scoped test can observe: declared files present at
+`/project` and at the project's host path, undeclared project files absent at both, the
+host interpreter and installed packages usable but read-only, isolated child interpreters
+importing declared source through editable installs (including an environment inside the
+project, without modifying the frozen copy), writes outside private scratch refused,
+fresh scratch per sandbox, and descendants. They also cover ordinary routing staying fresh
+and unsandboxed, case and batch modes, parallel workers, exact cache invalidation
+(declared inputs, interpreter, installed distributions and the environment's references
+into the project), reuse across identical checkouts, new test inventory,
+corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test owns and cleans up its projects. A test that
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 

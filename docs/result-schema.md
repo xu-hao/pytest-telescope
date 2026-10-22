@@ -23,7 +23,7 @@ A run result has `schema: 3` and `kind: "run"`. These fields distinguish it from
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
 | `execution` | Effective `mode` (`case` or `batch`), versioned scoped `profile` (`case-v1` or `batch-v1`), and `workers`. |
-| `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v1`), `required`, and `identity`. |
+| `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v2`), `required`, and `identity`. |
 | `grouping_complete` | All suite inventories and group-size preflight are validated; selected cases then belong to exactly one planned group. |
 | `groups` | Ordered ordinary sessions and scoped execution/cache groups with atomic member outcomes and wall-clock timing. |
 | `collection` | Collection outcome, counts, timings, bounded failure evidence and per-route suite inventories. |
@@ -37,8 +37,8 @@ A run result has `schema: 3` and `kind: "run"`. These fields distinguish it from
 declaration, even if no scoped case is selected; an all-ordinary run never starts
 Bubblewrap. `sandbox.identity` is null until the interpreter probe and Bubblewrap
 preflight succeed; afterward it is an opaque SHA-256 digest of the view policy, the
-interpreter identity and the installed distributions. It grants no cache authority by
-itself.
+interpreter identity, the installed distributions and how the environment reaches into
+the project. It grants no cache authority by itself.
 
 `collection.suites` has one row per suite and route that has files. The `ordinary` row
 covers the files of the suite's ordinary session; the `scoped` row covers files whose

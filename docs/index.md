@@ -206,7 +206,8 @@ python -m pytest_telescope run --explain -- -q
 Changing the common test file affects every scoped case in that file. Changing
 `pyproject.toml` affects every scoped case because configuration is always an input.
 Installing or upgrading a package in the environment also reruns scoped cases, because
-their cache key includes the interpreter and the installed distributions.
+their cache key includes the interpreter and the installed distributions, and how an
+editable install of the project reaches into it.
 
 ## Give each parameter its own input
 

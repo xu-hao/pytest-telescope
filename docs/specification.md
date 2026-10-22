@@ -206,9 +206,33 @@ not part of the cache key, so mark a scoped test `cache=False` when its result d
 their version.
 
 `subprocess.run([sys.executable, ...])` starts the same host interpreter with the same
-installed packages. A child started with `-I` ignores `PYTHONPATH` and the working
-directory, so it cannot import declared project source. To import declared source in a
-child, start it without `-I` and pass the source location explicitly:
+installed packages. When the project is installed into that environment in editable
+form, for example with `pip install -e .`, a child imports declared source through the
+install, including an isolated child started with `-I`. The install points at the
+project's host path, and the sandbox shows the frozen declared files there:
+
+```python
+import subprocess
+import sys
+
+import pytest
+
+
+@pytest.mark.telescope(inputs=["src/example_core/__init__.py", "src/example_core/worker.py"])
+def test_isolated_child_imports_declared_source():
+    completed = subprocess.run(
+        [sys.executable, "-I", "-m", "example_core.worker"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert completed.returncode == 0, completed.stderr
+```
+
+The setuptools finder module and `.pth` path entries are both supported, because both
+name the project's host path. Without an editable install, a child started with `-I`
+ignores `PYTHONPATH` and the working directory, so it cannot import declared project
+source. Start it without `-I` and pass the source location explicitly:
 
 ```python
 import os
@@ -229,6 +253,7 @@ def test_child_imports_declared_source():
     assert completed.returncode == 0
 ```
 
-The child sees the same view as its test: undeclared neighbouring modules stay absent.
+Either way the child sees the same view as its test: undeclared neighbouring modules stay
+absent, and the live checkout is never visible.
 The unreleased `git-local-v1` runtime profile and `isolated-source-v1` lookup profile were
 withdrawn with the Docker runtime; their configuration tables are rejected.

@@ -65,7 +65,9 @@ The sandbox controls the **filesystem view only**. It sets no CPU, memory, proce
 scratch limits and reports no CPU usage: limit and measure resources in the job that runs
 pytest. Scoped tests share the host network, so do not declare network-dependent tests
 as scoped. Scoped results are keyed by their declared files, the interpreter and the
-installed distributions; installing or upgrading a package reruns them.
+installed distributions; installing or upgrading a package reruns them. An editable
+install of the project (`pip install -e .`) resolves to the declared files, including in
+isolated `python -I` child processes.
 
 The default `case` mode creates a fresh sandbox and pytest session for every scoped case.
 Optional [batch mode](https://pytest-telescope.readthedocs.io/en/latest/batching/) shares
