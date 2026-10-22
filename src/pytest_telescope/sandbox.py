@@ -29,7 +29,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BACKEND = "bubblewrap"
-POLICY = "bubblewrap-view-v1"
+POLICY = "bubblewrap-view-v2"
 MAX_OUTPUT = 1_048_576
 MAX_COLLECTION = 67_108_864
 MAX_PROBE = 4 * 1_048_576
@@ -42,16 +42,53 @@ SYSTEM_DIRECTORIES = ("/usr", "/etc")
 SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
 # Paths the sandbox mounts itself; an environment directory may not overlap them.
 MOUNT_POINTS = ("/project", "/metadata", "/telescope", "/proc", "/dev")
+# Private scratch; the project directory may lie inside it, but not contain it.
+SCRATCH = ("/tmp", "/dev/shm")
 # User, mount and PID namespaces only. A PID namespace with its own /proc keeps other
 # processes' root and working directories, which are host paths, out of the view. The
 # worker is PID 1, so it reaps orphans and every remaining process ends with it.
 NAMESPACES = ("--unshare-user", "--unshare-pid", "--as-pid-1", "--die-with-parent")
 PROBE = r"""
-import json, re, sys, sysconfig
+import sys
+STARTUP = [(name, getattr(module, "__file__", None)) for name, module in list(sys.modules.items())]
+import hashlib, json, os, re, site, sysconfig
 from importlib import metadata
 
 def normalize(name):
     return re.sub(r"[-_.]+", "-", str(name or "")).lower()
+
+def references(root):
+    # Startup files of the site directories that name the project directory: the .pth
+    # files and the modules they loaded, such as an editable install's finder. Each
+    # occurrence of the directory becomes a placeholder, so identical checkouts at
+    # different paths keep one identity.
+    pattern = re.compile(re.escape(os.fsencode(root)) + rb"(?![A-Za-z0-9._~+@%=\x80-\xff-])")
+    sites = list(dict.fromkeys(
+        os.path.realpath(name) for name in site.getsitepackages() if os.path.isdir(name)
+    ))
+    candidates = []
+    for directory in sites:
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        candidates += [("pth", name, os.path.join(directory, name)) for name in names if name.endswith(".pth")]
+    for name, filename in STARTUP:
+        if type(filename) is str and any(
+            os.path.realpath(filename).startswith(directory + os.sep) for directory in sites
+        ):
+            candidates.append(("module", name, filename))
+    found = []
+    for kind, name, filename in candidates:
+        try:
+            with open(filename, "rb") as stream:
+                data = stream.read()
+        except OSError:
+            continue
+        if pattern.search(data):
+            normalized = pattern.sub(b"\0project\0", data)
+            found.append([kind, name, hashlib.sha256(normalized).hexdigest()])
+    return sorted(found)
 
 print(json.dumps({
     "executable": sys.executable,
@@ -69,6 +106,7 @@ print(json.dumps({
         [normalize(dist.metadata["Name"]), str(dist.version or "")]
         for dist in metadata.distributions()
     ),
+    "references": references(sys.argv[1]),
 }, sort_keys=True))
 """
 
@@ -275,10 +313,10 @@ def invocation(root):
                 signal.signal(signum, handler)
 
 
-def _probe(executable):
+def _probe(executable, project):
     """Describe an interpreter exactly as an isolated child of it sees its environment."""
     code, output = capture(
-        [executable, "-I", "-c", PROBE],
+        [executable, "-I", "-c", PROBE, str(project)],
         30,
         env=_host_environment(),
         cwd="/",
@@ -292,7 +330,8 @@ def _probe(executable):
         data = json.loads(output)
         valid = (
             type(data) is dict
-            and set(data) == {"executable", "prefixes", "path", "identity", "distributions"}
+            and set(data)
+            == {"executable", "prefixes", "path", "identity", "distributions", "references"}
             and type(data["executable"]) is str
             and all(
                 type(data[key]) is list and all(type(entry) is str for entry in data[key])
@@ -303,6 +342,11 @@ def _probe(executable):
             and all(
                 type(row) is list and len(row) == 2 and all(type(value) is str for value in row)
                 for row in data["distributions"]
+            )
+            and type(data["references"]) is list
+            and all(
+                type(row) is list and len(row) == 3 and all(type(value) is str for value in row)
+                for row in data["references"]
             )
         )
     except (ValueError, UnicodeError, RecursionError):
@@ -320,16 +364,36 @@ def _refuse(message):
     raise UnsupportedCapability("sandbox:environment", message)
 
 
+def _check_project(project):
+    """Refuse a project directory the sandbox cannot also show at its own host path.
+
+    The frozen view appears at /project and at the project's host path. That path must
+    not be or contain a directory the sandbox mounts, and must not lie inside one of the
+    sandbox's own mount points other than private scratch. /project itself is the view.
+    """
+    system = [Path(os.path.realpath(name)) for name in SYSTEM_DIRECTORIES]
+    if any(_inside(project, directory) for directory in system):
+        _refuse("the project cannot live inside a system directory shared with the sandbox")
+    if project == Path("/project"):
+        return
+    mounted = [*SYSTEM_DIRECTORIES, *SYSTEM_LINKS, *MOUNT_POINTS, *SCRATCH]
+    if any(_inside(Path(name), project) for name in mounted):
+        _refuse("the project directory cannot be or contain a directory the sandbox mounts")
+    if any(_inside(project, Path(point)) for point in MOUNT_POINTS) and not any(
+        _inside(project, Path(name)) for name in SCRATCH
+    ):
+        _refuse("the project directory cannot lie inside a directory the sandbox mounts itself")
+
+
 def _binds(description, project):
     """Map the interpreter's prefixes and import directories into the view, read-only.
 
     An environment prefix that contains the project is refused: binding it would expose
     the project. An import directory that contains or lies inside the project is not
-    bound, because project files are visible only through declarations.
+    bound: the project's host path shows only the frozen declared view.
     """
+    _check_project(project)
     system = [Path(os.path.realpath(name)) for name in SYSTEM_DIRECTORIES]
-    if any(_inside(project, directory) for directory in system):
-        _refuse("the project cannot live inside a system directory shared with the sandbox")
     prefixes = {
         os.path.normpath(name)
         for name in [*description["prefixes"], os.path.dirname(description["executable"])]
@@ -369,7 +433,24 @@ def _binds(description, project):
     return tuple((source, destination) for destination, source in ordered)
 
 
-def _base_arguments(box):
+NORMALIZERS = (os.path.normpath, os.path.realpath)
+
+
+def _project_paths(description, project):
+    """Import directories inside the project, outside every environment prefix."""
+    prefixes = {Path(convert(name)) for name in description["prefixes"] for convert in NORMALIZERS}
+    found = set()
+    for name in description["path"]:
+        if not os.path.isabs(name):
+            continue
+        for path in {Path(convert(name)) for convert in NORMALIZERS}:
+            if _inside(path, project) and not any(_inside(path, prefix) for prefix in prefixes):
+                found.add(path.relative_to(project).as_posix())
+    return sorted(found)
+
+
+def _base_arguments(box, project=None):
+    """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
         arguments += ["--ro-bind", directory, directory]
@@ -381,8 +462,62 @@ def _base_arguments(box):
     arguments += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/dev/shm"]
     arguments += ["--remount-ro", "/dev", "--tmpfs", "/tmp"]
     for source, destination in box.binds:
-        arguments += ["--ro-bind", source, destination]
+        if project is None or not _inside(Path(destination), project):
+            arguments += ["--ro-bind", source, destination]
     return arguments
+
+
+def _project_arguments(box, view, project):
+    """Show the frozen view read-only at /project and at the project's own host path.
+
+    An editable install refers to the project by its host path, so it resolves to the
+    declared files and nothing else. An environment bound inside the project still needs
+    a mount point there, and bwrap must never create one inside the frozen copy on the
+    host. The host path is then a private tmpfs: it binds the view's entries one by one,
+    makes directories only on the way to each environment, binds the environment and is
+    made read-only.
+    """
+    arguments = ["--ro-bind", str(view), "/project"]
+    if project == Path("/project"):
+        return arguments
+    inside = [
+        (source, Path(destination))
+        for source, destination in box.binds
+        if _inside(Path(destination), project)
+    ]
+    if not inside:
+        return arguments + ["--ro-bind", str(view), str(project)]
+    destinations = {destination for _, destination in inside}
+    ancestors = {
+        parent
+        for destination in destinations
+        for parent in destination.parents
+        if _inside(parent, project) and not any(_inside(parent, other) for other in destinations)
+    }
+    arguments += ["--tmpfs", str(project)]
+    pending = [project]
+    while pending:
+        directory = pending.pop(0)
+        frozen = view / directory.relative_to(project)
+        if os.path.lexists(frozen) and (frozen.is_symlink() or not frozen.is_dir()):
+            raise InfrastructureError("an environment lies below a frozen file")
+        for name in sorted(os.listdir(frozen)) if os.path.lexists(frozen) else []:
+            target = directory / name
+            if target in destinations:
+                raise InfrastructureError("the frozen view contains an environment directory")
+            if target in ancestors:
+                continue
+            source = frozen / name
+            if source.is_symlink():
+                arguments += ["--symlink", os.readlink(source), str(target)]
+            else:
+                arguments += ["--ro-bind", str(source), str(target)]
+        for child in sorted(path for path in ancestors if path.parent == directory):
+            arguments += ["--dir", str(child)]
+            pending.append(child)
+    for source, destination in inside:
+        arguments += ["--ro-bind", source, str(destination)]
+    return arguments + ["--remount-ro", str(project)]
 
 
 def _environment(box, forwarded=None):
@@ -443,20 +578,28 @@ def describe(root, executable=None):
     """The view of an interpreter's environment and its cache identity, without bwrap.
 
     The identity covers the interpreter build and every installed distribution visible
-    to it in isolated mode, so installing or upgrading a package changes it.
+    to it in isolated mode, so installing or upgrading a package changes it. It also
+    covers how the environment reaches into the project, relative to the project: the
+    startup files that name the project directory and the import directories inside it.
+    Without such references the project's path is not part of the identity.
     """
-    description = _probe(executable or sys.executable)
+    project = Path(root).resolve()
+    description = _probe(executable or sys.executable, project)
     folders = [os.path.dirname(description["executable"]), "/usr/local/bin", "/usr/bin", "/bin"]
     return Sandbox(
         bwrap=None,
         executable=description["executable"],
-        binds=_binds(description, Path(root).resolve()),
+        binds=_binds(description, project),
         path=":".join(dict.fromkeys(folders)),
         identity=fingerprint(
             {
                 "policy": POLICY,
                 "interpreter": description["identity"],
                 "distributions": description["distributions"],
+                "project": {
+                    "startup": description["references"],
+                    "paths": _project_paths(description, project),
+                },
             }
         ),
         description=description,
@@ -548,7 +691,8 @@ def execute(
                 raise InfrastructureError("worker request exceeded 64 MiB")
             stream.write(encoded)
     request_path.chmod(0o444)
-    argv = [*_base_arguments(box), "--ro-bind", str(view), "/project"]
+    project = Path(root).resolve()
+    argv = [*_base_arguments(box, project), *_project_arguments(box, view, project)]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
     argv += [

@@ -121,8 +121,10 @@ import sys
 
 import pytest
 
+# Wholly scoped: the module is never imported on the host.
+pytestmark = pytest.mark.telescope(inputs={declared})
 
-@pytest.mark.telescope(inputs={declared})
+
 def test_value():
     completed = subprocess.run(
         [sys.executable, "-I", "-m", "toypkg.worker"], capture_output=True, text=True, timeout=60
@@ -264,7 +266,7 @@ assert open(ROOT + "/tools/helper.txt").read() == "declared\\n"
 expected = ["test_subject.py", "tools"] + ([LOCATION] if "/" not in LOCATION else [])
 assert sorted(os.listdir(ROOT)) == sorted(expected)
 expected = ["helper.txt"] + (["env"] if LOCATION == "tools/env" else [])
-assert sorted(os.listdir(ROOT + "/tools")) == expected
+assert sorted(os.listdir(ROOT + "/tools")) == sorted(expected)
 
 
 def test_subject():
