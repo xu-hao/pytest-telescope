@@ -107,3 +107,66 @@ def test_an_environment_containing_the_project_is_refused(tmp_path):
     with pytest.raises(UnsupportedCapability) as refused:
         sandbox.describe(project, interpreter)
     assert refused.value.capability == "sandbox:environment"
+
+
+def editable_finder(site_packages, target):
+    """The two files a setuptools editable install leaves: a startup hook and its mapping."""
+    (site_packages / "__editable___toypkg_0_1_finder.py").write_text(
+        f"MAPPING = {{'toypkg': {str(target)!r}}}\n\n\ndef install():\n    pass\n"
+    )
+    (site_packages / "__editable__.toypkg-0.1.pth").write_text(
+        "import __editable___toypkg_0_1_finder; __editable___toypkg_0_1_finder.install()\n"
+    )
+
+
+def test_identity_covers_how_the_environment_reaches_into_the_project(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    plain = sandbox.describe(project, interpreter).identity
+    editable_finder(site_packages, project / "src" / "toypkg")
+    mapped = sandbox.describe(project, interpreter).identity
+    assert mapped != plain
+    editable_finder(site_packages, project / "lib" / "toypkg")
+    assert sandbox.describe(project, interpreter).identity not in {plain, mapped}
+    # A mapping to another checkout does not reach this project.
+    editable_finder(site_packages, tmp_path / "other" / "src" / "toypkg")
+    assert sandbox.describe(project, interpreter).identity == plain
+    # A path entry into the project reaches it too.
+    (site_packages / "__editable___toypkg_0_1_finder.py").unlink()
+    (site_packages / "__editable__.toypkg-0.1.pth").write_text(f"{project / 'src'}\n")
+    assert sandbox.describe(project, interpreter).identity not in {plain, mapped}
+
+
+def test_identity_does_not_depend_on_the_checkout_path(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    # Without an editable install the project path is not part of the identity.
+    assert (
+        sandbox.describe(first, interpreter).identity
+        == sandbox.describe(second, interpreter).identity
+    )
+    # With one, only where it points relative to the project counts.
+    editable_finder(site_packages, first / "src" / "toypkg")
+    reaching_first = sandbox.describe(first, interpreter).identity
+    editable_finder(site_packages, second / "src" / "toypkg")
+    assert sandbox.describe(second, interpreter).identity == reaching_first
+
+
+@pytest.mark.parametrize(
+    "root",
+    ["/", "/tmp", "/dev/shm", "/project/app", "/metadata/app", "/telescope/app", "/proc/app"],
+)
+def test_a_project_root_the_sandbox_cannot_show_at_its_host_path_is_refused(tmp_path, root):
+    interpreter, _ = environment(tmp_path / "env")
+    with pytest.raises(UnsupportedCapability) as refused:
+        sandbox.describe(root, interpreter)
+    assert refused.value.capability == "sandbox:environment"
+
+
+@pytest.mark.parametrize("root", ["/project", "/tmp/app", "/dev/shm/app"])
+def test_a_project_root_at_project_or_in_private_scratch_is_accepted(tmp_path, root):
+    interpreter, _ = environment(tmp_path / "env")
+    assert len(sandbox.describe(root, interpreter).identity) == 64

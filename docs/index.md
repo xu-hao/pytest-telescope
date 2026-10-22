@@ -16,7 +16,7 @@ exactly what a scoped test can see.
 
 ## Install
 
-This tutorial uses **0.1.0a4**. You need Linux, Python 3.11+, and the `bwrap` command
+This tutorial uses **0.1.0a5**. You need Linux, Python 3.11+, and the `bwrap` command
 from Bubblewrap (for example `sudo apt-get install bubblewrap`) on a host that lets it
 create user namespaces. There is no runtime to build and no container daemon. Version
 0.1.0a3 and earlier used Docker and are documented by their release tags.
@@ -26,7 +26,7 @@ mkdir telescope-demo
 cd telescope-demo
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a4
+python -m pip install pytest-telescope==0.1.0a5
 mkdir -p app data tests
 ```
 
@@ -206,7 +206,8 @@ python -m pytest_telescope run --explain -- -q
 Changing the common test file affects every scoped case in that file. Changing
 `pyproject.toml` affects every scoped case because configuration is always an input.
 Installing or upgrading a package in the environment also reruns scoped cases, because
-their cache key includes the interpreter and the installed distributions.
+their cache key includes the interpreter and the installed distributions, and how an
+editable install of the project reaches into it.
 
 ## Give each parameter its own input
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-telescope"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "Declared inputs. Isolated tests. Focused reruns."
 readme = "README.md"
 license = "MIT"
@@ -38,7 +38,8 @@ packages = ["src/pytest_telescope"]
 [tool.hatch.build.targets.sdist]
 core-metadata-version = "2.4"
 include = [
-  "/src", "/tests", "/scripts", "/docs", "/examples", "/benchmarks", "/README.md", "/CONTRIBUTING.md",
+  "/src", "/tests", "/scripts", "/docs", "/examples", "/benchmarks", "/README.md", "/CHANGELOG.md",
+  "/CONTRIBUTING.md",
   "/LICENSE", "/pyproject.toml", "/.readthedocs.yaml",
 ]
 

@@ -64,9 +64,10 @@ versioned identity, files with mode `0444`, directories with mode `0755`, and ep
 access/modification times. The sandbox mount is read-only. This representation
 participates in the exact case key and is mounted at `/metadata` only for that sandbox.
 The worker adds this metadata-only directory to Python's search path before pytest
-startup. All application imports still resolve through the declared `/project` snapshot
-and explicit pytest configuration. Child interpreters do not see `/metadata` unless the
-test adds it to their path.
+startup. All application imports still resolve to the declared snapshot: through
+`/project` and explicit pytest configuration, or through an editable install of the
+project, which points at the same snapshot at the project's host path. Child interpreters
+do not see `/metadata` unless the test adds it to their path.
 
 The effective metadata set is complete: omitted distributions are absent, including
 negative lookups. Duplicate normalized names or conflicts with packages installed in the
@@ -217,9 +218,10 @@ slot.
 ## Explicit capability refusals
 
 The sandbox provides the [filesystem view](bubblewrap.md): read-only declared project
-files and metadata, the read-only host interpreter, environment and system directories,
-private writable scratch, and the host network. It does not install tools, build runtimes,
-limit resources or isolate the network.
+files (at `/project` and at the project's host path) and metadata, the read-only host
+interpreter, environment and system directories, private writable scratch, and the host
+network. It does not install tools, build runtimes, limit resources or isolate the
+network.
 
 A suite may declare `capabilities = ["python", "project:readonly"]`. Requesting
 `network:none` or `scratch:noexec`, which the 0.1.0a3 Docker backend provided, or any
@@ -261,7 +263,8 @@ and host-environment paths are not supported inputs.
 
 Behavioral tests cover metadata version and entry-point lookup, source without metadata,
 metadata without source, negative lookup of other distributions, independent root/cwd/
-conftest behavior and structurally excluded modules inside real Bubblewrap sandboxes, plus
-routing, selectors, workers, retries and cleanup. See [development](development.md) for
+conftest behavior, structurally excluded modules and isolated child interpreters
+importing declared source through an editable install inside real Bubblewrap sandboxes,
+plus routing, selectors, workers, retries and cleanup. See [development](development.md) for
 the full gate and its current status. Earlier Docker-era qualification results apply to
 0.1.0a3 only.

@@ -134,7 +134,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
         "mode": "plan-only",
         "sandbox": {
             "backend": "bubblewrap",
-            "policy": "bubblewrap-view-v1",
+            "policy": "bubblewrap-view-v2",
             "required": True,
             "identity": None,
         },

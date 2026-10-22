@@ -67,7 +67,7 @@ These settings are rejected with a message naming the replacement:
 | --- | --- |
 | `[tool.pytest_telescope.execution.worker]`, `[...execution.budget]` | Limit resources in the job that runs pytest; set `execution.workers` |
 | `[tool.pytest_telescope.runtime]` | None: scoped tests use the invoking interpreter and environment |
-| `[tool.pytest_telescope.python]` and suite `python` tables | Set `PYTHONPATH` or `sys.path` for child interpreters explicitly |
+| `[tool.pytest_telescope.python]` and suite `python` tables | Install the project in editable form, or set `PYTHONPATH` or `sys.path` for child interpreters explicitly ([child interpreters](specification.md#host-tools-and-child-interpreters)) |
 
 ## Host requirements
 
@@ -80,7 +80,10 @@ administrator's AppArmor policy grants it user namespaces. pytest-telescope neve
 that policy. Check a host with `pytest-telescope run` on one scoped test: a
 `sandbox:namespaces` refusal reports Bubblewrap's own error. The interpreter environment
 must not contain the project directory, and the project must not live inside `/usr` or
-`/etc`.
+`/etc`. Because the sandbox also shows the project at its own host path, the project
+directory must not be `/`, `/tmp` or `/dev/shm`, and must not lie inside `/metadata`,
+`/telescope`, `/proc`, `/dev` (other than `/dev/shm`) or a subdirectory of `/project`.
+The project may be `/project` itself.
 
 ## Capability codes
 
@@ -88,7 +91,7 @@ must not contain the project directory, and the project must not live inside `/u
 | --- | --- |
 | `sandbox:bubblewrap` | No `bwrap` executable on `PATH`. |
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
-| `sandbox:environment` | The interpreter could not start in the view, or the environment layout overlaps the project or the sandbox's own mount points. |
+| `sandbox:environment` | The interpreter could not start in the view, the environment layout overlaps the project or the sandbox's own mount points, or the project directory cannot also be shown at its host path. |
 | `network:none`, `scratch:noexec` | A suite requested an isolation the sandbox does not provide. |
 | `pytest:distributed-scheduling`, `pytest:configuration`, `execution:batch-size`, `metadata:pep621-static-v1`, `project-metadata:runtime-conflict`, `project:links` | Unchanged from 0.1.0a3. |
 
@@ -98,8 +101,10 @@ Schema 3 replaces schema 2 for run and refusal results. Compared with schema 2:
 
 - `execution` gains `workers`.
 - `sandbox` replaces `runtime`, `python` and `resources`: `{"backend": "bubblewrap",
-  "policy": "bubblewrap-view-v1", "required": bool, "identity": digest-or-null}`.
+  "policy": "bubblewrap-view-v2", "required": bool, "identity": digest-or-null}`.
   `identity` is null until the interpreter probe and Bubblewrap preflight succeed.
+  Version 0.1.0a4 reported `bubblewrap-view-v1`, whose view did not show the project at
+  its host path.
 - Every unit and group has `route`, `"ordinary"` or `"scoped"`. `route_counts` gives the
   same seven count keys as `counts` for each route.
 - Groups list `files` instead of a single `file`; an ordinary group is one suite session

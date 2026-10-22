@@ -1,7 +1,7 @@
 # Per-case quickstart
 
 These are the base files for the [runnable tutorial](https://pytest-telescope.readthedocs.io/en/latest/).
-They use pytest-telescope 0.1.0a4 with Bubblewrap (`bwrap`) on Linux.
+They use pytest-telescope 0.1.0a5 with Bubblewrap (`bwrap`) on Linux.
 
 From this directory, with pytest-telescope installed:
 
