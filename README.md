@@ -38,7 +38,7 @@ create user namespaces. There is no runtime image to build.
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install pytest-telescope==0.1.0a4
+python -m pip install pytest-telescope==0.1.0a5
 ```
 
 Follow the [complete runnable quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
@@ -86,7 +86,11 @@ pytest startup. `pytest --telescope-plan` is a static planning adapter. Ordinary
 stays ordinary when telescope mode is disabled; `-p no:telescope` disables plugin loading
 entirely.
 
-**Version note:** 0.1.0a4 replaces the Docker backend of 0.1.0a1 to 0.1.0a3 with ordinary
+**Version note:** 0.1.0a5 shows each scoped test's frozen declared files at the project's
+own host path as well as at `/project`, so an editable install of the project resolves to
+declared source in isolated child interpreters; see the
+[changelog](https://github.com/xu-hao/pytest-telescope/blob/main/CHANGELOG.md).
+0.1.0a4 replaced the Docker backend of 0.1.0a1 to 0.1.0a3 with ordinary
 pytest plus Bubblewrap filesystem views; the `runtime` command, resource budgets and
 runtime profiles are gone. The marker interface introduced in 0.1.0a2 remains supported.
 Immutable 0.1.0a1 used file/group targets; central `targets` declarations must migrate to
