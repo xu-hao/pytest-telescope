@@ -4,6 +4,7 @@ Scoped cases launch bwrap; these controls are never skipped.
 """
 
 import json
+import marshal
 import os
 import subprocess
 import sys
@@ -142,6 +143,102 @@ def test_ordinary():
         assert summary["units"][0]["route"] == "ordinary"
         assert summary["sandbox"]["required"] is False
     assert not (project.root / ".pytest-telescope").exists()
+
+
+@pytest.mark.parametrize(
+    ("marker", "route"),
+    [
+        ("@pytest.mark.telescope(cache=False)", "ordinary"),
+        ("@pytest.mark.telescope(inputs=[])", "scoped"),
+    ],
+)
+def test_moved_checkout_uses_current_module_path_with_reused_rewrite_cache(project, marker, route):
+    original = project.root / "tests/test_subject.py"
+    moved_root = project.root.with_name("moved-project")
+    moved = moved_root / "tests/test_subject.py"
+    project.prepare(
+        {
+            "tests/test_subject.py": f"""
+import pytest
+import sys
+from pathlib import Path
+if Path(__file__) == Path({str(moved)!r}):
+    # Prove that collection loaded bytecode compiled in the previous checkout.
+    assert sys._getframe().f_code.co_filename == {str(original)!r}
+{marker}
+def test_case(): pass
+""",
+        }
+    )
+    first = project.run()
+    assert_outcomes(first, executed=1)
+    assert first["units"][0]["route"] == route
+    source_stat = original.stat()
+    caches = list(original.parent.glob("__pycache__/test_subject.*-pytest-*.pyc"))
+    assert len(caches) == 1
+    cache = caches[0]
+    cache_bytes = cache.read_bytes()
+    cache_stat = cache.stat()
+    assert marshal.loads(cache_bytes[16:]).co_filename == str(original)
+    cache_relative = cache.relative_to(project.root)
+
+    project.root.rename(moved_root)
+    project.root = moved_root
+    assert not original.exists()
+    assert moved.stat().st_mtime_ns == source_stat.st_mtime_ns
+    assert moved.stat().st_size == source_stat.st_size
+    moved_cache = moved_root / cache_relative
+    assert moved_cache.read_bytes() == cache_bytes
+    assert moved_cache.stat().st_mtime_ns == cache_stat.st_mtime_ns
+
+    second = project.run()
+    assert second["inventory_complete"]
+    assert second["units"][0]["route"] == route
+    if route == "ordinary":
+        assert_outcomes(second, executed=1)
+        assert not second["sandbox"]["required"]
+    else:
+        assert second["counts"]["executed"] + second["counts"]["reused"] == 1
+        assert second["counts"]["failed"] == second["counts"]["infrastructure_error"] == 0
+        assert second["sandbox"]["required"]
+    # A recompile would hide the bug by replacing the old co_filename.
+    assert moved_cache.read_bytes() == cache_bytes
+    assert moved_cache.stat().st_mtime_ns == cache_stat.st_mtime_ns
+
+
+@pytest.mark.parametrize(
+    "module_origin",
+    ["del __file__", "__file__ = None", "__file__ = 42", "__file__ = ''"],
+)
+def test_marker_without_a_valid_current_module_file_is_rejected(project, module_origin):
+    project.prepare(
+        {
+            "tests/test_subject.py": f"""
+import pytest
+{module_origin}
+@pytest.mark.telescope(cache=False)
+def test_case(): pass
+""",
+        }
+    )
+    assert project.run(expected=4)["status"] == "declaration_error"
+
+
+def test_marker_from_an_outside_project_module_is_rejected(project):
+    outside = project.root.parent / "outside.py"
+    outside.write_text("import pytest\npytestmark = pytest.mark.telescope(cache=False)\n")
+    project.prepare(
+        {
+            "tests/test_subject.py": f"""
+import importlib.util
+spec = importlib.util.spec_from_file_location('outside', {str(outside)!r})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+def test_case(): pass
+""",
+        }
+    )
+    assert project.run(expected=4)["status"] == "declaration_error"
 
 
 @pytest.mark.parametrize("field", ["inputs", "bundles"])
