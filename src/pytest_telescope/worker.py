@@ -179,7 +179,9 @@ def main(request=None, *, ordinary=False):
             positions_cache[code] = tuple(code.co_positions())
         try:
             position = positions_cache[code][frame.f_lasti // 2]
-            origin = source_calls.get((project_file(code.co_filename), position))
+            # Pytest's rewrite cache can retain co_filename from a moved checkout.
+            filename = project_file(frame.f_globals.get("__file__"))
+            origin = source_calls.get((filename, position))
             encoded_kwargs = canonical(kwargs)
         except (ValueError, TypeError, IndexError):
             invalid("unsupported dynamic telescope declaration")
