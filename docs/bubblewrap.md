@@ -1,9 +1,8 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
-This is the canonical execution contract for the release after 0.1.0a3. It replaces the
-Docker backend: there is no Docker fallback, runtime image or runtime preparation step.
-Version 0.1.0a3 and earlier releases remain immutable and keep their published Docker
-contract. The [API and configuration reference](bubblewrap-api.md) gives exact interfaces
+This is the canonical execution contract for pytest-telescope 0.1.0a6. Scoped tests use
+Bubblewrap filesystem views and the host Python environment. The
+[API and configuration reference](bubblewrap-api.md) gives exact interfaces
 and the [result reference](result-schema.md) gives exact schema 3 fields.
 
 The contract has three parts:
@@ -75,9 +74,9 @@ does not exist at `/project/...` and its host path does not exist either, so `op
 not a permission error.
 
 **The project's host path shows the same frozen copy.** If the project lives at
-`/home/dev/toyproject`, then `/home/dev/toyproject/src/toypkg/__init__.py` inside the
-sandbox is the same declared, read-only file as `/project/src/toypkg/__init__.py`, and
-an undeclared `/home/dev/toyproject/notes.txt` does not exist. The live checkout is never
+`/home/dev/my_project`, then `/home/dev/my_project/src/my_package/__init__.py` inside the
+sandbox is the same declared, read-only file as `/project/src/my_package/__init__.py`, and
+an undeclared `/home/dev/my_project/notes.txt` does not exist. The live checkout is never
 mounted, and the working directory stays `/project`. Code that reaches the project by its
 host path therefore sees exactly the declared files. When `/project` is itself the
 project directory, there is one view.

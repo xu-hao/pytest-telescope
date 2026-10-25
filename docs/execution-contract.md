@@ -4,8 +4,7 @@
 
 This contract covers literal declarations, real pytest inventory, result reuse and
 outcome accounting. The [ordinary and Bubblewrap execution contract](bubblewrap.md) owns
-routing and the sandbox's filesystem view; it replaces the Docker enforcement of 0.1.0a3.
-Versions 0.1.0a1 to 0.1.0a3 remain immutable with their published contracts.
+routing and the sandbox's filesystem view.
 
 ## User interface and scope
 
@@ -53,7 +52,7 @@ pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environm
 (`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks,
 special files and unsupported paths fail boundedly rather than being followed or omitted.
 
-Pyproject contains `[tool.pytest_telescope]` test roots/environment settings, a `[tool.pytest_telescope.defaults]` table for shared inputs/bundles/absence/cache policy, and reusable `[tool.pytest_telescope.bundles.NAME]` tables. Defaults add common support to scoped cases; they do not make unmarked cases scoped. Conftest, application modules, package initializers, helpers and collection resources must be visible in a scoped case's effective scope. Existing central `targets` is rejected with a migration message rather than silently treated as per-case configuration.
+Pyproject contains `[tool.pytest_telescope]` test roots/environment settings, a `[tool.pytest_telescope.defaults]` table for shared inputs/bundles/absence/cache policy, and reusable `[tool.pytest_telescope.bundles.NAME]` tables. Defaults add common support to scoped cases; they do not make unmarked cases scoped. Conftest, application modules, package initializers, helpers and collection resources must be visible in a scoped case's effective scope.
 
 The default `case` mode starts a fresh sandbox and pytest session per scoped case and recreates module/class/session fixtures. The optional [batch profile](batching.md) shares ordinary pytest fixture lifetime and private scratch only within one suite/module and an exactly equal expanded scope. Groups never union different readable inputs. Complete group evidence is reused atomically, and every group starts a fresh sandbox. The project files remain read-only in both modes.
 

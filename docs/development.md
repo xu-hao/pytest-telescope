@@ -67,7 +67,12 @@ qualification evidence, not a universal speedup guarantee.
 
 ## Qualification status
 
-The Bubblewrap replacement has not yet passed a complete gate on a host that permits
-Bubblewrap namespaces. Results of the 0.1.0a3 Docker gate do not
-transfer to it. A corrected regression does not turn its earlier failed full-run receipt
-into a passing one.
+Version 0.1.0a6 passed the complete gate with 412 behavioral tests and nine benchmark
+harness checks on a host that permits Bubblewrap namespaces. The hosted Python 3.11/3.13
+and pytest 8/9 matrix passed on both the pull request and merged source. The published
+wheel and sdist matched the reviewed artifacts, a clean wheel installation passed seven
+focused CLI controls, and the matching Read the Docs build succeeded. See the
+[release](https://github.com/xu-hao/pytest-telescope/releases/tag/v0.1.0a6).
+
+Run the gate for each candidate change; a release's qualification does not establish that
+an untested change passes.

@@ -2,7 +2,7 @@
 
 This reference describes result schema 3. Start with the practical
 [quickstart](index.md). The [API and configuration reference](bubblewrap-api.md) lists the
-interfaces that produce these results and the schema 2 to 3 changes, and
+interfaces that produce these results, and
 [complete examples](bubblewrap-schema-examples.json) show whole reports.
 
 The Python API raises `DeclarationError` for invalid declarations and

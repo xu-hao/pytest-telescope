@@ -22,16 +22,19 @@ make_plan(root, *, suites=None, structural_files=None)
 - `timeout` bounds each sandboxed session (scoped collection, case or batch), from 0.1 to
   3,600 seconds. Ordinary suite sessions have no pytest-telescope deadline; the job that
   runs pytest bounds them.
-- `arguments`, `suites`, `structural_files`, `force`, `no_cache`, `explain` and `cache_dir`
-  keep their 0.1.0a3 meanings ([structural narrowing](scoped-execution.md#invocation-only-structural-file-narrowing)).
+- `arguments` forwards supported pytest options and selectors to the suite sessions.
+  `suites` selects configured suite names; `None` selects all suites.
+- `structural_files` narrows suite file membership before parsing and importing modules
+  ([structural narrowing](scoped-execution.md#invocation-only-structural-file-narrowing)).
+- `force=True` executes scoped cases again even when a reusable success exists.
+  `no_cache=True` bypasses result reading and recording. `explain=True` includes reuse and
+  execution reasons in the result.
+- `cache_dir` selects the cache directory; `None` uses `.pytest-telescope/cache` under
+  `root`.
 - `run` raises `DeclarationError` for invalid declarations and `UnsupportedCapability`
   (a `DeclarationError` subclass with a `capability` attribute) for refusals.
   `error_result(error)` turns either, or an `InfrastructureError`, into the refusal
   envelope.
-
-Removed from 0.1.0a3: the `budget` argument, `runtime.build_runtime`,
-`runtime.inspect_runtime`, and the unreleased `runtime_profile`, `required_capabilities`,
-`python_profile` and `source_roots` arguments. There is no runtime to prepare or inspect.
 
 ## Command line
 
@@ -43,9 +46,8 @@ pytest --telescope [PYTEST-ARGS]
 pytest --telescope-plan
 ```
 
-The `runtime` command and the `--budget-*`, `--runtime-profile`, `--require-capability`,
-`--python-profile` and `--source-root` flags are removed. Exit statuses: 0 passed,
-1 test failure, 3 infrastructure failure, 4 declaration error or unsupported capability,
+Exit statuses: 0 passed, 1 test failure, 3 infrastructure failure,
+4 declaration error or unsupported capability,
 5 no selected cases.
 
 ## Configuration
@@ -56,18 +58,11 @@ mode = "case"   # or "batch"
 workers = 4     # concurrent scoped sandboxes, 1-32, default 1
 ```
 
-Every other table keeps its 0.1.0a3 meaning: `test_roots`, `env`, `defaults`, `bundles`,
-`distributions` and `suites`. A suite's `capabilities` list accepts `python` and
-`project:readonly`; `network:none` and `scratch:noexec` are no longer provided and refuse
-with that capability code.
-
-These settings are rejected with a message naming the replacement:
-
-| Removed setting | Replacement |
-| --- | --- |
-| `[tool.pytest_telescope.execution.worker]`, `[...execution.budget]` | Limit resources in the job that runs pytest; set `execution.workers` |
-| `[tool.pytest_telescope.runtime]` | None: scoped tests use the invoking interpreter and environment |
-| `[tool.pytest_telescope.python]` and suite `python` tables | Install the project in editable form, or set `PYTHONPATH` or `sys.path` for child interpreters explicitly ([child interpreters](specification.md#host-tools-and-child-interpreters)) |
+The [marker and project reference](specification.md#project-configuration) defines
+`test_roots`, `env`, `defaults` and `bundles`. The
+[metadata and suite reference](scoped-execution.md) defines `distributions` and `suites`.
+A suite's `capabilities` list accepts `python` and `project:readonly`;
+`network:none` and `scratch:noexec` refuse with that capability code.
 
 ## Host requirements
 
@@ -93,23 +88,25 @@ The project may be `/project` itself.
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
 | `sandbox:environment` | The interpreter could not start in the view, the environment layout overlaps the project or the sandbox's own mount points, or the project directory cannot also be shown at its host path. |
 | `network:none`, `scratch:noexec` | A suite requested an isolation the sandbox does not provide. |
-| `pytest:distributed-scheduling`, `pytest:configuration`, `execution:batch-size`, `metadata:pep621-static-v1`, `project-metadata:runtime-conflict`, `project:links` | Unchanged from 0.1.0a3. |
+| `pytest:distributed-scheduling` | Nested or external distributed scheduling was requested; telescope owns scoped workers. |
+| `pytest:configuration` | Unsupported pytest configuration format. |
+| `execution:batch-size` | A batch exceeds 4,096 selected members. |
+| `metadata:pep621-static-v1` | Local distribution metadata cannot be translated from the supported static PEP 621 fields. |
+| `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
+| `project:links` | A project input contains an unsupported directory symlink. |
 
 ## Result schema 3
 
-Schema 3 replaces schema 2 for run and refusal results. Compared with schema 2:
+Run and refusal results use schema 3. The [result reference](result-schema.md) defines
+all fields and accounting rules.
 
-- `execution` gains `workers`.
-- `sandbox` replaces `runtime`, `python` and `resources`: `{"backend": "bubblewrap",
+- `execution` reports the execution mode, profile and configured `workers`.
+- `sandbox` reports `{"backend": "bubblewrap",
   "policy": "bubblewrap-view-v2", "required": bool, "identity": digest-or-null}`.
   `identity` is null until the interpreter probe and Bubblewrap preflight succeed.
-  Version 0.1.0a4 reported `bubblewrap-view-v1`, whose view did not show the project at
-  its host path.
 - Every unit and group has `route`, `"ordinary"` or `"scoped"`. `route_counts` gives the
   same seven count keys as `counts` for each route.
-- Groups list `files` instead of a single `file`; an ordinary group is one suite session
+- Groups list `files`; an ordinary group is one suite session
   with profile `ordinary-v1`, never cache eligible.
 - `collection.suites` has one row per suite and route, each with `route` and `files`.
-- Every `cpu_seconds` field and `worker_cpu_seconds` are removed. Wall-clock timings stay.
-
-Cache records written by earlier versions are not eligible for reuse.
+- Timings report wall-clock durations. CPU and resource accounting belong to the caller.
