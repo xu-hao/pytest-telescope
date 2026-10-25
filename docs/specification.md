@@ -1,10 +1,10 @@
 # Marker and project reference
 
-The [quickstart](index.md) provides every file for a runnable project. The
+The [quickstart](index.md) shows how to adopt pytest-telescope in an existing project. The
 [ordinary and Bubblewrap execution contract](bubblewrap.md) is authoritative for routing
 and the sandbox, and the [declaration contract](execution-contract.md) for inventory and
-reuse. The base marker interface is available since 0.1.0a2; old central `targets`
-declarations are rejected with a migration message.
+reuse. Declare inputs beside tests, with shared defaults and bundles in project
+configuration.
 
 ## Markers beside cases
 
@@ -105,8 +105,8 @@ caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `
 a directory with validated `pyvenv.cfg`). Hidden and Git-ignored files can be declared.
 pytest-telescope never walks or hashes undeclared project files.
 
-The default suite keeps pytest settings in `[tool.pytest.ini_options]`. Next-alpha
-[independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
+The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
+[Independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
 Only named user variables are forwarded; runtime-controlled variables remain reserved.
 
 ## Select and control execution
@@ -255,5 +255,3 @@ def test_child_imports_declared_source():
 
 Either way the child sees the same view as its test: undeclared neighbouring modules stay
 absent, and the live checkout is never visible.
-The unreleased `git-local-v1` runtime profile and `isolated-source-v1` lookup profile were
-withdrawn with the Docker runtime; their configuration tables are rejected.

@@ -30,20 +30,20 @@ and the system directories, all read-only, plus private scratch. Undeclared proj
 files do not exist in its view. Declarations at module, class, function, and parameter
 levels add together with project defaults. `cache=False` alone leaves a case ordinary.
 
-## Try it
+## Add it to your project
 
 Requirements: Linux, Python 3.11+, and `bwrap` from Bubblewrap on a host that lets it
-create user namespaces. There is no runtime image to build.
+create user, mount and PID namespaces. From your existing checkout, activate the
+environment you normally use for tests:
 
 ```sh
-python -m venv .venv
-. .venv/bin/activate
+python -m pytest -q
 python -m pip install pytest-telescope==0.1.0a6
 ```
 
-Follow the [complete runnable quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
-for copyable application code, tests, JSON, and TOML. The base files are also in
-[examples/quickstart](https://github.com/xu-hao/pytest-telescope/blob/main/examples/quickstart).
+Follow the [existing-project quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
+to connect your pytest configuration, declare one test's inputs, and verify reuse before
+expanding adoption. Keep your application, fixtures and dependency installation workflow.
 
 From your configured project root:
 
@@ -85,17 +85,6 @@ The dedicated CLI starts no host pytest session before its own sessions. `pytest
 pytest startup. `pytest --telescope-plan` is a static planning adapter. Ordinary pytest
 stays ordinary when telescope mode is disabled; `-p no:telescope` disables plugin loading
 entirely.
-
-**Version note:** 0.1.0a6 accepts moved checkouts whose pytest assertion-rewrite bytecode
-still names the original path. 0.1.0a5 shows each scoped test's frozen declared files at the project's
-own host path as well as at `/project`, so an editable install of the project resolves to
-declared source in isolated child interpreters; see the
-[changelog](https://github.com/xu-hao/pytest-telescope/blob/main/CHANGELOG.md).
-0.1.0a4 replaced the Docker backend of 0.1.0a1 to 0.1.0a3 with ordinary
-pytest plus Bubblewrap filesystem views; the `runtime` command, resource budgets and
-runtime profiles are gone. The marker interface introduced in 0.1.0a2 remains supported.
-Immutable 0.1.0a1 used file/group targets; central `targets` declarations must migrate to
-markers, defaults, and bundles.
 
 See the [execution contract](https://github.com/xu-hao/pytest-telescope/blob/main/docs/bubblewrap.md),
 [API reference](https://github.com/xu-hao/pytest-telescope/blob/main/docs/bubblewrap-api.md),

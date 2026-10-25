@@ -2,7 +2,7 @@
 
 This document extends the [declaration contract](execution-contract.md) and the
 [ordinary and Bubblewrap execution contract](bubblewrap.md) with local distribution
-metadata, independent suites and parallel scoped workers. Existing releases are immutable.
+metadata, independent suites and parallel scoped workers.
 
 ## Static project metadata
 
@@ -192,9 +192,7 @@ integer of at most 32, default 1. `run --workers N` and `controller.run(root,
 workers=N)` override it for one invocation. It is a concurrency count, not a resource
 budget: pytest-telescope sets no CPU, memory, process or scratch limits and does not
 infer them from the host. Limit resources in the job that runs pytest; every sandbox is a
-child process of the invocation and stays inside those limits. The 0.1.0a3
-`execution.worker` and `execution.budget` tables are rejected with a message naming this
-replacement.
+child process of the invocation and stays inside those limits.
 
 Collection and ordinary sessions run one at a time; independent scoped case misses or
 batches then use up to `workers` sandboxes. By default each scoped case starts a fresh
@@ -224,8 +222,8 @@ network. It does not install tools, build runtimes, limit resources or isolate t
 network.
 
 A suite may declare `capabilities = ["python", "project:readonly"]`. Requesting
-`network:none` or `scratch:noexec`, which the 0.1.0a3 Docker backend provided, or any
-other capability, returns a machine-readable `unsupported` result with that capability
+`network:none`, `scratch:noexec` or any other capability returns a machine-readable
+`unsupported` result with that capability
 code and exit status 4. A refusal cannot mint a success or a reusable cache entry, and
 never silently widens the execution profile or falls back to ordinary execution. A
 refusal or incomplete inventory alone does not prove that no earlier case executed. Do
@@ -266,5 +264,4 @@ metadata without source, negative lookup of other distributions, independent roo
 conftest behavior, structurally excluded modules and isolated child interpreters
 importing declared source through an editable install inside real Bubblewrap sandboxes,
 plus routing, selectors, workers, retries and cleanup. See [development](development.md) for
-the full gate and its current status. Earlier Docker-era qualification results apply to
-0.1.0a3 only.
+the full gate and its current status.
