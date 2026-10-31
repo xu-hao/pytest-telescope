@@ -163,8 +163,9 @@ import pytest
 import sys
 from pathlib import Path
 if Path(__file__) == Path({str(moved)!r}):
-    # Prove that collection loaded bytecode compiled in the previous checkout.
-    assert sys._getframe().f_code.co_filename == {str(original)!r}
+    # Pytest 9.2 corrects the filename in memory; older versions keep the old path.
+    # The outer test verifies that the original bytecode cache is reused unchanged.
+    assert sys._getframe().f_code.co_filename in ({str(original)!r}, {str(moved)!r})
 {marker}
 def test_case(): pass
 """,
