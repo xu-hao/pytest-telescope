@@ -6,11 +6,11 @@ interfaces that produce these results, and
 [complete examples](bubblewrap-schema-examples.json) show whole reports.
 
 The Python API raises `DeclarationError` for invalid declarations and
-`UnsupportedCapability` for unqualified capabilities. `UnsupportedCapability` subclasses
+`UnsupportedCapability` for unsupported capabilities. `UnsupportedCapability` subclasses
 `DeclarationError` and exposes `capability`. Infrastructure failures during an established
 run are accounted in its result where possible. `controller.error_result(error)` converts a
-typed declaration, capability or infrastructure exception into the refusal envelope below.
-Consumers should dispatch on the explicit status and capability, without parsing messages.
+typed declaration, capability or infrastructure exception into the refusal response below.
+Use the status and capability fields to handle these errors; message text can change.
 
 ## Complete and incomplete run inventories
 
@@ -19,7 +19,7 @@ A run result has `schema: 3` and `kind: "run"`. These fields distinguish it from
 | Field | Meaning |
 | --- | --- |
 | `status` | `passed`, `failed`, `infrastructure_error`, or `no_tests`. |
-| `inventory_complete` | Whether every selected suite produced a validated real inventory within its effective structural file boundary. |
+| `inventory_complete` | Whether a complete, validated case inventory is available for each selected suite's effective file list. |
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
 | `execution` | Effective `mode` (`case` or `batch`), versioned scoped `profile` (`case-v1` or `batch-v1`), and `workers`. |
@@ -38,7 +38,7 @@ declaration, even if no scoped case is selected; an all-ordinary run never start
 Bubblewrap. `sandbox.identity` is null until the interpreter probe and Bubblewrap
 preflight succeed; afterward it is an opaque SHA-256 digest of the view policy, the
 interpreter identity, the installed distributions and how the environment reaches into
-the project. It grants no cache authority by itself.
+the project. A matching sandbox identity alone is not enough to reuse a result.
 
 `collection.suites` has one row per suite and route that has files. The `ordinary` row
 covers the files of the suite's ordinary session; the `scoped` row covers files whose
@@ -62,7 +62,7 @@ opaque case identity. `route` is `ordinary` or `scoped`. An ordinary case is nev
 `reused`; its `worker_seconds` is null because it shares its session.
 Outcomes are `executed`, `reused`, `failed`, `infrastructure_error`, or `not-selected`;
 `counts` also reserves `unsupported`. `counts.selected` includes every selected known
-case, including work parked after a terminal failure. A scoped case left unexecuted because
+case, including cases left unrun after a terminal failure. A scoped case left unexecuted because
 a collection stopped the run keeps outcome `infrastructure_error`, reason `execution not
 started` and a null `group_id`, but the run status follows the collection outcome: a
 failed collection is `failed`, not an infrastructure outage. `counts.not-selected` accounts for
@@ -114,8 +114,8 @@ Each case row adds `group_id`, `result_status`, and `complete`. Result status is
 `failed`, `skipped`, `not-run`, or `null` for unselected/unresolved infrastructure cases.
 Case `attempts` repeats its group count: summing case attempts does not count workers.
 Every batch-mode case row, including unselected and unresolved members, has
-`worker_seconds` set to `null`, because shared fixture costs cannot be attributed
-honestly to individual members. Case mode retains singleton measurements. Results
+`worker_seconds` set to `null`, because shared fixture costs cannot be measured separately
+for each member. Case mode retains per-case measurements. Results
 contain no CPU fields: resource accounting belongs to the caller.
 
 An ordinary group is one suite session. Its selected ordinary cases are its members; an
@@ -175,14 +175,14 @@ If no complete inventory can be established for a typed refusal, the CLI emits:
 Refusal status is `unsupported`, `declaration_error`, or `infrastructure_error`.
 `capability` exists only for unsupported results. The
 [API reference](bubblewrap-api.md#capability-codes) lists the capability codes, including
-`sandbox:bubblewrap`, `sandbox:namespaces` and `sandbox:environment`. Refusals never mint
-successful case records, silently widen the view or fall back to ordinary execution.
+`sandbox:bubblewrap`, `sandbox:namespaces` and `sandbox:environment`. A refusal creates no
+reusable result. The runner does not widen the view or fall back to ordinary execution.
 
 A refusal or `inventory_complete: false` alone does not prove that no earlier case
 executed: ordinary sessions may already have run. Sandbox prerequisites are checked
 before any session starts, so a `sandbox:*` refusal happens before test code runs. Do not
-blindly replay a run after a refusal; incomplete accounting remains unresolved execution
-evidence.
+automatically replay a run after a refusal: some tests may have run even if their results
+are missing.
 
 CLI exit statuses are 0 for success, 1 for test failure, 3 for infrastructure failure,
 4 for invalid declarations or unsupported capabilities, and 5 for no selected cases.

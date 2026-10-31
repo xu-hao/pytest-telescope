@@ -61,9 +61,9 @@ real browser after layout changes. Stop the local server when finished. Edit nav
 in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples first.
 
 The CI matrix covers supported host Python/pytest versions on Linux runners with
-Bubblewrap installed. Keep build/documentation tools in development dependencies. The
-[benchmark](benchmark.md) defines the plain-versus-Bubblewrap measurement; its output is
-qualification evidence, not a universal speedup guarantee.
+Bubblewrap installed. Keep build and documentation tools in development dependencies.
+Use the [benchmark](benchmark.md) to compare fresh execution with plain pytest and
+Bubblewrap on the same workload.
 
 ## Qualification status
 
@@ -74,5 +74,4 @@ wheel and sdist matched the reviewed artifacts, a clean wheel installation passe
 focused CLI controls, and the matching Read the Docs build succeeded. See the
 [release](https://github.com/xu-hao/pytest-telescope/releases/tag/v0.1.0a6).
 
-Run the gate for each candidate change; a release's qualification does not establish that
-an untested change passes.
+Run the gate again for each candidate change.

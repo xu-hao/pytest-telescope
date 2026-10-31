@@ -1,15 +1,17 @@
 # Optional identical-scope batches
 
-This is the execution contract for the optional batching profile of scoped cases. The
-[ordinary and Bubblewrap execution contract](bubblewrap.md) owns routing and the sandbox
-view; the [metadata and suite contract](scoped-execution.md) owns metadata and suites.
-Batching never applies to ordinary cases, which always share one ordinary session per suite.
+Batch mode lets scoped tests share a pytest session and its fixtures. It can reduce
+startup and fixture setup time when tests in the same module need exactly the same
+files. Ordinary cases already share one session per suite; batching applies only to
+scoped cases.
+
+The [execution contract](bubblewrap.md) describes routing and the sandbox view. The
+[metadata and suite reference](scoped-execution.md) covers their configuration.
 
 ## Choose fixture lifetime explicitly
 
-The default remains `case`: every selected scoped case owns a fresh sandbox, pytest
-session and private scratch. Opt into `batch` when ordinary pytest fixture sharing within
-an exactly equal scope is appropriate:
+By default, each scoped case that needs to run gets a new sandbox, pytest session and
+private scratch. Use `batch` if tests with the same scope can share fixtures:
 
 ```toml
 [tool.pytest_telescope.execution]
@@ -24,25 +26,25 @@ cannot predict dynamically collected group membership.
 
 The versioned execution profiles are `case-v1` and `batch-v1`. A batch occupies one
 worker slot regardless of member count; `workers` bounds how many cases or batches run at
-once. Parallelism never infers host CPU capacity. Batch mode never changes readable source
-or metadata permissions.
+once. Set `workers` to choose the concurrency; pytest-telescope does not infer it from
+the host's CPUs. Batching does not change which source or metadata a test can read.
 
 ## Exact scope and deterministic membership
 
-Partition selected cases by suite, source module, exactly equal effective readable file
-sets, declared absence, generated metadata visibility/identity, and cache policy. The
-frozen file identities include contents and supported modes. Equivalent declarations
-may share a batch only after expansion to exactly equal effective scopes; different
-scopes are never unioned. `cache=False` cases form separate noncacheable policy groups;
-they cannot make cacheable neighbors reusable or widen a narrow scope. This marker does
-not make nondeterministic grouping safe.
+Cases share a batch only when they belong to the same suite and source module and have
+exactly equal readable files, declared absence, generated metadata and cache policy.
+File comparisons include contents and supported modes. Two declarations can be written
+differently and still produce the same scope after expansion. Cases with different
+scopes stay in separate batches; pytest-telescope does not combine their inputs.
+`cache=False` cases form separate, uncached groups. Their grouping must still be
+reproducible.
 
-Within each group retain the selected pytest execution order after collection hooks and
-ordinary selection. Record that order explicitly as opaque case digests. Do not infer
-order from sorted digests or raw parameter strings. Collection must account for every
-current structural case, including unselected cases. Execution recollects the containing
-module and validates its complete inventory and the requested ordered selected subset;
-changed, missing, additional or reordered members refuse rather than guessing.
+Each group keeps pytest's selected execution order after collection hooks and selection.
+The result records that order as opaque case digests. Sorting digests or raw parameter
+strings would give a different order. Collection accounts for all cases in the configured
+files, including unselected cases. Before running a batch, pytest-telescope collects its
+module again and checks the full inventory and ordered selection. Changed, missing,
+additional or reordered members cause a refusal.
 
 A group's SHA-256 identity binds profile, suite/context, source module, expanded scope,
 ordered selected membership, containing-file inventory, arguments, explicit plugins,
@@ -89,7 +91,7 @@ attempt supplies member results and worker time. Controller wall time spans all
 attempts; `timing_complete` is false after retries or unavailable results, because worker
 time from an opaque failed attempt is unknown. These measurements are separate from
 member counts. Invalid worker output, collection drift, cancellation,
-failed descendant cleanup and outer lifecycle failure cannot mint successes.
+failed descendant cleanup and failure to clean up the invocation prevent reusable results.
 Cancellation stops new submissions and drains all owned active groups. Unstarted
 members remain explicitly accounted. No fallback widens the view or runs ordinary.
 
@@ -100,9 +102,9 @@ prevents publication of all new records, including other groups' successes.
 
 ## Machine accounting
 
-The public result schema is **3** for both execution modes and typed refusals.
-Existing inventory/case digest rules and count spellings remain unchanged. The
-[run result reference](result-schema.md) remains the authority for those fields.
+Both execution modes and typed refusals use result schema 3. The
+[run result reference](result-schema.md) defines the inventory and case digests and
+count fields.
 
 Run results add `execution` with `mode` and `profile`, and `groups`, in deterministic
 suite/module/first-selected-member order. `grouping_complete` remains false until every suite inventory and group-size preflight
@@ -128,15 +130,15 @@ Each case row adds `group_id`, `result_status` (`passed`, `failed`, `skipped`, `
 or `null` for unselected/unresolved infrastructure), and `complete`. Case `attempts`
 reports its group's attempt count; do not sum member attempts to count workers. In batch
 mode every case row, including unselected and unresolved members, has `worker_seconds`
-set to `null`: shared fixture and worker costs cannot honestly be attributed to
-individual cases. Case mode retains singleton timings.
+set to `null`: shared fixture and worker costs cannot be separated into per-case
+measurements. Case mode retains singleton timings.
 Group `failures` retains bounded phase/location/type/opaque-ID evidence, including
 collection errors whose IDs do not identify a requested member. A nonzero pytest
 session verdict fails the group/run even if every member report passed; those observed
 passes do not become reusable evidence. See the result reference for the preserved
 case-profile collection-failure verdict and separate not-run member counts.
 
-Group timings are the authority for execution totals. pytest-telescope reports no CPU
+Use group timings for execution totals. pytest-telescope reports no CPU
 usage; measure it for the whole invocation in the job that runs pytest.
 
 Case `outcome` keeps the existing vocabulary. Observed passed/skipped members are
@@ -168,7 +170,7 @@ limited by the same 100,000-case invocation bound and validated serialized recor
 Behavioral controls run real Bubblewrap sandboxes and cover ordinary shared
 session/module/class setup and teardown within a group, distinct function `tmp_path`,
 shared scratch, absent undeclared files, equal-scope eligibility, unequal-scope
-separation, honest partial execution for `-x`/`--maxfail` and shared teardown failure,
+separation, partial execution for `-x`/`--maxfail` and shared teardown failure,
 selection/membership/order changes, partial or corrupt records, noncacheable groups,
-bounded retries and cleanup. Report overhead and fixture-lifetime tradeoffs without
-universal speedup claims.
+bounded retries and cleanup. Measure startup overhead and fixture setup time in your own
+suite when deciding whether to use batching.

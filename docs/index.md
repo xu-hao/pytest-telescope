@@ -1,18 +1,19 @@
 # pytest-telescope
 
-Declared inputs. Isolated tests. Focused reruns.
+pytest-telescope caches pytest results so repeated checks spend less time running tests
+whose inputs haven't changed. If coding agents are adding changes to a merge queue,
+reusing those results can reduce the test work each queued change needs.
 
-Put input declarations beside your existing pytest tests. A declared test runs in a Linux
-[Bubblewrap](https://github.com/containers/bubblewrap) sandbox with its declared project
-files and your installed Python environment, read-only. Its successful result can be
-reused until those inputs change. Tests without declarations run as ordinary pytest on
-every invocation.
+You declare the project files each test reads. pytest-telescope runs it in a Linux
+[Bubblewrap](https://github.com/containers/bubblewrap) sandbox, where other project files
+are absent, and saves successful results for reuse. It checks the declared inputs,
+interpreter and installed packages before accepting a cached result. Tests without
+declarations run every time as ordinary pytest.
 
 ## Quickstart: add it to an existing project
 
-Start with a project whose tests already pass under pytest. Adopt pytest-telescope one
-test or module at a time; keep your application, test bodies, fixtures and dependency
-installation workflow.
+Start with a project whose tests already pass under pytest. The steps below add caching
+to one existing test, check that it works, then extend it to more of your suite.
 
 ### 1. Install in your project's test environment
 
@@ -33,19 +34,19 @@ to reproduce this setup in CI.
 
 ### 2. Point it at your existing tests and pytest configuration
 
-Merge this into the checkout's `pyproject.toml`, adjusting `tests` to your test directory:
+Add this table to your `pyproject.toml`, changing `tests` to your test directory:
 
 ```toml
 [tool.pytest_telescope]
 test_roots = ["tests"]
 ```
 
-This uses the pytest settings already in `[tool.pytest.ini_options]`. Keep those settings,
-including import paths and registered markers. Create `pyproject.toml` if needed; do not
-replace your existing project metadata or repeat a table that is already present.
+This uses the pytest settings already in `[tool.pytest.ini_options]`, including import
+paths and registered markers. Create `pyproject.toml` if you don't have one. If a table
+already exists, add settings to it; TOML does not allow the same table twice.
 
 If you keep pytest settings in `pytest.ini`, `.pytest.ini`, `tox.ini` or `setup.cfg`, or
-need explicit pytest plugins, use a named suite **instead of** top-level `test_roots`:
+need explicit pytest plugins, use a named suite in place of top-level `test_roots`:
 
 ```toml
 [tool.pytest_telescope.suites.tests]
@@ -62,8 +63,9 @@ The [suite reference](scoped-execution.md#independent-suites-and-structural-memb
 covers separate roots, working directories and suite arguments.
 
 Scoped sessions clear inherited environment variables. If a test needs a variable, list
-its name in `env` under `[tool.pytest_telescope]`; its presence and value then participate
-in cache identity. See the [project configuration reference](specification.md#project-configuration).
+its name in `env` under `[tool.pytest_telescope]`. Changing its value, setting it or
+unsetting it will invalidate cached results. See the
+[project configuration reference](specification.md#project-configuration).
 
 ### 3. Declare the inputs of one existing test
 
@@ -95,13 +97,13 @@ Use the data file that your test actually reads. Paths are relative to the proje
 The containing test source and configuration are automatic inputs; application source,
 conftest files, helpers and data need declarations.
 
-This makes that case **scoped**. It sees the declared project files read-only, plus the
+This makes the test *scoped*: it sees the declared project files read-only, plus the
 installed environment and system directories. Undeclared project files are absent.
 Writes belong in private scratch, for example through pytest's `tmp_path` fixture.
 Tests without an `inputs`, `bundles` or `distributions` declaration remain ordinary,
 including other tests in the same file.
 
-### 4. Preview, then run the selected test twice
+### 4. Run the test twice
 
 From the directory containing `pyproject.toml`:
 
@@ -112,30 +114,31 @@ python -m pytest_telescope run --explain -- tests/unit/test_parser.py::test_acce
 ```
 
 Replace the node selector with your test's path and name, using the same arguments on both
-runs. `plan` previews routes and effective scopes without importing project code; it does
-not enumerate actual parametrized cases. Pytest selection happens within the configured
-inventory, so other modules may still be collected. To exclude modules before parsing or
-importing them, use the suite's structural `include` and `exclude` settings.
+runs. `plan` reads declarations without importing project code and shows which files
+each test can read. Pytest discovers the actual parametrized cases when you run the
+tests. A node selector chooses what to run, but pytest may still collect other configured
+modules. Use the suite's `include` and `exclude` settings to leave modules out before
+they are parsed or imported.
 
-For a single selected, passing scoped case with no previous cache entry, the cold run
-reports one executed case. The unchanged warm run reports one reused case. These are
-selected fields from the JSON summaries:
+If your test has one case and passes, the first run with an empty cache reports one
+executed case. The second reports one reused case. Look for these fields in the JSON
+summaries:
 
 ```json
 {"counts": {"executed": 1, "reused": 0}}
 {"counts": {"executed": 0, "reused": 1}}
 ```
 
-A reused success records a previous execution. It is not a test executed on the warm run.
-Parametrized tests have one result per actual case, so their counts can be larger.
+`reused` means pytest-telescope accepted the previous result without running the case
+again. Parametrized tests have a result for each case, so their counts can be larger.
 
 If a scoped run fails to import a project module or read a fixture file, check the
-effective scope and add the missing dependency. Pytest fixtures still run normally, but
-their files must be declared. If Bubblewrap is missing or namespaces are unavailable, the
+files listed by `plan` and add the missing dependency. Pytest fixtures still run normally,
+but their files must be declared. If Bubblewrap is missing or namespaces are unavailable, the
 run refuses; use a host that meets the [requirements](bubblewrap-api.md#host-requirements).
 A refusal can occur after earlier tests have run, so inspect the result before retrying.
 
-### 5. Verify invalidation, then expand adoption
+### 5. Change an input and run again
 
 Make a normal change to one of the test's declared inputs and repeat the command. The
 case executes again; a passing result becomes reusable on the next unchanged run.
@@ -161,33 +164,48 @@ python -m pytest_telescope run --explain -- -q
 python -m pytest_telescope run --explain -- -q
 ```
 
-Every invocation executes selected ordinary cases in one fresh pytest session per suite.
-Scoped cases reuse eligible successes or execute in their sandbox. Check `route_counts`
-to distinguish ordinary executions, scoped executions and scoped reuse. A mixed suite
-continues to execute its ordinary cases on warm runs. Use this same command in CI after
-installing your test dependencies and ensuring Bubblewrap is available.
+Every run executes the selected ordinary cases in one fresh pytest session per suite.
+Scoped cases use a cached result when they can and run in a sandbox when they cannot.
+`route_counts` breaks down the executed and reused counts for each route.
+
+## Use it in CI
+
+Install your test dependencies and Bubblewrap, then use the same `run` command in your
+CI job. Save and restore `.pytest-telescope/cache` between jobs, or choose a location with
+`run --cache-dir PATH`. Without a saved cache, the next job must run the tests again.
+
+A merge-queue job still checks the current checkout. pytest-telescope compares each
+scoped case's inputs and execution settings with the saved result before reusing it.
+For example, a change to one parser's data file can rerun that parser's tests while
+other scoped tests reuse their results. Ordinary tests continue to run on every job.
+
+Compare a first run with an empty cache (a *cold* run) and a repeated run with unchanged
+inputs (a *warm* run) on your own suite. Starting separate pytest sessions costs time;
+short tests may cost more to run through the sandbox than through plain pytest. The
+[benchmark guide](benchmark.md) explains how to measure that overhead.
 
 ## Reuse policy and fixture lifetime
 
-In the default `case` mode, every scoped case starts a new sandbox and pytest session.
+In the default `case` mode, each scoped case that needs to run starts a new sandbox and
+pytest session.
 Session, module and class fixtures are recreated for each scoped case. Ordinary tests
 share normal pytest fixture lifetimes within their suite's ordinary session. A module
 containing both routes is imported during ordinary collection; use a module-level scope
 when the whole module, including its import, should be collected only in a sandbox.
 
 Optional [batch mode](batching.md) shares fixture lifetimes among selected scoped cases
-with exactly equal scopes in one suite/module. Use `run --execution-mode batch` when that
-lifetime suits the tests. `run --workers 4` runs up to four independent scoped sandboxes
-at once.
+in the same module and suite with exactly the same readable files, declared absence,
+metadata and cache policy. Use `run --execution-mode batch` when those tests can share
+fixtures. `run --workers 4` runs up to four independent scoped sandboxes at once.
 
 `@pytest.mark.telescope(cache=False)` alone leaves a test ordinary. Together with a scope,
 as in `inputs=[...], cache=False`, it keeps the test sandboxed and fresh on every run,
 without recording a reusable result. Use `run --force` to execute scoped successes again
 or `run --no-cache` to bypass result reading and recording.
 
-The sandbox controls the filesystem view only. Limit CPU, memory, processes and scratch
-in the job that runs pytest. Scoped tests share the host network. Make clock and
-randomness assumptions reproducible before relying on reuse. The
+The sandbox controls which files tests can see. Limit CPU, memory, processes and scratch
+space in the job that runs pytest. Tests share the host network. Before caching a test
+that uses the clock or randomness, give it a reproducible time or seed. The
 [execution contract](bubblewrap.md) describes the view and cache identity, and the
 [API reference](bubblewrap-api.md) lists the supported interfaces.
 
