@@ -1,10 +1,10 @@
 # Marker and project reference
 
-The [quickstart](index.md) shows how to adopt pytest-telescope in an existing project. The
-[ordinary and Bubblewrap execution contract](bubblewrap.md) is authoritative for routing
-and the sandbox, and the [declaration contract](execution-contract.md) for inventory and
-reuse. Declare inputs beside tests, with shared defaults and bundles in project
-configuration.
+Declare inputs beside tests, then use defaults and bundles in `pyproject.toml` to share
+declarations. If you're setting up pytest-telescope for the first time, start with the
+[quickstart](index.md). The [execution contract](bubblewrap.md) describes the sandbox,
+and [declarations, inventory and reuse](execution-contract.md) explains how results are
+cached.
 
 ## Markers beside cases
 
@@ -50,10 +50,10 @@ class TestParsing:
     def test_valid(self): ...
 ```
 
-This case receives the application bundle, common JSON, valid JSON, project defaults,
-its containing test file, and configuration. Function or parameter declarations cannot
-subtract inherited files. Module/class/function/parameter markers add together, and any
-inherited `cache=False` wins. A module-level `bundles` field scopes all its cases, even
+`test_valid` can read the application bundle, `data/common.json`, `data/valid.json`,
+project defaults, its containing test file and configuration. Module, class, function
+and parameter markers add together; a marker cannot remove inherited files. Any inherited
+`cache=False` disables caching. A module-level `bundles` field scopes all its cases, even
 functions with no individual marker, and keeps the module's import off the host.
 
 Keep shared import-time and parametrization dependencies in each consumer's scope.
@@ -93,9 +93,9 @@ declare application modules, package initializers, conftest files, helpers, and 
 A configuration change invalidates all scoped cases; a bundle input change invalidates
 its consumers. Ordinary cases always run, so nothing invalidates them.
 
-Inputs are project-relative; missing declarations and paths escaping the project are
-errors. `absent` asserts actual source nonexistence, unlike merely making a path
-inaccessible. Creating a declared-absent file is a validation error even on a warm cache.
+Inputs are project-relative. A declared input that is missing or points outside the
+project is an error. `absent` checks that a path does not exist in the source checkout.
+Creating that file is a validation error even when a cached result exists.
 A leaf symlink must use relative target text, with its destination in the effective
 scope. Directory symlinks, special files, and unsupported paths fail explicitly.
 
@@ -118,12 +118,13 @@ python -m pytest_telescope run --force -- -q
 python -m pytest_telescope run --no-cache -- -q
 ```
 
-Selectors apply actual pytest semantics, after accounting for the full current inventory.
-Other cases are reported unselected. Full options and selectors affect cache identity;
-a filtered invocation cannot reuse an unfiltered run's result. `--force` refreshes
-inventory and executes scoped successes again; `--no-cache` also prevents recording them.
-`--workers N` runs up to N independent scoped sandboxes at once. `plan` is only a
-nonexecuting static route and scope preview, not actual case enumeration.
+Pytest applies selectors after collecting the configured files. Other cases are reported
+as unselected. The cache key includes the full options and selectors, so a different
+selection needs results saved for that selection, even if the files are unchanged.
+`--force` refreshes inventory and executes scoped successes again; `--no-cache` also
+prevents recording them.
+`--workers N` runs up to N independent scoped sandboxes at once. `plan` reads declarations
+and previews routes and files without running pytest collection.
 
 Python callers can narrow a suite's files before marker parsing or collection imports:
 
@@ -194,7 +195,7 @@ not dynamically collected group membership. Each group occupies one worker slot.
 records are atomic: failures, partial runs or corrupted records cause the whole selected
 group to rerun. See [batching](batching.md) for ordering, 4,096-member limits and
 lifecycle rules, and [result schema 3](result-schema.md) for member/group outcomes,
-partial pytest stops and honest shared-worker timing.
+partial pytest stops and timing for shared workers.
 
 ## Host tools and child interpreters
 

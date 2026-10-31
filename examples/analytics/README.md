@@ -1,8 +1,8 @@
 # Synthetic analytics example
 
-Seven actual cases exercise deterministic Python computation and JSON inputs: two each
-for customer scoring, demand projection, and price schedules, plus one unmarked case
-that reads a project note. This is synthetic data, not production data.
+This example has six scoped tests that calculate customer scores, demand projections
+and price schedules from synthetic JSON data. A seventh test reads a project note and
+runs every time. Use it to try changing inputs and see which tests rerun.
 
 Install pytest-telescope 0.1.0a6 and Bubblewrap, then run from this directory:
 
@@ -16,8 +16,8 @@ The unchanged second run reuses the six scoped cases and their collection invent
 runs the ordinary project-note case again. Each scoped case starts a fresh sandbox and
 session, so even the session-scoped data directory fixture is recreated per case.
 
-Module-level literal markers select reusable scoring, demand, and pricing bundles, so
-those modules are collected only inside sandboxes. The bundles include the common helper,
+Each scoped module declares its scoring, demand or pricing bundle in a module-level
+marker, so pytest collects those modules only inside sandboxes. The bundles include the common helper,
 package initializer, conftest, and domain Python/JSON inputs. Only the customer-scores
 case adds `data/scoring-check.json` with a function marker. The unmarked project-note
 case is ordinary.

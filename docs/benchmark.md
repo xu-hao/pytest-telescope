@@ -2,9 +2,10 @@
 
 ## Plain pytest versus Bubblewrap scoped execution
 
-This measurement compares the same synthetic workload run as plain pytest, through the
-pytest-telescope ordinary route, and as scoped cases in Bubblewrap sandboxes. Its purpose
-is to show what the filesystem view costs, not to claim a universal speedup.
+This benchmark measures the cost of starting a sandbox for each test. It runs the same
+synthetic workload through plain pytest, pytest-telescope's ordinary route, and scoped
+Bubblewrap execution. Every test runs fresh, so the results measure execution overhead.
+To measure the benefit of caching, also compare cold and warm runs of your own suite.
 
 | Property | Rule |
 | --- | --- |
@@ -34,9 +35,9 @@ wait for, the worker reaps its own descendants as PID 1 of its sandbox, and no w
 in services outside the tree. When the measuring process runs in its own cgroup v2, the
 cgroup's `cpu.stat` usage over the same interval is recorded as a cross-check.
 
-The measuring process blocks on the invocation's exit rather than polling for it, so the
-wall time carries no polling granularity. An invocation that exceeds the deadline is killed
-and its measurement fails.
+The measuring process waits for the invocation to exit without polling. Its wall-time
+measurement therefore has no polling delay. If an invocation exceeds the deadline, the
+harness kills it and rejects the measurement.
 
 pytest-telescope's report adds the product's own phases where it exposes them: the
 controller's elapsed and setup time, sandboxed collection time, ordinary session time,
@@ -80,7 +81,7 @@ and sandboxes, so short tests can cost more than plain pytest. More workers can 
 wall time while total CPU stays the same or grows. Batch mode can reduce session startup
 cost when tests have exactly equal scopes and shared fixture lifetimes suit them.
 
-This harness measures fresh execution only. Measure cold and warm runs of your own suite
-separately to assess the benefit of result reuse; a warm result is a reused success, not
-fresh test execution. Synthetic workload timings do not establish a speedup for an
-existing project.
+For your own suite, record executed and reused case counts alongside cold and warm
+timings. A warm run can finish sooner because it reuses results; those cases have not
+run again. The balance between execution overhead and reuse depends on your tests and
+how often their inputs change.

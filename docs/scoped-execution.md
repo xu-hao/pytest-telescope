@@ -1,13 +1,15 @@
 # Metadata, independent suites, and parallel workers
 
-This document extends the [declaration contract](execution-contract.md) and the
-[ordinary and Bubblewrap execution contract](bubblewrap.md) with local distribution
-metadata, independent suites and parallel scoped workers.
+Use these settings when tests need local package metadata, when parts of your project
+have separate pytest configurations, or when you want to run scoped tests in parallel.
+The [declaration reference](execution-contract.md) explains how inputs are combined;
+the [execution contract](bubblewrap.md) describes the sandbox.
 
 ## Static project metadata
 
-Local distribution metadata is a frozen PROJECT input, distinct from the packages
-installed in the invoking environment. A project opts into the versioned static translator:
+Tests that call `importlib.metadata` can read metadata generated from a declared
+`pyproject.toml`. This is a project input, separate from the packages installed in your
+test environment. Configure it with `pep621-static-v1`:
 
 ```toml
 [tool.pytest_telescope.distributions.core]
@@ -36,31 +38,30 @@ def test_entry_point():
 `distributions` is additive in markers, defaults, and bundles. Like `inputs` and
 `bundles`, a literal marker field makes a case scoped, including an empty list. A scoped
 case receives only its effective distribution names, their metadata source and declared
-build inputs. Declaring metadata never implicitly grants the package's application
-source. Ordinary cases receive no generated metadata.
+build inputs. Declare application source separately in `inputs` if the test imports
+the package. Ordinary cases receive no generated metadata.
 
 Version 1 supports static `[project]` name, version, description, requires-python,
 dependencies, optional-dependencies, scripts, gui-scripts and entry-points. All fields
 are validated, names and versions normalized, and dependency strings validated using
 packaging standards. Unsupported fields and any nonempty `dynamic` declaration are
-explicit unsupported results; there is no partial silently guessed metadata. The
+reported as unsupported. The
 `[build-system]` declaration and complete source TOML bytes participate in identity.
 Build inputs are explicit files/directories/globs, not executable hooks. No build
 backend is imported, installed, or executed to create metadata. A missing project table,
 missing static version, backend-path, setup-only metadata, or dynamic build output is
 unsupported. Other `[tool]` configuration remains inert keyed data.
 
-The authority for this translation is the [PyPA static project metadata
-specification](https://packaging.python.org/en/latest/specifications/pyproject-toml/):
-static fields are project declarations. Generated `METADATA` and `entry_points.txt`
-follow the [installed-project metadata
+The translator reads static fields according to the [PyPA project metadata
+specification](https://packaging.python.org/en/latest/specifications/pyproject-toml/)
+and writes `METADATA` and `entry_points.txt` in the [installed-project metadata
 format](https://packaging.python.org/en/latest/specifications/recording-installed-packages/).
-This is a deliberately limited metadata projection, not a wheel build or editable
-installation. Console-script metadata is discoverable, but no launchers are generated.
-Wheel-specific files and arbitrary backend-generated resources are outside this format.
+It only generates metadata: it does not build a wheel or install the package.
+Tests can discover console-script metadata, but there are no generated launchers.
+Wheel-specific files and other backend-generated resources are unsupported.
 
-Freeze source bytes before deriving generated files. The generated representation has a
-versioned identity, files with mode `0444`, directories with mode `0755`, and epoch
+The controller freezes the source before generating metadata. The generated files have a
+versioned identity, file mode `0444`, directory mode `0755`, and epoch
 access/modification times. The sandbox mount is read-only. This representation
 participates in the exact case key and is mounted at `/metadata` only for that sandbox.
 The worker adds this metadata-only directory to Python's search path before pytest
@@ -71,7 +72,7 @@ do not see `/metadata` unless the test adds it to their path.
 
 The effective metadata set is complete: omitted distributions are absent, including
 negative lookups. Duplicate normalized names or conflicts with packages installed in the
-invoking environment refuse rather than shadowing installed metadata. Changing a selected
+invoking environment cause a refusal. Changing a selected
 metadata source, build input, entry point, generated representation, or relevant
 application source invalidates its consumers. Unrelated narrow resources do not.
 Missing/deleted required sources fail validation.
@@ -111,11 +112,10 @@ Explicit suites cannot be combined with top-level `test_roots`.
 All configured paths, declarations, selectors, include/exclude patterns and summary files
 remain relative to one outer project directory. `test_roots` accepts directories or
 explicit Python test files. File patterns use project-relative glob semantics.
-Membership is enumerated afresh before reuse: structural exclusions are applied before
-source parsing or importing the excluded modules. These modules are not collected
-inventory and cannot be selected with `-k`, `-m`, or node selectors. A file may occur in
+The file list is refreshed before reuse. Excluded modules are neither parsed nor
+imported, and cannot be selected with `-k`, `-m`, or node selectors. A file may occur in
 multiple suites; the pair of suite name and canonical project-relative pytest node ID
-is the execution identity. No centralized registry of individual cases is introduced.
+identifies each case. You do not need to maintain a separate list of cases.
 
 Each suite collects its entire structural inventory before ordinary pytest selection.
 Configured suite args and command-line args retain their order; pytest supplies `-k`
@@ -153,8 +153,8 @@ symlinks or symlink ancestors. A file must satisfy that suite's configured test 
 include/exclude patterns and Python test-file patterns. Foreign or excluded modules,
 unknown or unselected suite keys, and nonfiles refuse before any session starts.
 
-This is a narrowing operation only. It never changes cwd, rootdir, routes, source
-declarations or capabilities. Input declarations remain beside tests.
+This option only removes files from the invocation. It leaves cwd, rootdir, routes,
+input declarations and capabilities unchanged.
 `plan.make_plan(root, suites=None, structural_files=None)` supports the same static
 validation and effective file preview without importing tests or starting a sandbox.
 It cannot establish the real parametrized inventory.
@@ -177,8 +177,8 @@ Scoped sessions use the third-party packages installed in the invoking environme
 read-only, with plugin autoload disabled; suite plugins are explicit import names that
 must be installed there. Ordinary sessions load plugins as ordinary pytest does.
 Distributed schedulers (including xdist), scheduler options and conflicting plugin
-declarations are rejected; telescope alone owns parallel workers. Local distribution
-metadata never satisfies third-party installation.
+declarations are rejected; use telescope's `workers` setting for parallelism. Install
+third-party packages in the environment; declaring local metadata does not install them.
 
 ## Parallel scoped workers
 
@@ -209,7 +209,7 @@ pending until every worker, cancellation handler and frozen-copy cleanup complet
 terminal cleanup failure prevents publication of all new records; previously eligible
 records remain intact. The scheduler stops submitting work on cancellation or terminal
 cleanup failure, drains active work, marks unscheduled selected cases with explicit
-infrastructure outcomes, and never accepts half-cleaned successes. Infrastructure retry
+infrastructure outcomes, and waits for cleanup before accepting results. Infrastructure retry
 remains at most two attempts per scoped case or batch; a retry occupies the same worker
 slot.
 
@@ -224,8 +224,8 @@ network.
 A suite may declare `capabilities = ["python", "project:readonly"]`. Requesting
 `network:none`, `scratch:noexec` or any other capability returns a machine-readable
 `unsupported` result with that capability
-code and exit status 4. A refusal cannot mint a success or a reusable cache entry, and
-never silently widens the execution profile or falls back to ordinary execution. A
+code and exit status 4. A refusal creates no reusable result. The runner does not widen
+the sandbox's view or fall back to ordinary execution. A
 refusal or incomplete inventory alone does not prove that no earlier case executed. Do
 not automatically replay an invocation after a refusal. Missing files or invalid syntax
 remain declaration errors; sandbox outages remain infrastructure errors. Runtime code

@@ -1,17 +1,15 @@
 # Declarations, inventory and reuse
 
-## Status
-
-This contract covers literal declarations, real pytest inventory, result reuse and
-outcome accounting. The [ordinary and Bubblewrap execution contract](bubblewrap.md) owns
-routing and the sandbox's filesystem view.
+This page explains how pytest-telescope reads declarations, discovers cases and decides
+whether to reuse their results. The [execution contract](bubblewrap.md) describes which
+tests run in a sandbox and which files they can see.
 
 ## User interface and scope
 
-In the default `case` mode, every actual scoped pytest item is one independent execution
-and successful-result cache unit, including every parametrized variant. There is no
-central per-case registry. A new test file or generated case enters the current inventory
-automatically; it cannot disappear behind an old result.
+In the default `case` mode, each scoped pytest case runs and caches its result separately.
+That includes each variant of a parametrized test. Declarations stay beside the tests;
+there is no separate list of cases to maintain. Discovery includes new test files and
+generated cases before accepting cached results.
 
 Use literal declarations beside tests:
 
@@ -50,24 +48,55 @@ Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), teles
 state (`.pytest-telescope` and an explicitly selected in-project cache directory),
 pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environments
 (`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks,
-special files and unsupported paths fail boundedly rather than being followed or omitted.
+special files and unsupported paths are rejected.
 
-Pyproject contains `[tool.pytest_telescope]` test roots/environment settings, a `[tool.pytest_telescope.defaults]` table for shared inputs/bundles/absence/cache policy, and reusable `[tool.pytest_telescope.bundles.NAME]` tables. Defaults add common support to scoped cases; they do not make unmarked cases scoped. Conftest, application modules, package initializers, helpers and collection resources must be visible in a scoped case's effective scope.
+Put test roots and environment settings in `[tool.pytest_telescope]`, shared settings in
+`[tool.pytest_telescope.defaults]`, and reusable declarations in
+`[tool.pytest_telescope.bundles.NAME]`. Defaults add inputs to scoped cases but do not
+make unmarked cases scoped. Include any conftest files, application modules, package
+initializers, helpers and resources that collection or the test needs.
 
-The default `case` mode starts a fresh sandbox and pytest session per scoped case and recreates module/class/session fixtures. The optional [batch profile](batching.md) shares ordinary pytest fixture lifetime and private scratch only within one suite/module and an exactly equal expanded scope. Groups never union different readable inputs. Complete group evidence is reused atomically, and every group starts a fresh sandbox. The project files remain read-only in both modes.
+The default `case` mode starts a fresh sandbox and pytest session for each scoped case
+that needs to run. Module, class and session fixtures are recreated for each case.
+Optional [batch mode](batching.md) lets tests share fixtures and scratch within the same
+suite and module, provided their expanded scopes are exactly equal. Each batch starts
+a fresh sandbox, and its results are reused together. Cases with different inputs stay
+in separate groups. Project files are read-only in both modes.
 
 ## Static discovery and real pytest agreement
 
-The controller parses bounded test source syntax without importing or evaluating project Python. Supported spellings use `pytest.mark.telescope(...)` directly in function/class decorators, module/class `pytestmark`, or `pytest.param(..., marks=...)` inside literal parametrization declarations. Values are literal string lists and booleans; bundles provide reusable declarations. Arbitrary expressions, computed kwargs, declaration factory functions, aliases and generated telescope markers are unsupported. Ordinary parametrization values and pytest-generated item identities still come from real pytest collection, not an AST approximation.
+The controller reads test source without importing or evaluating project Python, within
+the [parsing limits below](#bounds-and-performance). Use `pytest.mark.telescope(...)`
+directly in function or class decorators, module or class `pytestmark`, or
+`pytest.param(..., marks=...)` inside literal parametrization declarations. Values must
+be literal string lists and booleans. Use bundles to share declarations.
 
-A pre-import guard in every pytest session validates each supported marker factory call against its exact frozen source position and literal arguments. Collected telescope marks must have registered origins and unchanged values, compared with an independent immutable canonical encoding of the static declaration. Mutable lists passed to pytest are never the validation baseline. Hidden dynamic marker construction that cannot be diagnosed statically fails the session; it never widens a scope or changes a route. Private pytest internals are not assumed stable.
+Expressions, computed keyword arguments, marker factories, aliases and generated
+telescope markers are unsupported. Pytest collection still supplies ordinary parameter
+values and the actual case identities.
+
+A guard installed before project imports checks each marker call against its position
+and literal arguments in the frozen source. Collected marks must come from those calls
+and have unchanged values. The comparison uses an independent, immutable encoding of
+the declaration, so mutating a list passed to pytest cannot change the expected value.
+If dynamically constructed markers evade static checks, they fail the session.
+They cannot widen a scope or change a route. This validation does not rely
+on private pytest internals remaining stable.
 
 The guard identifies a declaration by the calling module's current `__file__` within the
 project. Cached assertion-rewrite bytecode can keep an old checkout filename; the guard
 refuses missing, invalid or outside-project module origins instead of falling back to
 that embedded filename.
 
-A file whose module-level `pytestmark` carries a scope is collected in a sandbox whose view is the union of the declarations in such files of the suite, project defaults and configuration. Real collected provenance must confirm that every item carries the module scope, or collection fails without a broader retry. This collection view is never used to run a case body. Every other test file is collected by the suite's ordinary session, which also identifies the scoped cases of mixed files. Real pytest enumerates dynamic and parametrized items and maps inherited literal origins to effective declarations. Hooks that add, remove or change items after the validated collection checkpoint are rejected. Duplicate/invalid node identities are errors.
+Files scoped by module-level `pytestmark` are collected in a sandbox. Its view combines
+those files' declarations with the suite's project defaults and configuration. Collection
+checks that every case inherited its module's scope. If a case did not, collection fails
+without retrying with more files. No case body runs in this combined collection view.
+
+The suite's ordinary session collects the other files, including files that mix ordinary
+and scoped cases. Pytest discovers dynamic and parametrized cases and associates their
+inherited markers with the source declarations. Hooks cannot add, remove or change cases
+after collection has been validated. Duplicate or invalid node identities are errors.
 
 Each scoped execution begins a new sandbox with only that case's effective scope, before conftest/test imports. It collects its containing file, verifies the actual item/declaration inventory against discovery, and executes exactly the selected item in case mode. Batch execution instead validates the complete containing-module inventory and the requested ordered subset before executing that equal-scope group. A scoped execution missing a shared collection dependency fails with bounded collection evidence; it does not borrow another case's inputs. Common import/parametrization dependencies belong in shared declarations. In a mixed file, the whole file, including its ordinary cases, must collect identically inside each scoped case's view.
 
@@ -87,7 +116,15 @@ Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited 
 
 Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
 
-Freeze each distinct declared file once per invocation. Derive case keys from immutable frozen-file records and memoized scope identities. Materialize only missed scoped cases, using hard links to immutable frozen files without exposing the broader frozen pool. Do not copy/hash the project once per case. Each scoped miss starts one sandboxed pytest session per case by default, or per exact-scope group in batch mode; repeated collection of a large parametrized module is a real cost. Warm inventory/result hits start no sandbox. Ordinary sessions always run.
+The controller freezes each distinct declared file once per invocation and reuses its
+file record when computing case keys. It prepares a sandbox view only for cases that
+need to run, using hard links to the frozen files without exposing the other frozen
+inputs. This avoids copying and hashing the project for every case.
+
+Each cache miss still starts a sandboxed pytest session: one per case by default, or
+one per group in batch mode. Repeated collection of a large parametrized module can
+therefore be expensive. Reusing an inventory or result starts no sandbox. Ordinary
+sessions always run.
 
 ## Project configuration
 
@@ -175,11 +212,10 @@ and bounded failure evidence, not arbitrary pytest output.
 - Marker `cache=False`: always execute the case and never record a reusable
   success, regardless of other cases' cache settings.
 
-Filesystem inputs do not prove universal determinism. Tests that depend on clocks,
-uncontrolled randomness, native global state, network services, host tools, or undeclared
-environmental assumptions must be made reproducible, marked non-cacheable, or left
-ordinary. Scoped tests share the host network. Cached success is meaningful only under
-the documented input and environment assumptions.
+Declaring files is not enough for a test that also depends on the clock, uncontrolled
+randomness, native global state, network services or host tools. Make those dependencies
+reproducible, set `cache=False`, or leave the test ordinary. Scoped tests share the host
+network, and the cache cannot detect changes to external state.
 
 ## Failures and troubleshooting
 
@@ -201,10 +237,9 @@ case or batch gets at most two execution attempts for infrastructure failures; a
 ordinary session gets one and has no pytest-telescope deadline. Cache lock acquisition
 is bounded by twice the configured timeout plus 30 seconds; a concurrent invocation that
 waits behind a long ordinary session can therefore end with an infrastructure outcome. Startup, deadline, output, storage, invalid-result, or cleanup
-failure that exhausts recovery ends with a distinct infrastructure outcome. Retrying
-forever and silently removing restrictions are not recovery strategies. Force execution
-can diagnose a suspected record without relying on it; removing damaged records should
-affect reuse only, never turn failing work into a success.
+failure that exhausts recovery ends with an infrastructure outcome. Use `--force` to
+rerun a case when you suspect its cached result. Removing a damaged record causes a
+rerun; the case must pass again before its result can be reused.
 
 Each unit can report up to 64 failure entries containing a project-relative file, line
 number, phase (`collect`, `setup`, `call`, or `teardown`), exception type, and hashed

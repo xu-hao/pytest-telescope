@@ -1,25 +1,21 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
-This is the canonical execution contract for pytest-telescope 0.1.0a6. Scoped tests use
-Bubblewrap filesystem views and the host Python environment. The
-[API and configuration reference](bubblewrap-api.md) gives exact interfaces
-and the [result reference](result-schema.md) gives exact schema 3 fields.
+Tests without a scope declaration run as ordinary pytest every time. Tests with a
+declaration run in a Bubblewrap sandbox and can reuse a previous successful result.
+The sandbox restricts which project files a test can read. It uses your installed
+Python environment and leaves resource limits and network policy to the job running
+pytest.
 
-The contract has three parts:
-
-1. Tests without a scope declaration run as ordinary pytest, fresh every time.
-2. Tests with a scope declaration run in a Bubblewrap sandbox whose only job is the
-   **filesystem view**: the declared project files (at `/project` and at the project's
-   own host path), the host interpreter and environment, and the system directories, all
-   read-only, plus private scratch.
-3. Resource limits, resource accounting and network policy belong to whoever runs pytest.
+This page defines the execution rules for pytest-telescope 0.1.0a6. See the
+[API reference](bubblewrap-api.md) for interfaces and configuration, and the
+[result reference](result-schema.md) for schema 3 fields.
 
 ## Which route a case takes
 
-A case is **scoped** when its effective literal declarations contain an `inputs`,
-`bundles` or `distributions` field. Declarations inherit from module `pytestmark`,
+A case is *scoped* when it has an `inputs`, `bundles` or `distributions` field in its
+literal declarations. Declarations inherit from module `pytestmark`,
 class, function and `pytest.param(..., marks=...)` levels, and a literal empty list still
-counts. Every other case is **ordinary**.
+counts. Every other case is *ordinary*.
 
 | Declaration on or above the case | Route | Result reuse |
 | --- | --- | --- |
@@ -37,7 +33,7 @@ ordinary.
 
 ## Ordinary cases
 
-Each suite with ordinary cases runs **one fresh pytest session** with the interpreter
+Each suite with ordinary cases runs one fresh pytest session with the interpreter
 that runs pytest-telescope, its installed pytest and plugins, the inherited process
 environment, and the suite's working directory, root directory, configuration and
 arguments. There is no sandbox, no project snapshot, no repository hashing and no cache
@@ -45,7 +41,7 @@ record. Ordinary results are always reported as fresh executions; a later run ex
 them again. Ordinary sessions do not require Bubblewrap.
 
 A test file whose module-level `pytestmark` scopes every case is never passed to the
-ordinary session, so it is never imported on the host. A **mixed** file, with ordinary
+ordinary session, so it is never imported on the host. A *mixed* file, with ordinary
 cases and individually scoped cases, is imported and collected by the ordinary session.
 Its import and collection hooks run on the host. The ordinary session removes the scoped
 cases before any fixture setup, so pytest never runs a scoped case's fixtures or body on
@@ -68,12 +64,11 @@ invocation. Inside, the filesystem looks like this:
 | `/tmp`, `/dev/shm` | Private, empty, discarded scratch | writable |
 | Everything else, such as `/home` outside the environment and `/run` | Absent | read-only |
 
-**Declared files are visible; undeclared project files are absent.** An undeclared file
-does not exist at `/project/...` and its host path does not exist either, so `open`,
-`stat`, `os.path.exists`, native code and subprocesses all see nothing. This is absence,
-not a permission error.
+An undeclared project file does not exist at `/project/...` or at its host path.
+`open`, `stat`, `os.path.exists`, native code and subprocesses all see it as absent.
+Trying to open it gives a missing-file error.
 
-**The project's host path shows the same frozen copy.** If the project lives at
+The project's host path shows the same frozen copy. If the project lives at
 `/home/dev/my_project`, then `/home/dev/my_project/src/my_package/__init__.py` inside the
 sandbox is the same declared, read-only file as `/project/src/my_package/__init__.py`, and
 an undeclared `/home/dev/my_project/notes.txt` does not exist. The live checkout is never
@@ -81,14 +76,14 @@ mounted, and the working directory stays `/project`. Code that reaches the proje
 host path therefore sees exactly the declared files. When `/project` is itself the
 project directory, there is one view.
 
-**The host interpreter is reused, read-only.** Scoped tests run with the same executable
+Scoped tests run with the same executable
 and installed distributions as the invoking pytest-telescope process, including the
-active virtual environment. There is no separate runtime to build, no wheel download and
-no sealed interpreter copy. Installed packages, `sys.executable` subprocesses and native
+active virtual environment, mounted read-only. There is no runtime build or wheel download.
+Installed packages, `sys.executable` subprocesses and native
 extensions work as on the host, but nothing in the environment can be modified. An import
 directory that contains or lies inside the project is never bound from the host.
 
-**An editable install resolves to declared files.** Installing the project into the
+Installing the project into the
 invoking environment in editable form, for example with `pip install -e .`, leaves a
 `.pth` path entry or a finder module that points at the checkout's host path. Because
 that path shows the frozen copy, the project's packages import from declared files in
@@ -98,12 +93,12 @@ the test itself, in `sys.executable` children and in isolated `-I` children, whi
 checkout, points outside the view and is absent. The parent pytest process can also
 import declared source through pytest `pythonpath`, as before.
 
-**An environment inside the project directory**, such as `.venv`, keeps its host path:
+An environment inside the project directory, such as `.venv`, keeps its host path:
 the sandbox mounts it there on top of the project's view, read-only. It never appears
 under `/project`, and the frozen copy on the host is never modified to make room for it.
 
-**Writes outside private scratch fail.** `/project`, the project's host path, the
-environment, system directories and the sandbox root are read-only, so writes fail with a read-only file system error.
+`/project`, the project's host path, the environment, system directories and the sandbox
+root are read-only. Writes there fail with a read-only file system error.
 `/tmp` (also `HOME` and `TMPDIR`) and `/dev/shm` are private to one sandbox and removed
 when it exits. Pytest's cache provider is disabled and bytecode is not written.
 
@@ -121,19 +116,21 @@ with the worker. No other namespace is created.
 
 ## What the sandbox does not do
 
-- **No resource limits or accounting.** pytest-telescope sets no CPU, memory, process,
-  open-file or scratch-size limits and reports no CPU usage. Workers are plain child
-  processes, so they stay inside whatever limits the caller (CI job, container,
-  scheduler) applies to the whole pytest invocation. Measure CPU and memory there.
-- **No network isolation.** Sandboxed tests share the host network, including DNS through
-  the host `/etc`. Do not declare a test as scoped when its result depends on network
-  services: its cache key cannot see them. Use an ordinary test or `cache=False`.
-- **No security boundary against hostile code.** The view prevents accidental reads of
-  undeclared files and accidental writes. It is not a defence against a test that
-  deliberately attacks the kernel or the shared network.
-- **No fallback.** If Bubblewrap is missing or cannot create namespaces, the run refuses.
-  Scoped cases never fall back to ordinary execution, and nothing is replayed in ordinary
-  mode after a scoped runner starts.
+pytest-telescope sets no CPU, memory, process, open-file or scratch-size limits and
+reports no CPU usage. Workers are child processes, so they stay inside the limits your
+CI job, container or scheduler applies to the pytest invocation. Measure CPU and memory
+there.
+
+Sandboxed tests share the host network, including DNS through the host `/etc`. The cache
+key cannot track changes to network services. Leave tests that depend on those services
+ordinary, or add `cache=False` to their scope declarations.
+
+The view prevents accidental reads of undeclared files and accidental writes. It does
+not protect against code that deliberately attacks the kernel or shared network.
+
+If Bubblewrap is missing or cannot create namespaces, the run refuses. Scoped cases
+never fall back to ordinary execution, and nothing is replayed in ordinary mode after
+a scoped runner starts.
 
 ## Collection, cache identity and reuse
 
@@ -165,7 +162,8 @@ Identical checkouts at different paths with equivalent environments share result
 Without an editable install the project's path is not part of the key.
 
 `cache=False` keeps a scoped case sandboxed and fresh: it executes every time and never
-records a reusable result. `--force` and `--no-cache` keep their meanings. Ordinary cases
+records a reusable result. `--force` reruns cached cases; `--no-cache` also prevents
+recording new results. Ordinary cases
 are never looked up in or written to the cache.
 
 ## Case mode, batches and parallel workers
@@ -176,7 +174,7 @@ module with exactly identical effective scope, metadata and cache policy. Member
 sequentially in one sandbox with normal pytest fixture lifetime; unequal scopes are never
 merged into a union.
 
-Independent cases or batches run in parallel up to the configured number of **workers**
+Independent cases or batches run in parallel up to the configured number of `workers`
 (default 1, at most 32). Workers is a count of concurrent sandboxes, not a resource
 budget. Collection and ordinary sessions run one at a time before scoped execution
 starts.
