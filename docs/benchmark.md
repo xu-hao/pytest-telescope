@@ -85,3 +85,31 @@ For your own suite, record executed and reused case counts alongside cold and wa
 timings. A warm run can finish sooner because it reuses results; those cases have not
 run again. The balance between execution overhead and reuse depends on your tests and
 how often their inputs change.
+
+## Installed-runtime compatibility benchmarks
+
+The unreleased frozen-tool profile also has explicit host-compatibility controls in
+`benchmarks/frozen_runtime`. They exercise a real native library, unchanged env/Node
+commands, full Chromium navigation and clicking through an isolated CLI child, and a
+normally installed Python distribution in an isolated child. The small C sources, wheel
+and browser page are owned fixtures. Their compiler, installed Node/browser, glibc loader
+cache, stdlib and native-library layout still depend on the selected host, so these
+controls are invoked separately from the default functional suite.
+
+Supply actual installed executable paths; the harness neither downloads a browser nor
+substitutes a headless-shell binary for full Chromium:
+
+```sh
+TELESCOPE_TEST_NODE=/absolute/path/to/node \
+TELESCOPE_TEST_CHROMIUM=/absolute/path/to/chrome \
+python -m pytest -q benchmarks/frozen_runtime --basetemp /tmp/telescope-runtime-benchmark
+```
+
+Use a new owned temporary directory and explicit caller resource limits for each run.
+The fixture names every source root and byte pin, retains actual link and command
+semantics, closes native library search directories, and refuses unsupported layouts.
+Missing prerequisites and failed required controls are failures, never skips or evidence
+that the runtime is supported. Record the selected source revision, executable and
+closure digests, complete output, resource receipt and observed outcomes with each
+benchmark. Report compatibility only for the actual closure exercised; these checks do
+not establish arbitrary installed-runtime support or a portable performance result.

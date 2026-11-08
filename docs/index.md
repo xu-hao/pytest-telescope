@@ -3,6 +3,9 @@
 > Schema 4, per-scope environment inputs, frozen Git and frozen tools are unreleased
 > development interfaces. Published version 0.1.0a6 does not provide them.
 
+Contributors qualify host-specific tool installations with the separately invoked
+[installed-runtime benchmarks](benchmark.md#installed-runtime-compatibility-benchmarks).
+
 pytest-telescope caches pytest results so repeated checks spend less time running tests
 whose inputs haven't changed. If coding agents are adding changes to a merge queue,
 reusing those results can reduce the test work each queued change needs.

@@ -131,6 +131,11 @@ metadata, credential and control trees are unsupported sources. A narrow install
 package, library or resource tree is supported. A files-mode anchor may contain a
 separately declared tree subtree only when all overlapping entries and aliases agree
 exactly. Other redundant/conflicting overlaps refuse; mount order never chooses a winner.
+This restriction concerns complete source trees: a files-mode environment-prefix
+anchor may pin the invoking interpreter's exact launcher links and `pyvenv.cfg`, without
+enumerating or exposing unrelated installed packages. Explicit stdlib runtime files may
+share a system files-mode anchor with their pinned libraries, preserving existing
+relative paths without selecting the surrounding system tree.
 
 Entry shapes are exact tagged objects:
 
@@ -149,8 +154,14 @@ sticky modes, devices, sockets and FIFOs refuse. View modes are `source_mode & 0
 File bytes, read/execute bits and link text remain significant.
 
 Links retain their type and exact text. Relative and absolute text are allowed only
-when bounded resolution terminates in pinned entries of that same tool. Logical and
-original aliases must resolve to the same pinned target. Cycles, dangling targets,
+when bounded resolution through the combined declared view terminates in pinned entries
+of that same tool. The target may belong to another explicitly declared root of the
+tool; every traversed link, type, content and original/logical mapping remains bound.
+Declaring a link never selects its target automatically. Logical and original aliases
+must resolve to the same pinned target, without invented bridge paths or rewritten links.
+For example, an absolute link in a selected font-configuration tree may name a file
+explicitly pinned by a separate system files-mode root with its original path preserved.
+Cycles, dangling targets,
 escapes and links into undeclared baseline system/environment contents refuse. Declared
 root symlinks must instead be represented through canonical target roots and pinned link
 entries. When a selected tool needs one of the fixed baseline prefixes `/bin`, `/sbin`,
