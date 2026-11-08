@@ -62,6 +62,8 @@ class Projection:
             layout("selected command mapping exceeds its bound")
         if len(controls) > 1:
             layout("selected native loader caches disagree")
+        for name in names:
+            capture.runtimes[name].validate_union(originals)
         if controls:
             layout("native tool views require a supported exact preload control mount")
         for filename, (graph, key) in originals.items():
@@ -148,6 +150,8 @@ class Projection:
             self.entries[destination] = ("file", info.st_dev, info.st_ino, row["mode"] & 0o555)
 
     def verify(self):
+        if self.directory.is_symlink() or not self.directory.is_dir() or self.directory.stat().st_mode & 0o222:
+            raise InfrastructureError("owned tool projection root changed")
         expected = set(self.entries) | self.directories
         actual = set()
         pending = [self.directory]

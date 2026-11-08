@@ -2,7 +2,6 @@
 
 import hashlib
 import os
-import posixpath
 import shutil
 import stat
 import threading
@@ -162,50 +161,6 @@ def _tree_names(source, budget):
     return found
 
 
-def _resolved(name, entries):
-    seen = set()
-    for _ in range(declaration.MAX_LINK_HOPS):
-        name = posixpath.normpath(name)
-        if name in seen:
-            declaration.unsupported("layout", "frozen-tool link graph contains a cycle")
-        seen.add(name)
-        parts = Path(name).parts
-        for end in range(2, len(parts) + 1):
-            prefix = str(Path(*parts[:end]))
-            item = entries.get(prefix)
-            if item is not None and item[1]["kind"] == "symlink":
-                target = item[1]["target"]
-                name = posixpath.join(posixpath.dirname(prefix), target, *parts[end:])
-                break
-        else:
-            item = entries.get(name)
-            if item is None:
-                declaration.unsupported("layout", "frozen-tool link escapes its pinned entries")
-            return item[0]
-    declaration.unsupported("bounds", "frozen-tool link resolution exceeds its hop limit")
-
-
-def _validate_links(tool):
-    view = {}
-    pairs = []
-    for root in tool.document["roots"]:
-        for entry in root["entries"]:
-            source = str(Path(root["source"]) / entry["path"])
-            logical = str(Path("/tools") / tool.name / root["id"] / entry["path"])
-            view[logical] = (source, entry)
-            if root["preserve_source"]:
-                previous = view.get(source)
-                if previous is not None and previous != (source, entry):
-                    declaration.unsupported("layout", "frozen-tool aliases conflict")
-                view[source] = (source, entry)
-            if entry["kind"] == "symlink":
-                pairs.append((logical, source if root["preserve_source"] else None))
-    for logical, original in pairs:
-        target = _resolved(logical, view)
-        if original is not None and _resolved(original, view) != target:
-            declaration.unsupported("layout", "frozen-tool aliases resolve to different entries")
-
-
 def _writable_owned(directory):
     """Only a capture-owned tree is passed here, after all consuming views are gone."""
     from .sandbox import CleanupError
@@ -284,8 +239,10 @@ class Capture:
                 return self
             except BaseException as error:
                 _remove(self.directory)
+                if isinstance(error, OSError):
+                    error = InfrastructureError("owned frozen-tool capture operation failed")
                 if not isinstance(error, InfrastructureError) or isinstance(error, CleanupError) or attempt:
-                    raise
+                    raise error
 
     def __exit__(self, *exc):
         _remove(self.directory)
@@ -386,7 +343,10 @@ class Capture:
         self.verify(names)
         with self.view_lock:
             if names not in self.views:
-                self.views[names] = Projection(self, names)
+                try:
+                    self.views[names] = Projection(self, names)
+                except OSError as exc:
+                    raise InfrastructureError("owned frozen-tool view construction failed") from exc
             projection = self.views[names]
             projection.verify()
             prefixes = {}

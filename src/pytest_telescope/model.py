@@ -651,6 +651,9 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
 
 
 def validate_scope(root, unit):
+    from .tool_context import validate_environment
+
+    validate_environment(unit.env, unit.tools)
     inputs, absent = set(unit.inputs), set(unit.absent)
     for test in unit.tests:
         for parent in (root / test).parents:

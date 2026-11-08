@@ -821,7 +821,7 @@ def run(
                                 "metadata": metadata_identity(collection_unit.distributions),
                                 "files": collection_unit.tests,
                                 "registry": registry,
-                                "tools": collection_tools.identity,
+                                **({"tools": collection_tools.identity} if collection_unit.tools else {}),
                                 "environment": fingerprint(collection_environment),
                             }
                         )
@@ -964,7 +964,7 @@ def run(
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
-                                        "tools": tool_view.identity,
+                                        **({"tools": tool_view.identity} if unit.tools else {}),
                                         "environment": fingerprint(unit_environment(unit)),
                                     }
                                 ),

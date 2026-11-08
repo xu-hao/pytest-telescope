@@ -101,7 +101,7 @@ class Graph:
             except OSError as exc:
                 raise InfrastructureError("cannot revalidate frozen-tool baseline prefix") from exc
 
-    def resolve(self, filename, *, required=True):
+    def resolved_path(self, filename):
         seen = set()
         for _ in range(declaration.MAX_LINK_HOPS):
             filename = self.normalize_prefix(filename)
@@ -116,11 +116,14 @@ class Graph:
                     filename = posixpath.join(posixpath.dirname(prefix), self.nodes[key]["target"], *parts[end:])
                     break
             else:
-                key = self.mapping.get(filename)
-                if key is None and required:
-                    layout()
-                return key
+                return filename
         layout("frozen-tool link resolution exceeds its hop limit")
+
+    def resolve(self, filename, *, required=True):
+        key = self.mapping.get(self.resolved_path(filename))
+        if key is None and required:
+            layout()
+        return key
 
     def reference(self, row, *, kind=None):
         key = self.resolve(self.logical((row["root"], row["path"])))
@@ -144,12 +147,15 @@ class Graph:
 
         if self.nodes[key]["kind"] != "file":
             layout()
-        with _parent(self.directory / key[0] / key[1]) as (parent, leaf):
-            descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
-        with os.fdopen(descriptor, "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise InfrastructureError("owned frozen-tool runtime changed type")
-            yield stream
+        try:
+            with _parent(self.directory / key[0] / key[1]) as (parent, leaf):
+                descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            with os.fdopen(descriptor, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    raise InfrastructureError("owned frozen-tool runtime changed type")
+                yield stream
+        except OSError as exc:
+            raise InfrastructureError("cannot read owned frozen-tool runtime") from exc
 
     def bytes(self, key, maximum=16 * 1024 * 1024):
         if self.nodes[key].get("size", maximum + 1) > maximum:

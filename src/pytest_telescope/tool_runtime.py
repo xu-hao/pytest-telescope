@@ -2,6 +2,7 @@
 
 import os
 import posixpath
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,7 @@ class Runtime:
         self.budget = budget
         self.elfs = {}
         self.dependencies = {}
+        self.needed_targets = {}
         self.directories = ()
         self.cache = {}
         self.commands = {}
@@ -24,7 +26,7 @@ class Runtime:
         self.validate()
 
     def covered(self, filename):
-        filename = Path(self.graph.normalize_prefix(filename))
+        filename = Path(self.graph.resolved_path(filename))
         return any(filename.is_relative_to(directory) for directory in self.directories)
 
     def elf(self, key):
@@ -42,7 +44,7 @@ class Runtime:
             layout("native search candidate is not a regular pinned file")
         return key
 
-    def _find(self, key, info, name, alias):
+    def candidates(self, info, name, alias):
         if "/" in name:
             if not name.startswith("/") or posixpath.normpath(name) != name:
                 layout("relative native dependency names are unsupported")
@@ -51,7 +53,11 @@ class Runtime:
             candidates = [posixpath.join(directory, name) for directory in native.search_paths(info, alias)]
             candidates += [filename for filename, _ in self.cache.get(name, ())]
             candidates += [posixpath.join(directory, name) for directory in native.DEFAULT_SEARCH]
+        return candidates
+
+    def _find(self, key, info, name, alias):
         resolved = {}
+        candidates = self.candidates(info, name, alias)
         for filename in candidates:
             is_logical = filename.startswith("/tools/" + self.graph.tool.name + "/")
             if not is_logical and not self.covered(posixpath.dirname(filename)):
@@ -77,12 +83,44 @@ class Runtime:
             if self.elf(original) is None:
                 layout("native library dependency is not a supported ELF file")
             found.add(original)
+            self.needed_targets[key, name] = digest(self.graph.token(original))
         if info.interpreter is not None:
             loader = self.graph.resolve(info.interpreter)
             if self.graph.nodes[loader]["kind"] != "file" or self.elf(loader) is None:
                 layout("ELF interpreter is not a pinned native loader")
             self.graph.preserve(loader)
         self.dependencies[key] = found
+
+    def validate_union(self, originals):
+        """A discovery union cannot introduce a different loader search winner."""
+        def resolve(filename):
+            seen = set()
+            for _ in range(32):
+                filename = self.graph.normalize_prefix(posixpath.normpath(filename))
+                if filename in seen:
+                    layout("selected tool union contains a link cycle")
+                seen.add(filename)
+                parts = Path(filename).parts
+                for end in range(2, len(parts) + 1):
+                    prefix = str(Path(*parts[:end]))
+                    pair = originals.get(prefix)
+                    if pair is not None and pair[0].nodes[pair[1]]["kind"] == "symlink":
+                        filename = posixpath.join(posixpath.dirname(prefix), pair[0].nodes[pair[1]]["target"], *parts[end:])
+                        break
+                else:
+                    return originals.get(filename)
+            layout("selected tool union link traversal exceeds its bound")
+
+        for key, info in self.elfs.items():
+            for name in info.needed:
+                expected = self.needed_targets[key, name]
+                for alias in (self.graph.logical(key), self.graph.original(key)):
+                    for filename in self.candidates(info, name, alias):
+                        if filename.startswith("/tools/"):
+                            continue
+                        selected = resolve(filename)
+                        if selected is not None and digest(selected[0].token(selected[1])) != expected:
+                            layout("selected tool union changes a native dependency candidate")
 
     def _closure(self, key):
         found, pending = set(), list(self.dependencies[key])
@@ -112,6 +150,7 @@ class Runtime:
         # extensions and dlopen resources must not borrow missing live dependencies.
         for key, row in self.graph.nodes.items():
             if row["kind"] == "file":
+                self.budget.tick(visit=True)
                 with self.graph.open(key) as stream:
                     magic = stream.read(4)
                 if magic == b"\x7fELF":
@@ -121,10 +160,13 @@ class Runtime:
         if dynamic and (loader is None or loader["cache"] is None):
             layout("dynamic native tools require their pinned loader cache")
         if loader is not None:
-            normalized = sorted(set(self.graph.normalize_prefix(name) for name in loader["directories"]))
+            normalized = sorted(set(self.graph.resolved_path(name) for name in loader["directories"]))
             for name in normalized:
                 path = Path(name)
-                if name in ("/", "/usr", "/etc", "/tmp", "/dev/shm") or any(path.is_relative_to(point) for point in ("/proc", "/dev", "/sys", "/run", "/tools", "/telescope", "/metadata")):
+                entry = self.graph.resolve(name, required=False)
+                if entry is not None and self.graph.nodes[entry]["kind"] != "directory":
+                    layout("native search root is not a pinned directory")
+                if name in ("/", "/usr", "/etc", "/tmp", "/dev/shm", "/home", "/root", "/opt", "/var", "/usr/local", str(Path.home()), sys.prefix, sys.base_prefix) or any(path.is_relative_to(point) for point in ("/proc", "/dev", "/sys", "/run", "/tools", "/telescope", "/metadata")):
                     layout("native search roots cannot replace nonlibrary system roots")
             self.directories = tuple(name for name in normalized if not any(name != other and Path(name).is_relative_to(other) for other in normalized))
             if dynamic:
@@ -170,6 +212,13 @@ class Runtime:
             declared_libraries = {digest(self.graph.token(self.graph.reference(row, kind="file"))) for row in record["libraries"]}
             if self._closure(key) != declared_libraries:
                 layout("declared ELF libraries disagree with the actual transitive graph")
+        for key in self.executables:
+            current, seen = key, set()
+            while self.executables[current]["format"] == "script":
+                if current in seen or len(seen) >= 4:
+                    layout("script interpreter chain is cyclic or exceeds the supported depth")
+                seen.add(current)
+                current = self.graph.reference(self.executables[current]["interpreter"], kind="file")
         if dynamic:
             worker = self.graph.resolve(os.path.normpath(sys.executable))
             if worker not in self.executables or self.elf(worker) is None:
@@ -185,9 +234,12 @@ class Runtime:
         if len(line) > 256 or not line.startswith(b"#!") or not line.endswith(b"\n"):
             layout("unsupported or oversized tool shebang")
         try:
-            words = line[2:-1].decode("utf-8", errors="strict").split()
+            value = line[2:-1].decode("utf-8", errors="strict")
         except UnicodeError:
             layout("invalid tool shebang encoding")
+        if any((ord(char) < 32 and char != "\t") or ord(char) == 127 for char in value):
+            layout("unsupported control in tool shebang")
+        words = re.split(r"[ \t]+", value.strip(" \t"))
         if len(words) not in (1, 2) or not words[0].startswith("/"):
             layout("unsupported tool shebang syntax")
         interpreter = self.graph.reference(record["interpreter"], kind="file")
