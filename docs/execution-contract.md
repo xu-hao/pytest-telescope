@@ -37,7 +37,8 @@ def test_variant(value): ...
 ```
 
 Module/class/function/parameter declarations are additive. A literal `inputs`,
-`bundles`, `distributions` or `env` field makes a case scoped, including an empty list. Its
+`bundles`, `distributions` or `env` field makes a case scoped, including an empty list.
+The development declaration `git="frozen-checkout-v1"` also scopes its case. Its
 effective scope is the union of those inherited declarations, project defaults,
 containing test source and configuration source. A policy-only `cache=False` marker or
 absence assertion does not make a case scoped. Any inherited `cache=False` disables
@@ -72,7 +73,8 @@ The controller reads test source without importing or evaluating project Python,
 the [parsing limits below](#bounds-and-performance). Use `pytest.mark.telescope(...)`
 directly in function or class decorators, module or class `pytestmark`, or
 `pytest.param(..., marks=...)` inside literal parametrization declarations. Values must
-be literal string lists and booleans. Use bundles to share declarations.
+be literal string lists, booleans, or the supported literal Git version string. Use
+bundles to share declarations.
 
 Expressions, computed keyword arguments, marker factories, aliases and generated
 telescope markers are unsupported. Pytest collection still supplies ordinary parameter
@@ -113,6 +115,25 @@ The scoped inventory key covers the exact frozen collection view, current test-f
 Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes or environment values merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
 
 Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts by route, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static preview and explicitly does not claim real collected-case enumeration.
+
+### Frozen Git identity (development contract)
+
+The explicit `git="frozen-checkout-v1"` declaration adds the verified frozen Git
+context and its executable/runtime identity to only consuming case and group keys.
+It adds the supported tracked tree to that scope; other cases retain their existing
+inputs. Collection uses the union needed by its potential consumers, but execution
+uses each case's own scope. A collection refresh caused by Git cannot by itself
+invalidate a nonconsumer's result. Equal-scope batching includes Git context in equality;
+Git and non-Git scopes cannot share a group. `cache=False` continues to disable reuse.
+
+Freeze once per invocation and validate the relevant source and frozen snapshot before
+accepting a hit, before execution and before publication. Changed HEAD, local refs, reachable history, tracked source,
+link text or target content, executable or its relevant runtime changes the consuming
+identity. Bounded capture, integrity and cleanup failures refuse or end in infrastructure
+failure after bounded retries; they never create reusable success or trigger ordinary
+fallback. Pending records become eligible only after owned cleanup succeeds; a terminal
+cleanup failure suppresses all new pending records while preserving prior valid records.
+See the [view and state limits](bubblewrap.md#frozen-git-checkout-development-contract).
 
 ## Bounds and performance
 

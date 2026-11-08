@@ -173,6 +173,11 @@ Every run executes the selected ordinary cases in one fresh pytest session per s
 Scoped cases use a cached result when they can and run in a sandbox when they cannot.
 `route_counts` breaks down the executed and reused counts for each route.
 
+A development-only `git="frozen-checkout-v1"` declaration is being added for cases
+that require a frozen checkout and history. It is not part of the published 0.1.0a6
+package. See the [Git view contract](bubblewrap.md#frozen-git-checkout-development-contract)
+for its precise supported states and limits.
+
 ## Use it in CI
 
 Install your test dependencies and Bubblewrap, then use the same `run` command in your

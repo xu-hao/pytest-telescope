@@ -14,9 +14,72 @@ baseline. See the
 [API reference](bubblewrap-api.md) for interfaces and configuration, and the
 [result reference](result-schema.md) for schema 4 fields.
 
+## Frozen Git checkout (development contract)
+
+This explicit interface is under development; it is not a claim that the published
+0.1.0a6 package supports it. `git="frozen-checkout-v1"` scopes a case and grants an
+owned, integrity-verified read-only Git checkout at `/project` and the existing project
+host-path alias. The supported committed source tree, normalized index, HEAD and
+reachable local branch and tag history are visible. Untracked files require separate
+input declarations. The default without this declaration retains the existing no-Git
+view. Actual Git commands such as `rev-parse`, `log`, `show`, `ls-tree`, `diff` and
+`status` and `ls-files --stage`, including calls from subprocesses and Python children,
+operate on the frozen checkout; writes to it fail. Status reflects the normalized clean
+tracked checkout and any separately declared untracked files. External helpers, remotes,
+network operations and configuration-dependent behavior are unsupported. A separately created repository in private scratch remains writable.
+
+Version 1 supports clean, nonbare SHA-1 checkouts with committed symbolic local-branch
+or detached HEAD, regular tracked files and executable bits, local branches and tags,
+and complete reachable objects. Ordinary `.git` directories and validated conventional
+linked-worktree indirections are supported. Staged, dirty, deleted, sparse or
+filter-transformed tracked state, submodules, excluded tracked namespaces, bare, unborn,
+shallow, promisor, alternate, replacement, grafted or unverifiable repositories refuse.
+The visible index is normalized from the verified committed tree. Host remotes,
+remote-tracking refs, reflogs, unreachable objects, configuration, credentials, helpers,
+hooks and live metadata paths are not copied or executed.
+
+Tracked mode `120000` relative leaf symlinks are preserved as links with their exact
+link text when their lexical target remains inside the tracked tree and is a regular
+tracked file. Parent components are allowed when they remain inside. Link text is at
+most 4,096 bytes and existing path depth, length and entry bounds apply. Absolute or
+escaping targets, directory or dangling links, link ancestors, chains, cycles and other
+indirections refuse. Capture uses bounded no-follow validation of committed blob, live
+link and final frozen link with consistent before/after evidence; it never resolves a
+link through mutable host paths. Link text, mode and target content bind identity.
+
+Git execution uses the actual system Git resolved from a controlled system PATH. Version
+1 supports regular Linux x86_64 ELF64 little-endian glibc Git executables. Its loader and
+complete direct and transitive library closure are resolved within fixed system library
+directories, captured as owned immutable bytes and modes, and overlaid only in requesting
+views. Resolution rejects RPATH, RUNPATH, audit, filter, preload and unsafe dependency
+layouts; it does not resolve libraries from the project or invoking environment. The
+runtime closure is bounded to 128 files, 64 MiB per file, 256 MiB total and depth 32.
+Git, loader, libraries, their original system paths and symlink aliases are bound into
+identity and revalidated along with source, paths and links before hits and execution.
+Capture commands use the same verified frozen Git implementation and dependencies.
+For Git consumers, forwarding `GIT_*`, `SSH_*`, `LD_*`, `DYLD_*`, `HOME`, `PATH`,
+`XDG_CONFIG_HOME`, `LANG`, `LANGUAGE`, `LC_*` or `TZ` conflicts with controlled
+execution and is invalid; Git uses the C locale and UTC. Non-Git forwarding is unchanged.
+This is not a general tool snapshot facility.
+
+Capture bounds are 100,000 visible tracked paths and 100,000 reachable objects,
+200,000 walked metadata entries, 4,096 selected refs, 64 MiB per source, object or
+metadata file and 2 GiB aggregate Git material including staging. Paths and link
+targets are limited to 4,096 UTF-8 bytes and paths to 64 components. Git command output
+is bounded at 64 MiB; each command has the lesser of the invocation timeout and 30
+seconds, and complete capture has the lesser of the invocation timeout and 120 seconds.
+Limits refuse rather than truncating history. The runtime bounds above are separate.
+
+Capture and revalidation refuse unavailable, changing, corrupt, partial or unsupported
+contexts with bounded evidence and at most two fresh capture attempts. Diagnostics do
+not expose raw Git stderr, host configuration, contents or host paths. No mutable host repository is mounted, no
+ordinary fallback follows a scoped attempt, and failed cleanup prevents publishing new
+pending cache records. Caller resource limits and shared host network policy are
+unchanged. The snapshot does not claim full host-system, locale, NSS or network reproducibility.
+
 ## Which route a case takes
 
-A case is *scoped* when it has an `inputs`, `bundles`, `distributions` or `env` field in its
+A case is *scoped* when it has an `inputs`, `bundles`, `distributions`, `env` or `git` field in its
 literal declarations. Declarations inherit from module `pytestmark`,
 class, function and `pytest.param(..., marks=...)` levels, and a literal empty list still
 counts. Every other case is *ordinary*.

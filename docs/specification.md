@@ -23,6 +23,7 @@ def test_red(): ...
 | --- | --- |
 | `inputs=["path", "data/*.json"]` | Explicit project paths, directories, and globs. Makes the case scoped, including when empty. |
 | `bundles=["pricing"]` | Reusable project declarations. Also makes the case scoped, including when empty. |
+| `git="frozen-checkout-v1"` | Request a frozen read-only Git checkout and history. Makes the case scoped. |
 | `distributions=["core"]` | Selected local distribution metadata. Also makes the case scoped, including when empty. |
 | `env=["OPTIONAL_FEATURE"]` | Forward and key named environment variables for this scope. Also makes the case scoped, including when empty. |
 | `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not make a case scoped. |
@@ -34,7 +35,8 @@ Project defaults alone do not make it scoped. A scoped case sees exactly the uni
 inherited declarations, defaults, containing test source and configuration, read-only, in
 a [Bubblewrap view](bubblewrap.md). Each actual parametrized item is a separate unit.
 
-Use direct `pytest.mark.telescope(...)` calls with literal lists of strings and booleans.
+Use direct `pytest.mark.telescope(...)` calls with literal lists of strings and booleans;
+the Git field takes the literal version string shown above.
 Supported locations are function/class decorators, module/class `pytestmark`, and
 `pytest.param(..., marks=...)` inside literal parametrization declarations. Do not use
 marker aliases, generated telescope markers, computed arguments, or factory functions.
@@ -108,8 +110,8 @@ env = ["PARSER_FEATURE"]
 | --- | --- |
 | `test_roots` | Static test-source discovery roots; default `["."]`. Real pytest inventory includes new files and cases before accepting hits. |
 | `env` | Explicit host environment names to forward into scoped sandboxes and key, including presence/absence. Reserved runtime/protocol names are rejected. Ordinary sessions inherit the whole environment. |
-| `defaults` | Shared `inputs`, `bundles`, `distributions`, `env`, `absent`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
-| `bundles.NAME` | Reusable `inputs`, nested `bundles`, `distributions`, `env`, and `absent` lists. Cycles and unknown names are errors. |
+| `defaults` | Shared `inputs`, `bundles`, `distributions`, `env`, `absent`, `git`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
+| `bundles.NAME` | Reusable `inputs`, nested `bundles`, `distributions`, `env`, `absent` lists and the Git declaration. Cycles and unknown names are errors. |
 
 Containing test source and configuration are automatic inputs. Scoped cases explicitly
 declare application modules, package initializers, conftest files, helpers, and resources.
@@ -126,7 +128,8 @@ Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), teles
 state (`.pytest-telescope` and an explicit in-project cache directory), pytest/bytecode
 caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, or
 a directory with validated `pyvenv.cfg`). Hidden and Git-ignored files can be declared.
-pytest-telescope never walks or hashes undeclared project files.
+Without a Git declaration, pytest-telescope never walks or hashes undeclared project files.
+The explicit Git declaration grants the supported committed tree as described below.
 
 The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
 [Independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
@@ -141,6 +144,26 @@ scope an ordinary case. List any import, parametrization and collection dependen
 every consumer's shared declarations. The scoped discovery union is never an execution
 environment. No raw values are recorded in summaries, worker requests, cache records or
 normal diagnostic logs. Ordinary sessions retain the inherited environment.
+
+## Frozen Git checkout (development contract)
+
+The following interface is under development and is not a claim about the published
+0.1.0a6 package. Request it explicitly on a case:
+
+```python
+@pytest.mark.telescope(git="frozen-checkout-v1")
+def test_revision():
+    ...
+```
+
+The same literal string may appear in project defaults or bundles. Module, class,
+function and parameter declarations add together; inherited Git cannot be removed.
+Defaults alone do not scope an ordinary case. Omission leaves Git disabled; unknown
+versions and non-string or dynamic marker values are rejected. `plan` is static and
+does not run Git. A requested view includes the supported committed source and Git
+history as well as separately declared inputs; untracked files need separate declarations.
+The [sandbox contract](bubblewrap.md#frozen-git-checkout-development-contract) defines
+the supported states, safety and refusal boundaries.
 
 ## Select and control execution
 
@@ -235,8 +258,9 @@ partial pytest stops and timing for shared workers.
 Scoped tests run the host's own tools from the read-only system directories, for example
 `git` from `/usr/bin`, with `HOME` and `TMPDIR` set to private `/tmp`. Create
 repositories and other writable state in `/tmp` or `tmp_path`, copying declared inputs
-there when needed; project source stays read-only. Host tools and system libraries are
-not part of the cache key, so mark a scoped test `cache=False` when its result depends on
+there when needed; project source stays read-only. Except for the explicitly requested
+frozen Git context described above, host tools and system libraries are not part of the
+cache key, so mark a scoped test `cache=False` when its result depends on
 their version.
 
 `subprocess.run([sys.executable, ...])` starts the same host interpreter with the same

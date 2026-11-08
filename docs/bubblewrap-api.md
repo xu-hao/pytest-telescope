@@ -67,6 +67,10 @@ The [marker and project reference](specification.md#project-configuration) defin
 A suite's `capabilities` list accepts `python` and `project:readonly`;
 `network:none` and `scratch:noexec` refuse with that capability code.
 
+The development marker `git="frozen-checkout-v1"` requests the
+[frozen Git view](bubblewrap.md#frozen-git-checkout-development-contract); this is not a
+claim of support in the published 0.1.0a6 package. `plan` remains a static preview.
+
 ## Host requirements
 
 Ordinary-only projects need Linux and Python 3.11 or newer. Projects with scoped cases
@@ -87,6 +91,9 @@ The project may be `/project` itself.
 
 | Code | Meaning |
 | --- | --- |
+| `git:frozen-checkout-v1` | Requested repository state, layout, ref, link or object format is unsupported or absent. |
+| `git:executable` | System Git or its supported runtime closure is unavailable or unsupported. |
+| `git:limits` | A bounded Git capture, path, ref, object or runtime limit was exceeded. |
 | `sandbox:bubblewrap` | No `bwrap` executable on `PATH`. |
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
 | `sandbox:environment` | The interpreter could not start in the view, the environment layout overlaps the project or the sandbox's own mount points, or the project directory cannot also be shown at its host path. |
@@ -97,6 +104,11 @@ The project may be `/project` itself.
 | `metadata:pep621-static-v1` | Local distribution metadata cannot be translated from the supported static PEP 621 fields. |
 | `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
 | `project:links` | A project input contains an unsupported directory symlink. |
+
+Malformed Git declarations or conflicting forwarded Git, SSH, loader or locale controls raise `DeclarationError`.
+Changed previously observed bytes, corrupt or incomplete objects, command, deadline,
+read and materialization failures yield bounded `InfrastructureError` evidence after
+at most two fresh capture attempts; cleanup failure is terminal.
 
 ## Result schema 4
 

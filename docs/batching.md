@@ -37,6 +37,8 @@ the host's CPUs. Batching does not change which source or metadata a test can re
 Cases share a batch only when they belong to the same suite and source module and have
 exactly equal readable files, declared absence, generated metadata, effective environment
 names and captured presence/value context, and cache policy.
+The development frozen Git declaration and its context also participate in equality;
+Git consumers and nonconsumers remain in separate groups.
 File comparisons include contents and supported modes. Two declarations can be written
 differently and still produce the same scope after expansion. Cases with different
 scopes stay in separate batches; pytest-telescope does not combine their inputs.

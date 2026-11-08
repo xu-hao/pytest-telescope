@@ -28,8 +28,11 @@ package version, and the package must have a license in its metadata and a `LICE
 file.
 
 Each release must document its execution and cache rules and include results from real
-sandbox tests and benchmarks. Version `0.1.0a6` uses ordinary pytest and Bubblewrap
-filesystem views.
+sandbox tests and benchmarks. For the release introducing the explicitly declared frozen Git context, the maintainer
+has waived a new performance campaign. Real sandbox functional tests and
+benchmark-harness correctness checks remain required. Historical timings remain historical; fresh performance
+is unmeasured. Future releases retain the benchmark requirement unless separately waived.
+Version `0.1.0a6` uses ordinary pytest and Bubblewrap filesystem views.
 
 Before each release:
 
