@@ -663,14 +663,20 @@ def execute(
     if type(request) is not dict or request.get("mode") not in ("collection", "execution", "batch"):
         raise InfrastructureError("worker requires an explicit request protocol")
     required = (
-        {"mode", "registry", "selectors"}
+        {"mode", "registry", "selectors", "context_id"}
         if request["mode"] == "collection"
-        else {"mode", "registry", "group_id", "case_ids", "expected_digest"}
+        else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id"}
         if request["mode"] == "batch"
-        else {"mode", "registry", "case_id", "expected_digest"}
+        else {"mode", "registry", "case_id", "expected_digest", "context_id"}
     )
     if set(request) != required or type(request["registry"]) is not list:
         raise InfrastructureError("worker request fields do not match its protocol")
+    if (
+        type(request["context_id"]) is not str
+        or not re.fullmatch(r"[0-9a-f]{64}", request["context_id"])
+        or (request["mode"] == "batch" and request["context_id"] != request["group_id"])
+    ):
+        raise InfrastructureError("worker request context does not match its protocol")
     if metadata_directory is not None:
         metadata_directory = Path(metadata_directory).resolve()
         if metadata_directory.parent != directory or metadata_directory.name != "metadata":
@@ -787,13 +793,19 @@ def execute(
         if type(result) is dict and result.get("leaked_descendants") is True:
             raise InfrastructureError("worker left descendant processes running")
         valid = (
-            validate_collection(result, nonce=nonce)
+            validate_collection(result, nonce=nonce, context_id=request["context_id"])
             if request["mode"] == "collection"
             else validate_batch(
-                result, nonce=nonce, group_id=request["group_id"], case_ids=request["case_ids"]
+                result,
+                nonce=nonce,
+                group_id=request["group_id"],
+                case_ids=request["case_ids"],
+                context_id=request["context_id"],
             )
             if request["mode"] == "batch"
-            else validate_result(result, nonce=nonce, case_id=request["case_id"])
+            else validate_result(
+                result, nonce=nonce, case_id=request["case_id"], context_id=request["context_id"]
+            )
         )
         if not valid or result["exit_code"] != code:
             raise InfrastructureError("worker result identity, completion or exit status mismatch")

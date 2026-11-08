@@ -76,7 +76,7 @@ def run(root, *, status="passed", **kwargs):
     assert report["status"] == status, report
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True
-    assert report["schema"] == 3
+    assert report["schema"] == 4
     return report
 
 

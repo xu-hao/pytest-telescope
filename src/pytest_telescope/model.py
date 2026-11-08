@@ -29,7 +29,7 @@ class InfrastructureError(RuntimeError):
 
 
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
-SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "tools"})
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
 
 
 def render_json(value):
@@ -52,6 +52,7 @@ class Unit:
     absent: list[str]
     cache: bool
     distributions: list[str] = field(default_factory=list)
+    env: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
     tool_links: dict = field(default_factory=dict)
 
@@ -103,6 +104,25 @@ def sequence(value, label):
     ):
         raise DeclarationError(f"{label} requires at most 4096 nonempty strings")
     return value
+
+
+def environment_names(value):
+    names = sequence(value, "env")
+    forbidden = {
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTEST_ADDOPTS",
+        "PYTEST_PLUGINS",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+    }
+    if any(
+        not name.isidentifier() or name in forbidden or name.startswith("TELESCOPE_")
+        for name in names
+    ):
+        raise DeclarationError(
+            "environment names must not override the controlled Python/pytest runtime"
+        )
+    return sorted(set(names))
 
 
 def mapping(value, label, allowed=None):
@@ -418,13 +438,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
 
     def declaration(item, label):
-        item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions", "tools"})
+        item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions", "env", "tools"})
         # Expand after structural discovery establishes the potential tool bindings.
         # A function may inherit the tool owning one of its project directory links.
         inputs = set(sequence(item.get("inputs", []), label + " inputs"))
         absent = set(expanded(item.get("absent", []), label + " absence", missing=True))
         metadata = set(sequence(item.get("distributions", []), "distributions"))
         selected_tools = set(sequence(item.get("tools", []), "tools"))
+        env = set(environment_names(item.get("env", [])))
         if selected_tools - tool_definitions.keys():
             raise DeclarationError("unknown frozen tool")
         if metadata - distributions.keys():
@@ -435,6 +456,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             absent.update(child.absent)
             metadata.update(child.distributions)
             selected_tools.update(child.tools)
+            env.update(child.env)
         for name in metadata:
             inputs.update(distributions[name].inputs)
         if type(item.get("cache", True)) is not bool:
@@ -443,7 +465,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             raise DeclarationError("effective declaration exceeds 100000 paths")
         return Unit(
             label, [], sorted(inputs), sorted(absent), item.get("cache", True), sorted(metadata),
-            sorted(selected_tools),
+            env=sorted(env), tools=sorted(selected_tools),
         )
 
     def bundle(name):
@@ -455,7 +477,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             raise DeclarationError("bundle nesting exceeds 32 levels")
         if name not in resolved:
             active.add(name)
-            mapping(bundles[name], "bundle", {"inputs", "bundles", "absent", "distributions", "tools"})
+            mapping(bundles[name], "bundle", {"inputs", "bundles", "absent", "distributions", "env", "tools"})
             resolved[name] = declaration(bundles[name], "bundle " + name)
             depth = 1 + max((depths[dep] for dep in bundles[name].get("bundles", [])), default=0)
             if depth > 32:
@@ -467,6 +489,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     for name in bundles:
         bundle(name)
     defaults = declaration(spec.get("defaults", {}), "defaults")
+    global_env = environment_names(spec.get("env", []))
     inventory = set()
     for suite in configured_suites:
         members = set()
@@ -552,6 +575,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         inputs = set(files) | set(defaults.inputs)
         absent, metadata = set(defaults.absent), set(defaults.distributions)
         selected_tools = set(defaults.tools)
+        env = set(global_env) | set(defaults.env)
         cache = defaults.cache
         for filename in files:
             for row in rows_by_file.get(filename, []):
@@ -560,11 +584,12 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
                 absent.update(unit.absent)
                 metadata.update(unit.distributions)
                 selected_tools.update(unit.tools)
+                env.update(unit.env)
                 cache = cache and unit.cache
         for name in metadata:
             inputs.update(distributions[name].inputs)
         inputs.update(tool_context.project_inputs(tools, sorted(selected_tools)))
-        return inputs, absent, metadata, cache, selected_tools
+        return inputs, absent, metadata, cache, selected_tools, env
 
     collections, scoped_files, ordinary_files = [], {}, {}
     pool_inputs, pool_absent = set(), set()
@@ -580,14 +605,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         ]
         configuration = {"pyproject.toml", suite.config}
         if with_scope:
-            inputs, absent, _, _, selected_tools = support(with_scope)
+            inputs, absent, _, _, selected_tools, _ = support(with_scope)
             pool_inputs.update(inputs | configuration)
             pool_absent.update(absent)
             pool_tools.update(selected_tools)
         if not wholly:
             collections.append(None)
             continue
-        inputs, absent, metadata, cache, selected_tools = support(wholly)
+        inputs, absent, metadata, cache, selected_tools, env = support(wholly)
         collection = Unit(
             suite.name,
             wholly,
@@ -595,8 +620,8 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             sorted(absent),
             cache,
             sorted(metadata),
-            sorted(selected_tools),
-            tool_context.project_links(tools, sorted(selected_tools)),
+            env=sorted(env), tools=sorted(selected_tools),
+            tool_links=tool_context.project_links(tools, sorted(selected_tools)),
         )
         validate_scope(root, collection)
         collections.append(collection)
@@ -604,26 +629,11 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         "pool", [], sorted(pool_inputs), sorted(pool_absent), True,
         tools=sorted(pool_tools), tool_links=tool_context.project_links(tools, sorted(pool_tools)),
     ) if pool_inputs else None
-    env = sequence(spec.get("env", []), "env")
-    forbidden = {
-        "PYTHONPATH",
-        "PYTHONHOME",
-        "PYTEST_ADDOPTS",
-        "PYTEST_PLUGINS",
-        "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
-    }
-    if any(
-        not name.isidentifier() or name in forbidden or name.startswith("TELESCOPE_")
-        for name in env
-    ):
-        raise DeclarationError(
-            "environment names must not override the controlled Python/pytest runtime"
-        )
     return Manifest(
         root,
         raw,
         collections,
-        sorted(set(env)),
+        global_env,
         sorted(inventory),
         addopts,
         registry,
@@ -687,6 +697,7 @@ def case_unit(manifest, item, suite):
     inputs = set(manifest.defaults.inputs) | {item["file"], "pyproject.toml", suite.config}
     metadata = set(manifest.defaults.distributions)
     absent = set(manifest.defaults.absent)
+    env = set(manifest.env) | set(manifest.defaults.env)
     cache = manifest.defaults.cache
     selected_tools = set(manifest.defaults.tools)
     for origin in origins:
@@ -695,13 +706,15 @@ def case_unit(manifest, item, suite):
         absent.update(declaration.absent)
         metadata.update(declaration.distributions)
         selected_tools.update(declaration.tools)
+        env.update(declaration.env)
         cache = cache and declaration.cache
     for name in metadata:
         inputs.update(manifest.distributions[name].inputs)
     inputs.update(tool_context.project_inputs(manifest.tools, sorted(selected_tools)))
     unit = Unit(
         item["case_id"], [item["file"]], sorted(inputs), sorted(absent), cache, sorted(metadata),
-        sorted(selected_tools), tool_context.project_links(manifest.tools, sorted(selected_tools)),
+        env=sorted(env), tools=sorted(selected_tools),
+        tool_links=tool_context.project_links(manifest.tools, sorted(selected_tools)),
     )
     validate_scope(manifest.root, unit)
     return unit
