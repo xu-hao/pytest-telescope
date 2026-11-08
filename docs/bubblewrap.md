@@ -9,13 +9,14 @@ The sandbox restricts which project files a test can read. It uses your installe
 Python environment and leaves resource limits and network policy to the job running
 pytest.
 
-This page defines the execution rules for pytest-telescope 0.1.0a6. See the
+This page defines the development execution contract following the published 0.1.0a6
+baseline. See the
 [API reference](bubblewrap-api.md) for interfaces and configuration, and the
 [result reference](result-schema.md) for schema 4 fields.
 
 ## Which route a case takes
 
-A case is *scoped* when it has an `inputs`, `bundles` or `distributions` field in its
+A case is *scoped* when it has an `inputs`, `bundles`, `distributions` or `env` field in its
 literal declarations. Declarations inherit from module `pytestmark`,
 class, function and `pytest.param(..., marks=...)` levels, and a literal empty list still
 counts. Every other case is *ordinary*.
@@ -26,10 +27,11 @@ counts. Every other case is *ordinary*.
 | `@pytest.mark.telescope(cache=False)` | ordinary | never |
 | `@pytest.mark.telescope(absent=["local.json"])` | ordinary | never |
 | `@pytest.mark.telescope(inputs=[])` | scoped | yes |
+| `@pytest.mark.telescope(env=[])` | scoped | yes |
 | `@pytest.mark.telescope(inputs=[], cache=False)` | scoped | never |
 | module `pytestmark = pytest.mark.telescope(bundles=["shared"])` | scoped (every case in the module) | yes |
 
-Project `defaults` add files to scoped cases but never make a case scoped. An `absent`
+Project `defaults` add files and environment names to scoped cases but never make a case scoped. An `absent`
 declaration is still checked against the project for every case that carries it. A
 malformed, unsupported or mutated declaration refuses the run; it never turns a case
 ordinary.
