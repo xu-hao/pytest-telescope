@@ -174,6 +174,8 @@ def skip_teardown():
 def test_setup(skip_setup): pass
 def test_call(): pytest.skip("call optional")
 def test_teardown(skip_teardown): pass
+@pytest.mark.skipif(True, reason="conditional option")
+def test_skipif(): pass
 @pytest.mark.xfail(reason="expected condition")
 def test_xfail(): assert False
 """,
@@ -181,11 +183,12 @@ def test_xfail(): assert False
     cold = controller.run(tmp_path)
     assert cold["status"] == "passed", cold
     warm = controller.run(tmp_path)
-    assert warm["counts"]["reused"] == 4
+    assert warm["counts"]["reused"] == 5
     expectations = {
         "setup": ("setup", digest("Skipped: setup optional")),
         "call": ("call", digest("Skipped: call optional")),
         "teardown": ("teardown", digest("Skipped: teardown optional")),
+        "skipif": ("setup", digest("Skipped: conditional option")),
         "xfail": ("call", digest("expected condition", "xfail")),
     }
     for suffix, (phase, reason) in expectations.items():
@@ -204,7 +207,13 @@ def test_xfail(): assert False
         + b"".join(path.read_bytes() for path in (tmp_path / ".pytest-telescope").rglob("*.json"))
         + capsys.readouterr().out.encode()
     )
-    for raw in (b"setup optional", b"call optional", b"teardown optional", b"expected condition"):
+    for raw in (
+        b"setup optional",
+        b"call optional",
+        b"teardown optional",
+        b"conditional option",
+        b"expected condition",
+    ):
         assert raw not in recorded
 
 
