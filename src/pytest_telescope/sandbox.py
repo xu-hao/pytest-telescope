@@ -449,13 +449,20 @@ def _project_paths(description, project):
     return sorted(found)
 
 
-def _base_arguments(box, project=None):
+def _base_arguments(box, project=None, *, frozen_prefixes=()):
     """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
         arguments += ["--ro-bind", directory, directory]
+    prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
-        if os.path.islink(link):
+        if link in prefixes:
+            row = prefixes[link]
+            if row["kind"] == "symlink":
+                arguments += ["--symlink", row["target"], link]
+            elif row["kind"] == "directory":
+                arguments += ["--ro-bind", link, link]
+        elif os.path.islink(link):
             arguments += ["--symlink", os.readlink(link), link]
         elif os.path.isdir(link):
             arguments += ["--ro-bind", link, link]
@@ -693,7 +700,7 @@ def execute(
             stream.write(encoded)
     request_path.chmod(0o444)
     project = Path(root).resolve()
-    argv = [*_base_arguments(box, project), *_project_arguments(box, view, project)]
+    prefixes = ()
     if tool_view is not None:
         from .tool_capture import ToolView
 
@@ -712,9 +719,19 @@ def execute(
         for source, destination in tool_view.bindings:
             if not source.is_relative_to(tool_view.directory) or source.is_symlink():
                 raise InfrastructureError("tool binding is outside its owned frozen material")
+        prefixes = tool_view.prefixes
+        from .tool_context import validate_environment
+
+        validate_environment(environment, tool_view.names)
+    argv = [*_base_arguments(box, project, frozen_prefixes=prefixes), *_project_arguments(box, view, project)]
+    if tool_view is not None:
+        for source, destination in tool_view.bindings:
             argv += ["--ro-bind", str(source), destination]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
+    controlled = box
+    if tool_view is not None and tool_view.command_path is not None:
+        controlled = replace(box, path=tool_view.command_path + ":" + box.path)
     argv += [
         "--ro-bind",
         str(WORKER),
@@ -726,7 +743,7 @@ def execute(
         "/",
         "--chdir",
         "/project/" + suite_cwd,
-        *_environment(box, {**environment, "TELESCOPE_REQUEST": REQUEST}),
+        *_environment(controlled, {**environment, "TELESCOPE_REQUEST": REQUEST}),
         "--",
         box.executable,
         "-I",

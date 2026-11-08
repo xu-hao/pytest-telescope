@@ -1,0 +1,176 @@
+"""Owned read-only projections of exact selected entries and command mappings."""
+
+import os
+import stat
+from pathlib import Path
+
+from .model import InfrastructureError
+from .tool_context import digest
+from .tool_graph import layout
+
+
+def inside(filename, parents):
+    return any(Path(filename).is_relative_to(parent) for parent in parents)
+
+
+def minimal(paths):
+    return sorted(name for name in set(paths) if not any(name != other and Path(name).is_relative_to(other) for other in paths))
+
+
+class Projection:
+    def __init__(self, capture, names):
+        self.capture = capture
+        self.names = names
+        self.bindings = {}
+        self.commands = {}
+        self.command_path = None
+        self.entries = {}
+        self.directories = set()
+        self.masks = []
+        originals = {}
+        trees, closed = [], []
+        controls = set()
+        for name in names:
+            graph, runtime = capture.graphs[name], capture.runtimes[name]
+            for root in graph.roots.values():
+                source = capture.directory / name / root["id"]
+                self.bindings[str(Path("/tools") / name / root["id"])] = source
+                if not root["preserve_source"]:
+                    continue
+                if root["coverage"] == "tree":
+                    trees.append(root["source"])
+                for row in root["entries"]:
+                    key = (root["id"], row["path"])
+                    filename = graph.original(key)
+                    previous = originals.get(filename)
+                    value = (graph, key)
+                    if previous is not None and previous[0].token(previous[1]) != graph.token(key):
+                        layout("selected original tool mappings conflict")
+                    originals[filename] = value
+            closed.extend(runtime.directories)
+            if runtime.control is not None:
+                controls.add(digest(graph.token(runtime.control)))
+            for command, key in runtime.commands.items():
+                # Logical mapping and the whole executable context are significant;
+                # equal executable bytes alone cannot make two commands equivalent.
+                signature = digest([graph.logical(key), graph.tool.document, graph.prefix_identity()])
+                previous = self.commands.get(command)
+                if previous is not None and previous[0] != signature:
+                    layout("selected tool command mappings conflict")
+                self.commands[command] = (signature, graph.logical(key))
+        if len(self.commands) > 1024:
+            layout("selected command mapping exceeds its bound")
+        if len(controls) > 1:
+            layout("selected native loader caches disagree")
+        if controls:
+            layout("native tool views require a supported exact preload control mount")
+        for filename, (graph, key) in originals.items():
+            if graph.nodes[key]["kind"] == "symlink" and not inside(filename, trees):
+                closed.append(str(Path(filename).parent))
+        self.closed = minimal(closed)
+        protected = ("/", "/usr", "/etc", "/tmp", "/dev/shm", str(capture.manifest.root))
+        for filename in self.closed:
+            if filename in protected or Path(capture.manifest.root).is_relative_to(filename) or Path(filename).is_relative_to(capture.manifest.root):
+                layout("closed tool directory overlaps a protected mount or project")
+        payload = [
+            [[name, capture.manifest.tools[name].document, capture.graphs[name].prefix_identity()] for name in names],
+            self.closed, sorted(self.commands.items()),
+        ]
+        self.identity = digest(payload)
+        self.directory = capture.directory / ".views" / self.identity
+        self.directory.mkdir(mode=0o700)
+        for index, destination in enumerate(self.closed):
+            source = self.directory / ("closed-" + str(index))
+            source.mkdir(mode=0o700)
+            self.directories.add(source)
+            members = [(path, value) for path, value in originals.items() if Path(path).is_relative_to(destination)]
+            for filename, (graph, key) in sorted(members, key=lambda item: (len(Path(item[0]).parts), item[0])):
+                self.materialize(graph, key, source / Path(filename).relative_to(destination))
+            self.bindings[destination] = source
+        for name in names:
+            graph = capture.graphs[name]
+            for root in graph.roots.values():
+                if not root["preserve_source"] or inside(root["source"], self.closed):
+                    continue
+                source = capture.directory / name / root["id"]
+                if root["coverage"] == "tree":
+                    self.bindings[root["source"]] = source
+                else:
+                    for row in root["entries"]:
+                        destination = graph.original((root["id"], row["path"]))
+                        if row["kind"] == "file" and not inside(destination, [*trees, *self.closed]):
+                            self.bindings[destination] = source / row["path"]
+        if self.commands:
+            directory = self.directory / "commands"
+            directory.mkdir(mode=0o700)
+            self.directories.add(directory)
+            for command, (_, target) in self.commands.items():
+                leaf = directory / command
+                leaf.symlink_to(target)
+                self.entries[leaf] = ("symlink", target)
+            self.command_path = "/tools/.commands/" + self.identity
+            self.bindings[self.command_path] = directory
+        if controls:
+            # No ambient preload can introduce an unpinned library. An explicit
+            # nonempty preload/audit configuration needs a different runtime profile.
+            preload = originals.get("/etc/ld.so.preload")
+            if preload is not None and preload[0].bytes(preload[1]).strip():
+                layout("native preload configuration is unsupported")
+            self.masks.append("/etc/ld.so.preload")
+        for directory in sorted(self.directories, key=lambda path: len(path.parts), reverse=True):
+            row = self.entries.get(directory)
+            directory.chmod(row[1] & 0o555 if row and row[0] == "directory" else 0o555)
+        self.directory.chmod(0o555)
+
+    def materialize(self, graph, key, destination):
+        row = graph.nodes[key]
+        source = graph.directory / key[0] / key[1]
+        # Owned empty ancestors confer no host siblings. Every actual member comes
+        # from a pinned record; hard links are ONLY between already-owned copies.
+        missing = []
+        parent = destination.parent
+        while parent != self.directory and not parent.exists():
+            missing.append(parent)
+            parent = parent.parent
+        for parent in reversed(missing):
+            parent.mkdir(mode=0o700)
+            self.directories.add(parent)
+        if row["kind"] == "directory":
+            destination.mkdir(mode=0o700, exist_ok=True)
+            self.directories.add(destination)
+            self.entries[destination] = ("directory", row["mode"])
+        elif row["kind"] == "symlink":
+            destination.symlink_to(row["target"])
+            self.entries[destination] = ("symlink", row["target"])
+        else:
+            os.link(source, destination, follow_symlinks=False)
+            info = source.stat(follow_symlinks=False)
+            self.entries[destination] = ("file", info.st_dev, info.st_ino, row["mode"] & 0o555)
+
+    def verify(self):
+        expected = set(self.entries) | self.directories
+        actual = set()
+        pending = [self.directory]
+        while pending:
+            directory = pending.pop()
+            with os.scandir(directory) as children:
+                for child in children:
+                    path = Path(child.path)
+                    actual.add(path)
+                    if child.is_dir(follow_symlinks=False):
+                        pending.append(path)
+        if actual != expected:
+            raise InfrastructureError("owned tool projection membership changed")
+        for filename, row in self.entries.items():
+            info = filename.lstat()
+            if row[0] == "symlink":
+                valid = stat.S_ISLNK(info.st_mode) and os.readlink(filename) == row[1]
+            elif row[0] == "directory":
+                valid = stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == row[1] & 0o555
+            else:
+                valid = stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode)) == row[1:]
+            if not valid:
+                raise InfrastructureError("owned tool projection mapping changed")
+        for directory in self.directories:
+            if not directory.is_dir() or directory.is_symlink() or directory.stat().st_mode & 0o222:
+                raise InfrastructureError("owned tool projection directory changed")

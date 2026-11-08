@@ -5,6 +5,7 @@ import os
 import posixpath
 import shutil
 import stat
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -248,6 +249,8 @@ class ToolView:
     names: tuple
     bindings: tuple
     identity: str
+    command_path: str | None = None
+    prefixes: tuple = ()
 
 
 class Capture:
@@ -257,6 +260,10 @@ class Capture:
         self.timeout = min(timeout, 120)
         self.cancellation = cancellation
         self.sources = {}
+        self.graphs = {}
+        self.runtimes = {}
+        self.views = {}
+        self.view_lock = threading.RLock()
 
     def _budget(self, deadline=None):
         return Budget(time.monotonic() + self.timeout if deadline is None else deadline, self.cancellation)
@@ -266,6 +273,9 @@ class Capture:
 
         for attempt in range(2):
             self.sources = {}
+            self.graphs = {}
+            self.runtimes = {}
+            self.views = {}
             self.directory.mkdir(mode=0o700)
             try:
                 deadline = time.monotonic() + self.timeout
@@ -295,19 +305,19 @@ class Capture:
             declaration.validate_project_link(self.manifest.root, link)
 
     def _capture(self, deadline):
+        from .tool_graph import Graph
+        from .tool_python import validate as validate_python
+        from .tool_runtime import Runtime
+
         budget = self._budget(deadline)
+        (self.directory / ".views").mkdir(mode=0o700)
         for name, tool in self.manifest.tools.items():
-            _validate_links(tool)
             self._pins(tool)
-            # Native/Python runtime profiles are integrated separately; no unverified
-            # executable context can silently become an admitted data-only closure.
-            if tool.document["executables"] or tool.document["python"] or tool.document["loader"] is not None:
-                declaration.unsupported("layout", "the requested native runtime closure is not yet supported")
             target = self.directory / name
             target.mkdir(mode=0o700)
             for root in tool.document["roots"]:
                 source = Path(root["source"])
-                if (source / "pyvenv.cfg").is_file():
+                if root["coverage"] == "tree" and any(row["path"] == "pyvenv.cfg" or "site-packages" in Path(row["path"]).parts or "dist-packages" in Path(row["path"]).parts for row in root["entries"]):
                     declaration.unsupported("layout", "an interpreter environment is not a tool root")
                 if root["coverage"] == "tree" and _tree_names(source, budget) != {row["path"] for row in root["entries"]}:
                     declaration.unsupported("identity", "frozen-tool tree differs from its complete inventory")
@@ -319,6 +329,11 @@ class Capture:
                     if row["kind"] == "directory":
                         (frozen / row["path"]).chmod(row["mode"] & 0o555)
             target.chmod(0o555)
+            graph = Graph(tool, target)
+            graph.validate_links()
+            runtime = Runtime(graph, self._budget(deadline))
+            validate_python(graph, self._budget(deadline))
+            self.graphs[name], self.runtimes[name] = graph, runtime
         self.directory.chmod(0o555)
 
     def verify(self, names, *, deadline=None):
@@ -346,8 +361,13 @@ class Capture:
                             raise InfrastructureError("frozen-tool source changed after capture")
                         _measure(self.directory / name / root["id"] / row["path"], row, frozen_budget, frozen=True)
                 self._pins(tool)
+                self.graphs[name].verify_prefixes()
             except DeclarationError as exc:
                 raise InfrastructureError("frozen-tool source or declaration changed after capture") from exc
+        with self.view_lock:
+            for selected, projection in self.views.items():
+                if set(selected) <= set(names):
+                    projection.verify()
 
     def verify_project(self, records):
         """The frozen project lock bytes must match, not merely the current source."""
@@ -360,22 +380,25 @@ class Capture:
                     raise InfrastructureError("frozen project records disagree with tool pins")
 
     def view(self, names):
+        from .tool_view import Projection
+
         names = tuple(sorted(names))
         self.verify(names)
-        binds = {}
-        for name in names:
-            for root in self.manifest.tools[name].document["roots"]:
-                source = self.directory / name / root["id"]
-                binds[str(Path("/tools") / name / root["id"])] = source
-                if root["preserve_source"]:
-                    aliases = [row for row in root["entries"] if row["kind"] != "directory"] if root["coverage"] == "files" else [{"path": "."}]
-                    for row in aliases:
-                        destination = str(Path(root["source"]) / row["path"])
-                        given = source / row["path"]
-                        if given.is_symlink():
-                            declaration.unsupported("layout", "sparse original link requires a closed directory mapping")
-                        if destination in binds and binds[destination] != given:
-                            declaration.unsupported("layout", "selected tool original aliases conflict")
-                        binds[destination] = given
-        identity = declaration.digest([[name, hashlib.sha256(self.manifest.tools[name].raw).hexdigest()] for name in names])
-        return ToolView(self.directory, names, tuple((source, destination) for destination, source in sorted(binds.items())), identity)
+        with self.view_lock:
+            if names not in self.views:
+                self.views[names] = Projection(self, names)
+            projection = self.views[names]
+            projection.verify()
+            prefixes = {}
+            for name in names:
+                for prefix, (row, _) in self.graphs[name].prefixes.items():
+                    previous = prefixes.get(prefix)
+                    if previous is not None and previous != row:
+                        declaration.unsupported("layout", "selected native prefix mappings disagree")
+                    prefixes[prefix] = row
+            return ToolView(
+                self.directory, names,
+                tuple((source, destination) for destination, source in sorted(projection.bindings.items(), key=lambda item: (len(Path(item[0]).parts), item[0]))),
+                projection.identity, projection.command_path,
+                tuple(sorted(prefixes.items())),
+            )
