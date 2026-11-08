@@ -206,6 +206,7 @@ class ToolView:
     identity: str
     command_path: str | None = None
     prefixes: tuple = ()
+    system: object = None
 
 
 class Capture:
@@ -219,6 +220,7 @@ class Capture:
         self.runtimes = {}
         self.views = {}
         self.view_lock = threading.RLock()
+        self.system = None
 
     def _budget(self, deadline=None):
         return Budget(time.monotonic() + self.timeout if deadline is None else deadline, self.cancellation)
@@ -231,6 +233,7 @@ class Capture:
             self.graphs = {}
             self.runtimes = {}
             self.views = {}
+            self.system = None
             self.directory.mkdir(mode=0o700)
             try:
                 deadline = time.monotonic() + self.timeout
@@ -238,14 +241,21 @@ class Capture:
                 self.verify(tuple(self.manifest.tools), deadline=deadline)
                 return self
             except BaseException as error:
-                _remove(self.directory)
+                self._cleanup()
                 if isinstance(error, OSError):
                     error = InfrastructureError("owned frozen-tool capture operation failed")
                 if not isinstance(error, InfrastructureError) or isinstance(error, CleanupError) or attempt:
                     raise error
 
     def __exit__(self, *exc):
-        _remove(self.directory)
+        self._cleanup()
+
+    def _cleanup(self):
+        try:
+            if self.system is not None:
+                self.system.close()
+        finally:
+            _remove(self.directory)
 
     def _pins(self, tool):
         for lock in tool.document["locks"]:
@@ -265,6 +275,7 @@ class Capture:
         from .tool_graph import Graph
         from .tool_python import validate as validate_python
         from .tool_runtime import Runtime
+        from .tool_system import BaselineEtc
 
         budget = self._budget(deadline)
         (self.directory / ".views").mkdir(mode=0o700)
@@ -281,6 +292,8 @@ class Capture:
                 frozen = target / root["id"]
                 for row in root["entries"]:
                     filename = source / row["path"]
+                    if filename == Path("/etc/ld.so.preload") and (row["kind"] != "file" or row["size"] != 0):
+                        declaration.unsupported("layout", "nonempty or indirect native preload inputs are unsupported")
                     self.sources[name, root["id"], row["path"]] = _measure(filename, row, budget, frozen / row["path"])
                 for row in reversed(root["entries"]):
                     if row["kind"] == "directory":
@@ -291,13 +304,18 @@ class Capture:
             runtime = Runtime(graph, self._budget(deadline))
             validate_python(graph, self._budget(deadline))
             self.graphs[name], self.runtimes[name] = graph, runtime
+        if any(runtime.control is not None for runtime in self.runtimes.values()):
+            self.system = BaselineEtc(self._budget(deadline))
         self.directory.chmod(0o555)
 
     def verify(self, names, *, deadline=None):
+        names = tuple(names)
         if deadline is None:
             deadline = time.monotonic() + self.timeout
         budget = self._budget(deadline)
         frozen_budget = self._budget(deadline)
+        if self.system is not None and any(self.runtimes[name].control is not None for name in names):
+            self.system.verify(self._budget(deadline))
         for name in names:
             tool = self.manifest.tools[name]
             try:
@@ -360,5 +378,5 @@ class Capture:
                 self.directory, names,
                 tuple((source, destination) for destination, source in sorted(projection.bindings.items(), key=lambda item: (len(Path(item[0]).parts), item[0]))),
                 projection.identity, projection.command_path,
-                tuple(sorted(prefixes.items())),
+                tuple(sorted(prefixes.items())), projection.system,
             )

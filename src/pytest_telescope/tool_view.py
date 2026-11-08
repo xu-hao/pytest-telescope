@@ -26,7 +26,7 @@ class Projection:
         self.command_path = None
         self.entries = {}
         self.directories = set()
-        self.masks = []
+        self.system = None
         originals = {}
         trees, closed = [], []
         controls = set()
@@ -65,10 +65,14 @@ class Projection:
         for name in names:
             capture.runtimes[name].validate_union(originals)
         if controls:
-            layout("native tool views require a supported exact preload control mount")
+            if capture.system is None:
+                raise InfrastructureError("native tool view lacks its admitted system composition")
+            self.system = capture.system
         for filename, (graph, key) in originals.items():
             if graph.nodes[key]["kind"] == "symlink" and not inside(filename, trees):
-                closed.append(str(Path(filename).parent))
+                parent = str(Path(filename).parent)
+                if parent != "/etc" or self.system is None:
+                    closed.append(parent)
         self.closed = minimal(closed)
         protected = ("/", "/usr", "/etc", "/tmp", "/dev/shm", str(capture.manifest.root))
         for filename in self.closed:
@@ -77,6 +81,7 @@ class Projection:
         payload = [
             [[name, capture.manifest.tools[name].document, capture.graphs[name].prefix_identity()] for name in names],
             self.closed, sorted(self.commands.items()),
+            None if self.system is None else [self.system.identity, "/etc/ld.so.preload", "file", 0o444, 0],
         ]
         self.identity = digest(payload)
         self.directory = capture.directory / ".views" / self.identity
@@ -116,9 +121,16 @@ class Projection:
             # No ambient preload can introduce an unpinned library. An explicit
             # nonempty preload/audit configuration needs a different runtime profile.
             preload = originals.get("/etc/ld.so.preload")
-            if preload is not None and preload[0].bytes(preload[1]).strip():
-                layout("native preload configuration is unsupported")
-            self.masks.append("/etc/ld.so.preload")
+            if preload is not None:
+                row = preload[0].nodes[preload[1]]
+                if row["kind"] != "file" or row["size"] != 0 or row["mode"] & 0o555 != 0o444:
+                    layout("native preload declaration conflicts with its fixed empty control")
+            empty = self.directory / "empty-preload"
+            empty.touch(mode=0o444, exist_ok=False)
+            empty.chmod(0o444)
+            info = empty.stat(follow_symlinks=False)
+            self.entries[empty] = ("file", info.st_dev, info.st_ino, 0o444, 0)
+            self.bindings["/etc/ld.so.preload"] = empty
         for directory in sorted(self.directories, key=lambda path: len(path.parts), reverse=True):
             row = self.entries.get(directory)
             directory.chmod(row[1] & 0o555 if row and row[0] == "directory" else 0o555)
@@ -147,7 +159,7 @@ class Projection:
         else:
             os.link(source, destination, follow_symlinks=False)
             info = source.stat(follow_symlinks=False)
-            self.entries[destination] = ("file", info.st_dev, info.st_ino, row["mode"] & 0o555)
+            self.entries[destination] = ("file", info.st_dev, info.st_ino, row["mode"] & 0o555, row["size"])
 
     def verify(self):
         if self.directory.is_symlink() or not self.directory.is_dir() or self.directory.stat().st_mode & 0o222:
@@ -172,7 +184,7 @@ class Projection:
             elif row[0] == "directory":
                 valid = stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == row[1] & 0o555
             else:
-                valid = stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode)) == row[1:]
+                valid = stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode), info.st_size) == row[1:]
             if not valid:
                 raise InfrastructureError("owned tool projection mapping changed")
         for directory in self.directories:

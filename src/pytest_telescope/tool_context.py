@@ -272,6 +272,13 @@ def parse(project, name, registration):
     unique([row["id"] for row in roots])
     root_map = {row["id"]: row for row in roots}
     entries = {row["id"]: {entry["path"]: entry for entry in row["entries"]} for row in roots}
+    for root in roots:
+        for entry in root["entries"]:
+            original = str(PurePosixPath(root["source"]) / entry["path"])
+            if original == "/etc/ld.so.preload" and (entry["kind"] != "file" or entry["size"] != 0):
+                unsupported("layout", "nonempty or indirect native preload inputs are unsupported")
+            if root["preserve_source"] and original in {"/etc/ld.so.cache", "/etc/ld.so.preload"} and document["loader"] is None:
+                unsupported("layout", "loader control aliases require the explicit native profile")
     if sum(len(row["entries"]) for row in roots) > MAX_ENTRIES:
         unsupported("bounds", "too many frozen-tool entries")
     if sum(entry["size"] for row in roots for entry in row["entries"] if entry["kind"] == "file") > MAX_TOOL_BYTES:

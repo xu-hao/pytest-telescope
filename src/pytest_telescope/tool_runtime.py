@@ -23,6 +23,9 @@ class Runtime:
         self.commands = {}
         self.executables = {}
         self.control = None
+        self.lookup_names = {}
+        for filename in graph.mapping:
+            self.lookup_names.setdefault(posixpath.basename(filename), []).append(filename)
         self.validate()
 
     def covered(self, filename):
@@ -44,16 +47,24 @@ class Runtime:
             layout("native search candidate is not a regular pinned file")
         return key
 
-    def candidates(self, info, name, alias):
+    def candidates(self, info, name, alias, lookup_names=None):
         if "/" in name:
             if not name.startswith("/") or posixpath.normpath(name) != name:
                 layout("relative native dependency names are unsupported")
             candidates = [name]
         else:
-            candidates = [posixpath.join(directory, name) for directory in native.search_paths(info, alias)]
+            directories = (*native.search_paths(info, alias), *native.DEFAULT_SEARCH)
+            candidates = [posixpath.join(directory, name) for directory in directories]
             candidates += [filename for filename, _ in self.cache.get(name, ())]
-            candidates += [posixpath.join(directory, name) for directory in native.DEFAULT_SEARCH]
-        return candidates
+            # Closed directories may contain explicitly pinned hwcap/platform
+            # alternatives. Conservatively include every declared descendant with
+            # this SONAME: an unknown ordering refuses instead of borrowing a winner.
+            lookup = self.lookup_names if lookup_names is None else lookup_names
+            normalized = [self.graph.resolved_path(directory) for directory in directories]
+            candidates += [filename for filename in lookup.get(name, ()) if any(Path(filename).parent.is_relative_to(directory) for directory in normalized)]
+        if len(candidates) > MAX_RELATIONS:
+            layout("native lookup exceeds its candidate bound")
+        return sorted(set(candidates))
 
     def _find(self, key, info, name, alias):
         resolved = {}
@@ -93,6 +104,9 @@ class Runtime:
 
     def validate_union(self, originals):
         """A discovery union cannot introduce a different loader search winner."""
+        lookup_names = {}
+        for filename in originals:
+            lookup_names.setdefault(posixpath.basename(filename), []).append(filename)
         def resolve(filename):
             seen = set()
             for _ in range(32):
@@ -115,7 +129,7 @@ class Runtime:
             for name in info.needed:
                 expected = self.needed_targets[key, name]
                 for alias in (self.graph.logical(key), self.graph.original(key)):
-                    for filename in self.candidates(info, name, alias):
+                    for filename in self.candidates(info, name, alias, lookup_names):
                         if filename.startswith("/tools/"):
                             continue
                         selected = resolve(filename)

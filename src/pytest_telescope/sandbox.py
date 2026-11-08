@@ -37,6 +37,8 @@ MAX_INVOCATIONS = 64
 WORKER = Path(__file__).with_name("worker.py")
 REQUEST = "/telescope/request.json"
 WORKER_PATH = "/telescope/worker.py"
+TOOL_BOOTSTRAP = Path(__file__).with_name("tool_bootstrap.py")
+TOOL_BOOTSTRAP_PATH = "/telescope/tool-bootstrap.py"
 READY = "TELESCOPE_SANDBOX_READY"
 SYSTEM_DIRECTORIES = ("/usr", "/etc")
 SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
@@ -449,11 +451,14 @@ def _project_paths(description, project):
     return sorted(found)
 
 
-def _base_arguments(box, project=None, *, frozen_prefixes=()):
+def _base_arguments(box, project=None, *, frozen_prefixes=(), tool_system=None):
     """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
-        arguments += ["--ro-bind", directory, directory]
+        if directory == "/etc" and tool_system is not None:
+            arguments += tool_system.arguments()
+        else:
+            arguments += ["--ro-bind", directory, directory]
     prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
         if link in prefixes:
@@ -707,6 +712,7 @@ def execute(
     request_path.chmod(0o444)
     project = Path(root).resolve()
     prefixes = ()
+    tool_system = None
     if tool_view is not None:
         from .tool_capture import ToolView
 
@@ -726,10 +732,16 @@ def execute(
             if not source.is_relative_to(tool_view.directory) or source.is_symlink():
                 raise InfrastructureError("tool binding is outside its owned frozen material")
         prefixes = tool_view.prefixes
+        tool_system = tool_view.system
+        if tool_system is not None:
+            from .tool_system import BaselineEtc
+
+            if type(tool_system) is not BaselineEtc or tool_system.closed:
+                raise InfrastructureError("native view requires owned system composition handles")
         from .tool_context import validate_environment
 
         validate_environment(environment, tool_view.names)
-    argv = [*_base_arguments(box, project, frozen_prefixes=prefixes), *_project_arguments(box, view, project)]
+    argv = [*_base_arguments(box, project, frozen_prefixes=prefixes, tool_system=tool_system), *_project_arguments(box, view, project)]
     if tool_view is not None:
         for source, destination in tool_view.bindings:
             argv += ["--ro-bind", str(source), destination]
@@ -738,6 +750,10 @@ def execute(
     controlled = box
     if tool_view is not None and tool_view.command_path is not None:
         controlled = replace(box, path=tool_view.command_path + ":" + box.path)
+    startup = [box.executable, "-I", WORKER_PATH]
+    if tool_system is not None:
+        argv += ["--ro-bind", str(TOOL_BOOTSTRAP), TOOL_BOOTSTRAP_PATH]
+        startup = [box.executable, "-I", "-S", TOOL_BOOTSTRAP_PATH]
     argv += [
         "--ro-bind",
         str(WORKER),
@@ -751,9 +767,7 @@ def execute(
         "/project/" + suite_cwd,
         *_environment(controlled, {**environment, "TELESCOPE_REQUEST": REQUEST}),
         "--",
-        box.executable,
-        "-I",
-        WORKER_PATH,
+        *startup,
     ]
     code, output = capture(
         argv,
@@ -763,6 +777,8 @@ def execute(
         cancellation=cancellation,
     )
     try:
+        if tool_system is not None and code == 4 and output.splitlines() == [b"TELESCOPE_TOOL_VIEW_REFUSAL"]:
+            raise UnsupportedCapability("tool:layout", "native tool views require a private process filesystem and closed startup descriptors")
         unsupported = [
             line[len(b"TELESCOPE_UNSUPPORTED ") :]
             for line in output.splitlines()
@@ -784,6 +800,8 @@ def execute(
         ]
         if len(reports) != 1:
             message = _bwrap_message(output)
+            if tool_view is not None and tool_view.names and message:
+                message = "the frozen tool filesystem view could not start"
             raise InfrastructureError(
                 "sandbox startup failed: " + message
                 if message
