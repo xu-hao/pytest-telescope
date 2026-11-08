@@ -171,12 +171,15 @@ def assert_member_and_group_evidence(project, report, session_code):
     assert group["route"] == "ordinary" and group["profile"] == "ordinary-v1"
     assert group["case_ids"] == [member["case_id"]]
     assert member["group_id"] == group["group_id"]
-    assert group["outcome"] == {
-        0: "executed",
-        1: "failed",
-        3: "infrastructure_error",
-        4: "infrastructure_error",
-    }[session_code]
+    assert (
+        group["outcome"]
+        == {
+            0: "executed",
+            1: "failed",
+            3: "infrastructure_error",
+            4: "infrastructure_error",
+        }[session_code]
+    )
     assert group["complete"] is True and group["stop_reason"] is None
     assert group["cache_eligible"] is False and group["attempts"] == 1
     assert group["passed"] == passed and group["failed"] == failed
@@ -185,7 +188,9 @@ def assert_member_and_group_evidence(project, report, session_code):
 
 
 @pytest.mark.parametrize("session_code,expected_status,cli_code", SCENARIOS)
-def test_ordinary_session_verdict_api(project, monkeypatch, session_code, expected_status, cli_code):
+def test_ordinary_session_verdict_api(
+    project, monkeypatch, session_code, expected_status, cli_code
+):
     witness(project, session_code)
     actual_capture = ordinary.capture
     observed = []

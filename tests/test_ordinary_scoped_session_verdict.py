@@ -118,7 +118,9 @@ def assert_mixed_evidence(project, report, session_code):
 
 
 @pytest.mark.parametrize("session_code", [3, 4])
-def test_real_scoped_execution_preserves_ordinary_session_failure(project, monkeypatch, session_code):
+def test_real_scoped_execution_preserves_ordinary_session_failure(
+    project, monkeypatch, session_code
+):
     actual_capture = ordinary.capture
     observed = []
 
