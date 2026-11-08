@@ -4,7 +4,7 @@ import json
 import shutil
 
 import pytest
-from test_ordinary_session_verdict import write_session
+from test_ordinary_session_verdict import assert_group_identity, assert_phase_reports, write_session
 
 from pytest_telescope import controller, ordinary
 
@@ -78,7 +78,7 @@ def assert_ordinary_events(project, session_codes):
 
 
 def assert_mixed_evidence(project, report, session_code):
-    assert report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["sandbox"]["required"] is True
     assert len(report["sandbox"]["identity"]) == 64
     assert report["inventory_complete"] is True and report["grouping_complete"] is True
@@ -101,6 +101,8 @@ def assert_mixed_evidence(project, report, session_code):
         assert member["suite"] == group["suite"] == route
         assert member["result_status"] == "passed" and member["outcome"] == "executed"
         assert member["complete"] is True and member["attempts"] == 1
+        assert_phase_reports(member)
+        assert_group_identity(group, "ordinary-v2" if route == "ordinary" else "case-v2")
         assert member["group_id"] == group["group_id"]
         assert group["case_ids"] == [member["case_id"]]
         assert group["complete"] is True and group["stop_reason"] is None
