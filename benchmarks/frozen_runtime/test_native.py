@@ -68,10 +68,17 @@ def test_native_origin_resolution_uses_same_frozen_library_at_both_paths(project
     runtime.add_tree("install", installation)
     executable = runtime.executable(installation / "bin/owned-probe")
     runtime.finish()
-    project.module("test_native.py", f"""import subprocess
+    project.module("test_native.py", f"""import stat
+import subprocess
+from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['native'])
 def test_native():
+    preload = Path('/etc/ld.so.preload')
+    assert preload.read_bytes() == b''
+    assert stat.S_IMODE(preload.stat().st_mode) == 0o444
+    with pytest.raises(OSError):
+        preload.write_bytes(b'cannot replace controlled preload')
     for command in ({str(executable)!r}, {runtime.logical(executable)!r}):
         result = subprocess.run([command, 'argument with spaces'], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, result.stderr
