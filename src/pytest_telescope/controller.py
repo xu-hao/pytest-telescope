@@ -460,6 +460,8 @@ def run(
     from .execution import worker_count
     from .model import Unit, scoped_item
     from .project_metadata import materialize_metadata, metadata_records
+    from .tool_capture import Capture
+    from .tool_context import validate_environment
 
     started = time.monotonic()
     if not math.isfinite(timeout) or not 0.1 <= timeout <= 3600:
@@ -486,6 +488,7 @@ def run(
         requested_selectors.update(hashed)
         invocations[suite.name] = (effective, options, hashed, bool(selectors and not own))
     environment = {name: os.environ.get(name) for name in manifest.env}
+    validate_environment(manifest.env, manifest.tools)
     observations = [
         dict(
             name=suite.name,
@@ -760,12 +763,16 @@ def run(
                 inventory_state, count=max(8, len(configured)), size=64 * 1024 * 1024
             )
             with PendingRecords(store, inventory_store) as pending:
-                with sandbox.invocation(manifest.root) as pool_directory:
+                with (
+                    sandbox.invocation(manifest.root) as pool_directory,
+                    Capture(manifest, pool_directory, timeout, cancellation) as tools,
+                ):
                     pool = pool_directory / "project"
                     records = snapshot(manifest, manifest.pool, pool)
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
+                    tools.verify_project(record_map)
                     frozen_scope_hashes, metadata_hashes = {}, {}
 
                     def metadata_identity(names):
@@ -784,6 +791,7 @@ def run(
                             for entry in manifest.registry
                             if entry["file"] in collection_unit.tests
                         ]
+                        collection_tools = tools.view(collection_unit.tools)
                         inventory_key = fingerprint(
                             {
                                 **common,
@@ -795,6 +803,7 @@ def run(
                                 "metadata": metadata_identity(collection_unit.distributions),
                                 "files": collection_unit.tests,
                                 "registry": registry,
+                                "tools": collection_tools.identity,
                             }
                         )
                         inventory_path = inventory_state / (inventory_key + ".json")
@@ -838,6 +847,7 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        tool_view=tools.view(collection_unit.tools),
                                         selection_disabled=disabled,
                                         allow_unknown_selectors=True,
                                         request={
@@ -913,6 +923,7 @@ def run(
                         signature = (suite.name, item["file"], tuple(item["origins"]))
                         if signature not in scopes:
                             unit = case_unit(manifest, item, suite)
+                            tool_view = tools.view(unit.tools)
                             inputs = tuple(unit.inputs)
                             if inputs not in frozen_scope_hashes:
                                 frozen_scope_hashes[inputs] = fingerprint(
@@ -926,6 +937,7 @@ def run(
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
+                                        "tools": tool_view.identity,
                                     }
                                 ),
                             )
@@ -981,6 +993,7 @@ def run(
                             results[index] = row
                     progress["grouping_complete"] = True
                     for candidate in candidates:
+                        tools.verify(candidate["unit"].tools)
                         previous = (
                             read_record(
                                 candidate["path"],
@@ -1052,6 +1065,7 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        tool_view=tools.view(unit.tools),
                                         cancellation=cancellation,
                                         request=request,
                                     )
@@ -1148,6 +1162,7 @@ def run(
                                 groups[job["group_index"]]["stop_reason"] = "cancelled"
                                 for index, _ in job["members"]:
                                     results[index]["reason"] = blocked
+                    tools.verify(tuple(manifest.tools))
                 if blocked is None:
                     pending.publish()
                     progress["published"] = True

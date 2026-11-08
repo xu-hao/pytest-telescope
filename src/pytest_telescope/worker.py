@@ -16,7 +16,7 @@ import pytest
 
 MAX_INVENTORY = 67_108_864
 REQUEST_PATH = "/telescope/request.json"
-SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions"})
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "tools"})
 PROJECT_ROOT = Path("/project")
 
 

@@ -640,6 +640,7 @@ def execute(
     suite_cwd=".",
     suite="default",
     metadata_directory=None,
+    tool_view=None,
     cancellation=None,
     selection_disabled=False,
     allow_unknown_selectors=False,
@@ -693,6 +694,25 @@ def execute(
     request_path.chmod(0o444)
     project = Path(root).resolve()
     argv = [*_base_arguments(box, project), *_project_arguments(box, view, project)]
+    if tool_view is not None:
+        from .tool_capture import ToolView
+
+        if (
+            type(tool_view) is not ToolView
+            or tool_view.directory.parent.parent != scratch
+            or tool_view.directory.name != "tools"
+        ):
+            raise InfrastructureError("tools require an owned frozen invocation")
+        if tool_view.names and (
+            _inside(project, Path("/tools"))
+            or _inside(Path("/tools"), project)
+            or any(_inside(Path(destination), Path("/tools")) or _inside(Path("/tools"), Path(destination)) for _, destination in box.binds)
+        ):
+            raise UnsupportedCapability("tool:layout", "frozen-tool namespace overlaps the invoking environment or project")
+        for source, destination in tool_view.bindings:
+            if not source.is_relative_to(tool_view.directory) or source.is_symlink():
+                raise InfrastructureError("tool binding is outside its owned frozen material")
+            argv += ["--ro-bind", str(source), destination]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
     argv += [

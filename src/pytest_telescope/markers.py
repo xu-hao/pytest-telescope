@@ -43,6 +43,7 @@ def validate_kwargs(kwargs):
         "absent",
         "cache",
         "distributions",
+        "tools",
     }:
         raise MarkerError("unsupported telescope marker fields")
     for name, value in kwargs.items():
