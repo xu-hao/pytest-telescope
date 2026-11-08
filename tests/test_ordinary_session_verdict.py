@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -140,13 +141,27 @@ def witness(project, session_code):
     (project / "events.jsonl").unlink()
 
 
+def assert_phase_reports(member, call_outcome="passed"):
+    assert member["reports"] == [
+        {"phase": "setup", "outcome": "passed", "skip_reason": None},
+        {"phase": "call", "outcome": call_outcome, "skip_reason": None},
+        {"phase": "teardown", "outcome": "passed", "skip_reason": None},
+    ]
+
+
+def assert_group_identity(group, profile):
+    assert group["profile"] == profile
+    assert re.fullmatch(r"[0-9a-f]{64}", group["group_id"])
+    assert group["collection_skips"] == []
+
+
 def assert_member_and_group_evidence(project, report, session_code):
     """Check causal prerequisites before the intentionally failing aggregate assertion."""
     print(json.dumps({"report": report}, sort_keys=True))
     assert_session_events(project, session_code)
     failed = int(session_code == 1)
     passed = 1 - failed
-    assert report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True
     assert report["collection"]["outcome"] == "executed"
@@ -166,9 +181,11 @@ def assert_member_and_group_evidence(project, report, session_code):
     assert member["outcome"] == ("failed" if failed else "executed")
     assert member["complete"] is True
     assert member["attempts"] == 1
+    assert_phase_reports(member, "failed" if failed else "passed")
     assert member["passed"] == passed and member["failed"] == failed
     (group,) = report["groups"]
-    assert group["route"] == "ordinary" and group["profile"] == "ordinary-v1"
+    assert group["route"] == "ordinary"
+    assert_group_identity(group, "ordinary-v2")
     assert group["case_ids"] == [member["case_id"]]
     assert member["group_id"] == group["group_id"]
     assert (

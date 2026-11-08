@@ -4,7 +4,13 @@ import json
 import shutil
 
 import pytest
-from test_ordinary_session_verdict import assert_session_events, invoke, write_session
+from test_ordinary_session_verdict import (
+    assert_group_identity,
+    assert_phase_reports,
+    assert_session_events,
+    invoke,
+    write_session,
+)
 
 from pytest_telescope import controller
 
@@ -57,7 +63,7 @@ def test_empty_ordinary_selection_keeps_final_session_verdict(project, endpoint,
 
     report, code = run_endpoint(project, endpoint, arguments)
     assert read_events(project) == expected_events
-    assert report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["inventory_complete"] is True and report["grouping_complete"] is True
     assert report["collection"]["outcome"] == "executed"
     assert report["collection"]["collected"] == 1
@@ -69,8 +75,10 @@ def test_empty_ordinary_selection_keeps_final_session_verdict(project, endpoint,
     assert member["route"] == "ordinary" and member["selected"] is False
     assert member["outcome"] == "not-selected" and member["result_status"] is None
     assert member["group_id"] is None and member["complete"] is False
+    assert member["reports"] == []
     (group,) = report["groups"]
     assert group["route"] == "ordinary" and group["case_ids"] == []
+    assert_group_identity(group, "ordinary-v2")
     assert group["complete"] is True and group["stop_reason"] is None
     assert group["attempts"] == 1 and group["cache_eligible"] is False
     assert group["passed"] == group["failed"] == group["skipped"] == 0
@@ -109,6 +117,7 @@ def test_ordinary_session_infrastructure_takes_precedence_over_member_failure(
     print(json.dumps({"report": report}, sort_keys=True))
     for name, final_code in suite_codes.items():
         assert_session_events(project / name, final_code)
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["inventory_complete"] is True and report["grouping_complete"] is True
     assert report["collection"]["outcome"] == "executed"
     assert report["suites"] == ["first", "second"]
@@ -125,6 +134,8 @@ def test_ordinary_session_infrastructure_takes_precedence_over_member_failure(
         member = next(row for row in report["units"] if row["suite"] == group["suite"])
         assert member["route"] == "ordinary" and member["complete"] is True
         assert member["result_status"] == ("failed" if failed else "passed")
+        assert_phase_reports(member, "failed" if failed else "passed")
+        assert_group_identity(group, "ordinary-v2")
         assert member["outcome"] == ("failed" if failed else "executed")
         assert member["group_id"] == group["group_id"]
         assert member["attempts"] == 1
@@ -148,7 +159,7 @@ def test_ordinary_collection_failure_is_not_an_empty_or_infrastructure_run(proje
     )
     report, code = run_endpoint(project, endpoint)
     assert read_events(project) == [{"kind": "session", "incoming": 2, "final": 2}]
-    assert report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["inventory_complete"] is False and report["grouping_complete"] is False
     assert report["collection"]["outcome"] == "failed"
     assert report["collection"]["failures"]
@@ -171,6 +182,7 @@ def test_ordinary_collection_failure_is_not_an_empty_or_infrastructure_run(proje
 def test_ordinary_sessions_repeat_fresh_even_after_final_session_failure(project, session_code):
     write_session(project, session_code)
     first_events = None
+    first_group_id = None
     for invocation in (1, 2):
         report = controller.run(project, explain=True)
         print(json.dumps({"invocation": invocation, "report": report}, sort_keys=True))
@@ -180,6 +192,7 @@ def test_ordinary_sessions_repeat_fresh_even_after_final_session_failure(project
             first_events = events
         else:
             assert events == first_events * 2
+        assert report["schema"] == 4 and report["kind"] == "run"
         assert report["inventory_complete"] is True and report["grouping_complete"] is True
         assert report["cases"] == {"collected": 1, "passed": 1, "failed": 0, "skipped": 0}
         assert report["counts"]["executed"] == report["counts"]["selected"] == 1
@@ -189,9 +202,16 @@ def test_ordinary_sessions_repeat_fresh_even_after_final_session_failure(project
         (member,) = report["units"]
         assert member["route"] == "ordinary" and member["outcome"] == "executed"
         assert member["result_status"] == "passed" and member["complete"] is True
+        assert_phase_reports(member)
         assert member["attempts"] == 1
         (group,) = report["groups"]
         assert group["route"] == "ordinary" and group["complete"] is True
+        assert_group_identity(group, "ordinary-v2")
+        assert member["group_id"] == group["group_id"]
+        if first_group_id is None:
+            first_group_id = group["group_id"]
+        else:
+            assert group["group_id"] != first_group_id
         assert group["outcome"] == ("executed" if session_code == 0 else "infrastructure_error")
         assert group["attempts"] == 1 and group["cache_eligible"] is False
         assert group["case_ids"] == [member["case_id"]]
