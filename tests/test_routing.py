@@ -83,7 +83,7 @@ def test_unmarked_cases_run_as_fresh_ordinary_pytest_without_bubblewrap(
     first = controller.run(project, explain=True)
     second = controller.run(project, explain=True)
     for report in (first, second):
-        assert report["schema"] == 3 and report["kind"] == "run", report
+        assert report["schema"] == 4 and report["kind"] == "run", report
         assert report["status"] == "passed", report
         assert report["sandbox"]["required"] is False
         assert report["sandbox"]["identity"] is None
@@ -91,7 +91,7 @@ def test_unmarked_cases_run_as_fresh_ordinary_pytest_without_bubblewrap(
         assert report["route_counts"]["ordinary"]["executed"] == 4
         assert report["route_counts"]["scoped"]["selected"] == 0
         assert {row["route"] for row in report["units"]} == {"ordinary"}
-        assert [group["profile"] for group in report["groups"]] == ["ordinary-v1"]
+        assert [group["profile"] for group in report["groups"]] == ["ordinary-v2"]
         assert report["groups"][0]["cache_eligible"] is False
         assert report["inventory_complete"] is True and report["grouping_complete"] is True
     assert (project / "ran.log").read_text() == "ran\nran\n"
@@ -169,7 +169,7 @@ def test_scoped_cases_refuse_before_any_test_runs_without_usable_bubblewrap(
     monkeypatch.chdir(project)
     assert controller.main(["run"]) == 4
     output = json.loads(capsys.readouterr().out)
-    assert output["schema"] == 3 and output["kind"] == "refusal"
+    assert output["schema"] == 4 and output["kind"] == "refusal"
     assert output["status"] == "unsupported" and output["capability"] == capability
     assert not (project / "ran.log").exists()
 
@@ -222,9 +222,9 @@ def test_configured_workers_appear_in_plan_and_report(project):
         '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 3\n',
     )
     put(project, "tests/test_plain.py", "def test_plain():\n    pass\n")
-    assert make_plan(project)["execution"] == {"mode": "batch", "profile": "batch-v1", "workers": 3}
+    assert make_plan(project)["execution"] == {"mode": "batch", "profile": "batch-v2", "workers": 3}
     report = controller.run(project, workers=2)
-    assert report["execution"] == {"mode": "batch", "profile": "batch-v1", "workers": 2}
+    assert report["execution"] == {"mode": "batch", "profile": "batch-v2", "workers": 2}
 
 
 @pytest.mark.parametrize(

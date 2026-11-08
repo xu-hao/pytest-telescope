@@ -14,7 +14,20 @@ from pytest_telescope.model import DeclarationError, fingerprint, load
 
 def success():
     return {
-        "protocol": 1,
+        "protocol": 5,
+        "context_id": "d" * 64,
+        "collection_skips": [],
+        "case_results": [
+            {
+                "case_id": "a" * 64,
+                "outcome": "passed",
+                "complete": True,
+                "reports": [
+                    {"phase": phase, "outcome": "passed", "skip_reason": None}
+                    for phase in ("setup", "call", "teardown")
+                ],
+            }
+        ],
         "nonce": "b" * 32,
         "failures": [],
         "exit_code": 0,
@@ -48,10 +61,10 @@ def test_semantically_corrupt_records_are_misses(tmp_path, changes):
     path = tmp_path / "record.json"
     path.write_text(
         json.dumps(
-            {"schema": SCHEMA, "key": "key", "result": result, "checksum": fingerprint(result)}
+            {"schema": SCHEMA, "key": "d" * 64, "result": result, "checksum": fingerprint(result)}
         )
     )
-    assert read_record(path, "key") is None
+    assert read_record(path, "d" * 64) is None
 
 
 def test_protocol_environment_cannot_be_declared(tmp_path):
@@ -87,16 +100,16 @@ def test_complete_success_record_is_accepted(tmp_path):
     path = tmp_path / "record.json"
     path.write_text(
         json.dumps(
-            {"schema": SCHEMA, "key": "key", "result": result, "checksum": fingerprint(result)}
+            {"schema": SCHEMA, "key": "d" * 64, "result": result, "checksum": fingerprint(result)}
         )
     )
-    assert read_record(path, "key") == result
+    assert read_record(path, "d" * 64) == result
 
 
 def test_deep_json_record_is_a_cache_miss(tmp_path):
     path = tmp_path / "record.json"
     path.write_text("[" * 20000 + "0" + "]" * 20000)
-    assert read_record(path, "key") is None
+    assert read_record(path, "d" * 64) is None
 
 
 def test_nan_timeout_is_rejected_before_project_access(tmp_path):
@@ -115,7 +128,9 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
         calls.append(request["mode"])
         if request["mode"] == "collection":
             return dict(
-                protocol=4,
+                protocol=7,
+                context_id=request["context_id"],
+                collection_skips=[],
                 kind="collection",
                 nonce="b" * 32,
                 exit_code=0,
@@ -173,7 +188,9 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     rows = module_rows(tmp_path, [("test_unit.py", ["unit"])])
     collected = {
-        "protocol": 4,
+        "protocol": 7,
+        "context_id": "d" * 64,
+        "collection_skips": [],
         "kind": "collection",
         "nonce": "b" * 32,
         "exit_code": 0,
@@ -187,11 +204,13 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
 
     def execute(*args, request, **kwargs):
         calls.append(request["mode"])
-        return (
-            collected
-            if request["mode"] == "collection"
-            else success() | {"case_ids": [rows[0]["case_id"]]}
-        )
+        if request["mode"] == "collection":
+            return collected | {"context_id": request["context_id"]}
+        result = success()
+        result["context_id"] = request["context_id"]
+        result["case_ids"] = [rows[0]["case_id"]]
+        result["case_results"][0]["case_id"] = rows[0]["case_id"]
+        return result
 
     sandbox_double(execute, fail_outer=True)
     report = controller.run(tmp_path)

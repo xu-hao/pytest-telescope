@@ -30,7 +30,7 @@ def project(tmp_path):
 def passed(root, **kwargs):
     report = controller.run(root, explain=True, **kwargs)
     assert report["status"] == "passed", report
-    assert report["schema"] == 3 and report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["inventory_complete"] is True
     assert len(report["inventory_digest"]) == 64
     assert report["counts"]["selected"] == sum(row["selected"] for row in report["units"])
@@ -251,7 +251,7 @@ test_roots = ["test_shared.py"]
     put(project, "test_shared.py", "def test_shared(): pass\n")
     report = passed(project)
     assert report["cases"]["passed"] == 2
-    assert [group["profile"] for group in report["groups"]] == ["ordinary-v1"] * 2
+    assert [group["profile"] for group in report["groups"]] == ["ordinary-v2"] * 2
     assert len({row["case_id"] for row in report["units"]}) == 2
     assert {row["file"] for row in report["units"]} == {"test_shared.py"}
 

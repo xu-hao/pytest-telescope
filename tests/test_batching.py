@@ -48,7 +48,7 @@ def project(tmp_path):
 def run(root, *, status="passed", **options):
     report = controller.run(root, explain=True, **options)
     assert report["status"] == status, report
-    assert report["schema"] == 3 and report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True
     selected = {row["case_id"]: row for row in report["units"] if row["selected"]}
@@ -66,7 +66,7 @@ def run(root, *, status="passed", **options):
             assert selected[member]["attempts"] == group["attempts"]
     assert all(row["group_id"] is None for row in report["units"] if not row["selected"])
     if report["execution"]["mode"] == "batch":
-        assert report["execution"]["profile"] == "batch-v1"
+        assert report["execution"]["profile"] == "batch-v2"
         assert all(row["worker_seconds"] is None for row in report["units"])
     assert all("cpu_seconds" not in group for group in report["groups"])
     return report
@@ -148,9 +148,9 @@ class TestShared:
 def test_default_case_mode_and_singleton_batch_profiles_are_mutually_ineligible(project):
     configure(project, mode="case")
     simple_module(project, count=1)
-    assert make_plan(project)["execution"] == {"mode": "case", "profile": "case-v1", "workers": 1}
+    assert make_plan(project)["execution"] == {"mode": "case", "profile": "case-v2", "workers": 1}
     first = run(project)
-    assert first["execution"] == {"mode": "case", "profile": "case-v1", "workers": 1}
+    assert first["execution"] == {"mode": "case", "profile": "case-v2", "workers": 1}
     assert len(first["groups"]) == 1
     batch = run(project, execution_mode="batch")
     assert batch["counts"]["executed"] == 1 and batch["counts"]["reused"] == 0
@@ -187,7 +187,7 @@ def test_right():
     cold = run(project)
     # The mixed file is collected by an ordinary session that selects no ordinary case.
     ordinary = [group for group in cold["groups"] if group["route"] == "ordinary"]
-    assert [(group["case_ids"], group["profile"]) for group in ordinary] == [([], "ordinary-v1")]
+    assert [(group["case_ids"], group["profile"]) for group in ordinary] == [([], "ordinary-v2")]
     scoped = [group for group in cold["groups"] if group["route"] == "scoped"]
     assert sorted(len(group["case_ids"]) for group in scoped) == [1, 2]
     assert run(project)["counts"]["reused"] == 3
@@ -459,12 +459,12 @@ def test_cli_execution_mode_and_api_validation(project, monkeypatch, capsys):
     monkeypatch.chdir(project)
     assert controller.main(["run", "--execution-mode", "batch"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["schema"] == 3
-    assert report["execution"] == {"mode": "batch", "profile": "batch-v1", "workers": 1}
+    assert report["schema"] == 4
+    assert report["execution"] == {"mode": "batch", "profile": "batch-v2", "workers": 1}
     assert len(report["groups"]) == 1 and report["counts"]["executed"] == 2
     assert controller.main(["run", "--execution-mode", "invalid"]) == 4
     refused = json.loads(capsys.readouterr().out)
-    assert refused["schema"] == 3 and refused["status"] == "declaration_error"
+    assert refused["schema"] == 4 and refused["status"] == "declaration_error"
     with pytest.raises(DeclarationError):
         controller.run(project, execution_mode="invalid")
 
