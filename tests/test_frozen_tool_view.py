@@ -1,7 +1,10 @@
 """Required real-Bubblewrap controls for frozen data views and consuming identities."""
 
 import json
+import stat
 import pytest
+
+from pytest_telescope import tool_capture
 
 from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, canonical, digest, entries, put
 
@@ -11,16 +14,34 @@ def project(tmp_path):
     return ToolProject(tmp_path / "project", tmp_path / "installed")
 
 
-def test_sparse_original_symlink_uses_closed_owned_parent_with_no_live_siblings(project):
+@pytest.mark.parametrize("source_mode", [
+    pytest.param(0o755, id="source0755-to0555"),
+    pytest.param(0o750, id="source0750-to0550"),
+])
+def test_sparse_original_symlink_uses_closed_owned_parent_with_no_live_siblings(project, source_mode, monkeypatch):
     source = project.add_tree("frontend", preserve=True, files={
         "bin/real.txt": "pinned", "bin/unselected.txt": "live sibling",
     })
+    (source / "bin").chmod(source_mode)
     (source / "bin/alias.txt").symlink_to("real.txt")
     project.refresh("frontend")
     root = project.documents["frontend"]["roots"][0]
     root["coverage"] = "files"
     root["entries"] = [row for row in root["entries"] if row["path"] != "bin/unselected.txt"]
     project.save("frontend")
+    original_view = tool_capture.Capture.view
+    observed_modes = []
+
+    def view(self, names):
+        result = original_view(self, names)
+        if "frontend" in result.names:
+            bindings = {destination: frozen for frozen, destination in result.bindings}
+            logical = bindings["/tools/frontend/install"] / "bin"
+            original = bindings[str(source / "bin")]
+            observed_modes.append((stat.S_IMODE(logical.stat().st_mode), stat.S_IMODE(original.stat().st_mode)))
+        return result
+
+    monkeypatch.setattr(tool_capture.Capture, "view", view)
     project.module("test_sparse_links.py", f"""import os
 import stat
 from pathlib import Path
@@ -33,13 +54,20 @@ def test_links():
         assert stat.S_ISLNK(link.lstat().st_mode)
         assert os.readlink(link) == 'real.txt'
         assert link.read_text() == 'pinned'
-        assert stat.S_IMODE(directory.stat().st_mode) == 0o555
+        assert stat.S_IMODE(directory.stat().st_mode) == {source_mode & 0o555}
         with pytest.raises(OSError):
             (directory / 'new.txt').write_text('not writable')
 """)
-    assert_counts(project.run(), executed=1)
+    report = project.run()
+    expected_modes = (source_mode & 0o555, source_mode & 0o555)
+    assert observed_modes and all(row == expected_modes for row in observed_modes), {
+        "source_mode": source_mode, "expected": expected_modes, "observed": observed_modes,
+    }
+    assert_counts(report, executed=1)
     assert (source / "bin/unselected.txt").read_text() == "live sibling"
     assert (source / "bin/alias.txt").is_symlink()
+    assert (source / "bin").stat().st_mode & 0o777 == source_mode
+    assert_counts(project.run(), reused=1)
 
 
 @pytest.mark.parametrize("absolute", [False, True])

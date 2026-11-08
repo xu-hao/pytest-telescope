@@ -47,6 +47,15 @@ Host-dependent runtime compatibility checks run separately under
 outside the default functional gate. The frozen-tool declaration, data-view, identity
 and injected lifecycle controls remain required functional tests.
 
+System-composition controls use an owned synthetic baseline directory through the
+production admission seam. They retain actual controller handles while real Bubblewrap
+mount setup and the startup guard run, then attempt to reopen those handles from the
+isolated worker. They also cover source swaps, exact control slots and metadata, private
+inventory, cleanup before cache publication, and guard refusal before worker imports.
+These checks never inventory real host `/etc` or read credential contents. A passed
+functional source-snapshot check qualifies those mechanisms for that candidate; it does
+not qualify an installed wheel or an ambient native/browser runtime.
+
 For documentation alone:
 
 ```sh

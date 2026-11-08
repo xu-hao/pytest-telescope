@@ -194,7 +194,7 @@ def test_second():
             yield descriptor
 
     monkeypatch.setattr(tool_capture, "_parent", parent)
-    report = project.run(structural_files=["tests/test_second.py"])
+    report = project.run(structural_files={"default": ["tests/test_second.py"]})
     assert_counts(report, executed=1)
     assert not forbidden
     assert (second / "value.txt").read_text() == "second"

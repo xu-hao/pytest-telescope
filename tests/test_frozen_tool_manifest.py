@@ -96,14 +96,16 @@ def test_tree_mode_cannot_snapshot_a_broad_system_or_home_root(project, source):
 
 
 @pytest.mark.parametrize("special", ["fifo", "socket"])
-def test_special_file_is_refused_without_opening_or_waiting_for_it(project, special):
+def test_special_file_is_refused_without_opening_or_waiting_for_it(project, special, monkeypatch):
     path = project.external / "first/value.txt"
     path.unlink()
     if special == "fifo":
         os.mkfifo(path)
     else:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.bind(str(path))
+        with monkeypatch.context() as owned_directory:
+            owned_directory.chdir(path.parent)
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+                sock.bind(path.name)
     report = project.run()
     assert report["status"] in {"declaration_error", "unsupported"}, report
     assert not cache_bytes(project.root)
