@@ -62,13 +62,26 @@ For Git consumers, forwarding `GIT_*`, `SSH_*`, `LD_*`, `DYLD_*`, `HOME`, `PATH`
 execution and is invalid; Git uses the C locale and UTC. Non-Git forwarding is unchanged.
 This is not a general tool snapshot facility.
 
-Capture bounds are 100,000 visible tracked paths and 100,000 reachable objects,
-200,000 walked metadata entries, 4,096 selected refs, 64 MiB per source, object or
-metadata file and 2 GiB aggregate Git material including staging. Paths and link
-targets are limited to 4,096 UTF-8 bytes and paths to 64 components. Git command output
-is bounded at 64 MiB; each command has the lesser of the invocation timeout and 30
-seconds, and complete capture has the lesser of the invocation timeout and 120 seconds.
-Limits refuse rather than truncating history. The runtime bounds above are separate.
+Capture bounds are 100,000 visible tracked paths and 500,000 reachable objects,
+200,000 walked filesystem and metadata entries, 4,096 selected refs, 64 MiB per
+individual source file, Git object or metadata file, and 2 GiB of simultaneously owned
+Git capture storage. The latter counts staging, intermediate copies, reachable-pack
+generation peak and the final snapshot and source material; it is not a sum of the
+uncompressed sizes of historical objects and does not bound all concurrent case views.
+The separately bounded runtime closure is described above. Caller jobs remain responsible
+for actual CPU, memory, process and scratch limits and accounting.
+
+Reachable history is retained in an owned reachable-only compact pack. Compound pack
+files are streamed and bounded by the 2 GiB physical aggregate rather than the 64 MiB
+individual object limit. Copying, hashing and current-tree object bodies are streamed;
+each body remains bounded by 64 MiB, and no pack or body stream may exceed its applicable
+physical aggregate or per-object bound. The SHA-1 object listing is bounded to 20.5 MiB
+(500,000 records of at most 41 bytes). All other command output is bounded at 64 MiB.
+Complete object and connectivity verification remain required. Paths and link targets
+are limited to 4,096 UTF-8 bytes and paths to 64 components. Each command has the lesser
+of the invocation timeout and 30 seconds; each complete capture attempt has the lesser
+of the invocation timeout and 120 seconds. Limits refuse rather than truncating history.
+The exact owned pack representation is deterministic or included in the identity.
 
 Capture and revalidation refuse unavailable, changing, corrupt, partial or unsupported
 contexts with bounded evidence and at most two fresh capture attempts. Diagnostics do
