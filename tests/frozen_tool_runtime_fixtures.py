@@ -27,7 +27,7 @@ PAYLOADS = Path(__file__).with_name("frozen_tool_payloads")
 MAX_FIXTURE_OUTPUT = 1024 * 1024
 
 
-def owned_command(command, directory, label, *, timeout=120):
+def owned_command(command, directory, label, *, timeout=120, accepted=(0,)):
     """Run one owned process group, retain one bounded log, and always reap it."""
     scratch = directory / "setup-scratch"
     scratch.mkdir(exist_ok=True)
@@ -82,12 +82,12 @@ def owned_command(command, directory, label, *, timeout=120):
         process.stdout.close()
         with log_path.open("xb") as log:
             log.write(output)
-    if failure is not None or process.returncode:
+    if failure is not None or process.returncode not in accepted:
         pytest.fail(f"owned fixture {label} failed ({failure or process.returncode}); log {log_path.name}")
     return bytes(output)
 
 
-def native_install(directory):
+def native_install(directory, *, alternate=False):
     """Compile only these two owned sources with the already-installed compiler."""
     directory.mkdir()
     install = directory / "installation"
@@ -99,10 +99,20 @@ def native_install(directory):
         "/usr/bin/cc", "-fPIC", "-shared", "-Wl,-soname,libownedprobe.so",
         "-o", str(install / "lib/libownedprobe.so"), str(install / "source/library.c"),
     ], directory, "compile-library")
+    runpath = "$ORIGIN/../lib"
+    if alternate:
+        alternative = directory / "unselected-library"
+        alternative.mkdir()
+        put(alternative, "library.c", 'const char *owned_answer(void) { return "unselected"; }\n')
+        owned_command([
+            "/usr/bin/cc", "-fPIC", "-shared", "-Wl,-soname,libownedprobe.so",
+            "-o", str(alternative / "libownedprobe.so"), str(alternative / "library.c"),
+        ], directory, "compile-alternative")
+        runpath += ":" + str(alternative)
     owned_command([
         "/usr/bin/cc", "-o", str(install / "bin/owned-probe"),
         str(install / "source/native.c"), "-L" + str(install / "lib"),
-        "-lownedprobe", "-Wl,-rpath,$ORIGIN/../lib",
+        "-lownedprobe", "-Wl,-rpath," + runpath,
     ], directory, "compile-program")
     return install
 
