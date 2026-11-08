@@ -1,5 +1,8 @@
 # Marker and project reference
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 Declare inputs beside tests, then use defaults and bundles in `pyproject.toml` to share
 declarations. If you're setting up pytest-telescope for the first time, start with the
 [quickstart](index.md). The [execution contract](bubblewrap.md) describes the sandbox,
@@ -21,10 +24,11 @@ def test_red(): ...
 | `inputs=["path", "data/*.json"]` | Explicit project paths, directories, and globs. Makes the case scoped, including when empty. |
 | `bundles=["pricing"]` | Reusable project declarations. Also makes the case scoped, including when empty. |
 | `distributions=["core"]` | Selected local distribution metadata. Also makes the case scoped, including when empty. |
+| `env=["OPTIONAL_FEATURE"]` | Forward and key named environment variables for this scope. Also makes the case scoped, including when empty. |
 | `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not make a case scoped. |
 | `cache=False` | Never reuse or record success for this case; does not make a case scoped. |
 
-Without an `inputs`, `bundles` or `distributions` field on or above it, a case is
+Without an `inputs`, `bundles`, `distributions` or `env` field on or above it, a case is
 ordinary: it runs in an ordinary pytest session every time, with no sandbox and no cache.
 Project defaults alone do not make it scoped. A scoped case sees exactly the union of its
 inherited declarations, defaults, containing test source and configuration, read-only, in
@@ -52,9 +56,26 @@ class TestParsing:
 
 `test_valid` can read the application bundle, `data/common.json`, `data/valid.json`,
 project defaults, its containing test file and configuration. Module, class, function
-and parameter markers add together; a marker cannot remove inherited files. Any inherited
+and parameter markers add together; a marker cannot remove inherited files or environment names. Any inherited
 `cache=False` disables caching. A module-level `bundles` field scopes all its cases, even
 functions with no individual marker, and keeps the module's import off the host.
+
+Environment names compose in the same places. For example:
+
+```python
+pytestmark = pytest.mark.telescope(env=["MODULE_FEATURE"])
+
+@pytest.mark.telescope(env=["CLASS_FEATURE"])
+class TestVariants:
+    @pytest.mark.telescope(env=["FUNCTION_FEATURE"])
+    @pytest.mark.parametrize("value", [
+        pytest.param("a", marks=pytest.mark.telescope(env=["PARAM_FEATURE"]))
+    ])
+    def test_variant(self, value): ...
+```
+
+The parameter receives all four names plus its defaults, bundles and global names.
+Another case does not receive `PARAM_FEATURE` unless it declares or inherits it.
 
 Keep shared import-time and parametrization dependencies in each consumer's scope.
 Collection of wholly scoped modules runs with the union of their potential scopes; an
@@ -75,18 +96,20 @@ env = ["FEATURE_VARIANT"]
 
 [tool.pytest_telescope.defaults]
 inputs = ["tests/conftest.py", "app/__init__.py"]
+env = ["SHARED_FEATURE"]
 
 [tool.pytest_telescope.bundles.application]
 inputs = ["app/parser.py", "tests/helpers.py"]
 absent = ["app/local_override.json"]
+env = ["PARSER_FEATURE"]
 ```
 
 | Table or field | Meaning |
 | --- | --- |
 | `test_roots` | Static test-source discovery roots; default `["."]`. Real pytest inventory includes new files and cases before accepting hits. |
 | `env` | Explicit host environment names to forward into scoped sandboxes and key, including presence/absence. Reserved runtime/protocol names are rejected. Ordinary sessions inherit the whole environment. |
-| `defaults` | Shared `inputs`, `bundles`, `absent`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
-| `bundles.NAME` | Reusable `inputs`, nested `bundles`, and `absent` lists. Cycles and unknown names are errors. |
+| `defaults` | Shared `inputs`, `bundles`, `distributions`, `env`, `absent`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
+| `bundles.NAME` | Reusable `inputs`, nested `bundles`, `distributions`, `env`, and `absent` lists. Cycles and unknown names are errors. |
 
 Containing test source and configuration are automatic inputs. Scoped cases explicitly
 declare application modules, package initializers, conftest files, helpers, and resources.
@@ -108,6 +131,16 @@ pytest-telescope never walks or hashes undeclared project files.
 The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
 [Independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
 Only named user variables are forwarded; runtime-controlled variables remain reserved.
+Each `env` is a literal list of at most 4,096 nonempty identifiers of at most 4,096
+characters each. `PYTHONPATH`, `PYTHONHOME`, `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`,
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, and names beginning `TELESCOPE_` are reserved.
+The invoking environment is captured once. Absence, an empty value and a nonempty value
+are distinct; a change invalidates only consumers of that name, except that top-level
+`env` names apply to every scoped case. Defaults add names to scoped cases but do not
+scope an ordinary case. List any import, parametrization and collection dependency in
+every consumer's shared declarations. The scoped discovery union is never an execution
+environment. No raw values are recorded in summaries, worker requests, cache records or
+normal diagnostic logs. Ordinary sessions retain the inherited environment.
 
 ## Select and control execution
 
@@ -194,7 +227,7 @@ override the configuration without editing it. `plan` reports the configured mod
 not dynamically collected group membership. Each group occupies one worker slot. Group
 records are atomic: failures, partial runs or corrupted records cause the whole selected
 group to rerun. See [batching](batching.md) for ordering, 4,096-member limits and
-lifecycle rules, and [result schema 3](result-schema.md) for member/group outcomes,
+lifecycle rules, and [result schema 4](result-schema.md) for member/group outcomes,
 partial pytest stops and timing for shared workers.
 
 ## Host tools and child interpreters
