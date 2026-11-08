@@ -1,7 +1,7 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Schema 4, per-scope environment inputs, frozen Git and frozen tools are unreleased
+> development interfaces. Published version 0.1.0a6 does not provide them.
 
 Tests without a scope declaration run as ordinary pytest every time. Tests with a
 declaration run in a Bubblewrap sandbox and can reuse a previous successful result.
@@ -92,7 +92,7 @@ unchanged. The snapshot does not claim full host-system, locale, NSS or network 
 
 ## Which route a case takes
 
-A case is *scoped* when it has an `inputs`, `bundles`, `distributions`, `env` or `git` field in its
+A case is *scoped* when it has an `inputs`, `bundles`, `distributions`, `env`, `tools` or `git` field in its
 literal declarations. Declarations inherit from module `pytestmark`,
 class, function and `pytest.param(..., marks=...)` levels, and a literal empty list still
 counts. Every other case is *ordinary*.
@@ -103,6 +103,7 @@ counts. Every other case is *ordinary*.
 | `@pytest.mark.telescope(cache=False)` | ordinary | never |
 | `@pytest.mark.telescope(absent=["local.json"])` | ordinary | never |
 | `@pytest.mark.telescope(inputs=[])` | scoped | yes |
+| `@pytest.mark.telescope(tools=[])` | scoped | yes |
 | `@pytest.mark.telescope(env=[])` | scoped | yes |
 | `@pytest.mark.telescope(inputs=[], cache=False)` | scoped | never |
 | module `pytestmark = pytest.mark.telescope(bundles=["shared"])` | scoped (every case in the module) | yes |
@@ -144,6 +145,11 @@ invocation. Inside, the filesystem looks like this:
 | `/dev` | Minimal device nodes | read-only, except `/dev/shm` |
 | `/tmp`, `/dev/shm` | Private, empty, discarded scratch | writable |
 | Everything else, such as `/home` outside the environment and `/run` | Absent | read-only |
+
+Explicit frozen Git and tool declarations add only their documented views. A selected
+native tool may also replace library-search directories with the narrower frozen view
+[below](#frozen-tools-and-runtime-files-development-contract); without it the table is
+unchanged.
 
 An undeclared project file does not exist at `/project/...` or at its host path.
 `open`, `stat`, `os.path.exists`, native code and subprocesses all see it as absent.
@@ -191,12 +197,74 @@ discovery receives the potential collection union; execution receives only its o
 effective names.
 Suite plugins are loaded explicitly; autoload remains disabled.
 
+Selected tools may prepend their readonly command directory to the controlled PATH.
+Conflicting effective environment declarations refuse rather than being overwritten;
+the [tool reference](bubblewrap-api.md#scripts-and-pinned-command-lookup) defines this
+scope-local rule. Nonconsumers retain the environment behavior above.
+
 Bubblewrap creates a user namespace, a mount namespace and a PID namespace. The PID
 namespace is required for a correct view: the host `/proc` would expose other processes'
 root and working directories, which are paths into the host filesystem. The pytest worker
 is PID 1 of its namespace, so it adopts and reaps orphaned descendants; any descendant
 still alive after teardown makes the result unusable, and every remaining process ends
 with the worker. No other namespace is created.
+
+## Frozen tools and runtime files (development contract)
+
+`tools=["frontend"]` opts a case into an explicitly registered `frozen-tool-v1` closure.
+The [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+defines the exact records. The controller captures and verifies the declared existing
+files into owned immutable material. It never binds the live installation, hard-links
+source files, installs a runtime or infers arbitrary program dependencies.
+
+| Selected view | Contents |
+| --- | --- |
+| `/tools/NAME/ROOT` | Only the selected root's pinned files, directories and unchanged safe links. |
+| Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. |
+| `/tools/.commands/SCOPE_DIGEST` | Readonly command-name symlinks to exact pinned executables; first in the controlled PATH. |
+| Declared native library-search directories | Closed readonly trees synthesized from the selected runtime entries; all other host siblings are absent. |
+
+Source modes bind identity; frozen files/directories use the source rwx mode with write
+bits removed. Writes to any of these views fail. A link remains a link with the exact
+declared text: a project `node_modules` link is not replaced by a directory. Logical and
+original aliases must resolve only to pinned entries of the same closure. A selected
+project-link binding admits traversal only through that exact link/target. Omission
+keeps the existing directory-link refusal and adds no external view.
+
+Narrow original aliases may live below `/tmp` or `/dev/shm`; their undeclared live parent
+contents are never exposed and the scratch roots remain private. Controller, project,
+device and protocol paths stay protected. Conflicting selected mappings refuse instead
+of depending on mount order. All source content and mode checks use bounded no-follow
+capture and revalidation; an immutable owned view is verified before it is used.
+
+The native profile supports declared Linux x86_64 glibc ELF loaders/libraries and simple
+pinned script interpreters. An unchanged `#!/usr/bin/env node` executes the actual pinned
+env and Node through kernel shebang handling and the explicit command map. No script,
+argument, assertion, exit code, signal or child transport is rewritten. Its dynamic
+loader uses actual pinned cache and loader bytes; declared search directories exclude
+unbound host libraries, including competing hardware-capability candidates. Unsupported
+or ambiguous lookup refuses. The selected closure must also include the invoking Python
+worker's native/runtime needs; a preflight failure occurs before project imports.
+
+Browser executables, driver/bootstrap scripts, subprocesses and resources follow these
+same records. A browser name or version is not sufficient. Its actual executable must
+fit the bounded profile; changing a full browser to a different headless executable is
+not a preservation of the caller's command. Already-installed Python package/data and
+dist-info records similarly preserve real import and metadata paths, including in
+`sys.executable -I` children. Neither feature constructs an interpreter environment.
+
+Tool selection does not remove packages already present in the baseline environment
+from nonconsumers. It adds frozen identity for explicitly claimed files. A case without
+the tool gets no new `/tools` entries or external aliases and retains the baseline
+system view. Only consumers key the selected manifest/lock bytes, mappings, actual file
+bytes/modes/link text, executable/runtime graph, command map and closed loader view.
+The existing invoking-interpreter and installed-distribution identity remains in every
+scoped key; names and versions alone do not identify claimed mutable runtime files.
+
+Capture, retry and terminal cleanup obey the
+[bounded lifecycle](execution-contract.md#frozen-tool-capture-and-reuse). A failure never
+widens the view or causes ordinary replay. CPU, memory, process and scratch limits remain
+the caller's responsibility; network policy is unchanged.
 
 ## What the sandbox does not do
 
@@ -234,8 +302,9 @@ implementation, the sandbox policy version, the
 interpreter identity (implementation, full version and build string, ABI and platform),
 the sorted names and versions of every distribution visible to the isolated
 interpreter, and how the environment reaches into the project. Installing, upgrading or
-removing a package therefore invalidates scoped results. The host system directories and
-the host network are not part of the key.
+removing a package therefore invalidates scoped results. Only explicitly selected frozen
+Git/tool runtime files add host-tool byte identity; the remaining host system directories
+and the host network are not part of the key.
 
 How the environment reaches into the project is recorded relative to the project: the
 `.pth` files of the interpreter's site directories and the modules they load at startup

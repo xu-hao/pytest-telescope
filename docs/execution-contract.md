@@ -1,7 +1,7 @@
 # Declarations, inventory and reuse
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Schema 4, per-scope environment inputs, frozen Git and frozen tools are unreleased
+> development interfaces. Published version 0.1.0a6 does not provide them.
 
 This page explains how pytest-telescope reads declarations, discovers cases and decides
 whether to reuse their results. The [execution contract](bubblewrap.md) describes which
@@ -37,7 +37,7 @@ def test_variant(value): ...
 ```
 
 Module/class/function/parameter declarations are additive. A literal `inputs`,
-`bundles`, `distributions` or `env` field makes a case scoped, including an empty list.
+`bundles`, `distributions`, `env` or `tools` field makes a case scoped, including an empty list.
 The development declaration `git="frozen-checkout-v1"` also scopes its case. Its
 effective scope is the union of those inherited declarations, project defaults,
 containing test source and configuration source. A policy-only `cache=False` marker or
@@ -51,8 +51,9 @@ undeclared project files for it.
 Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
 state (`.pytest-telescope` and an explicitly selected in-project cache directory),
 pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environments
-(`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks,
-special files and unsupported paths are rejected.
+(`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks
+require an exact selected frozen-tool binding; all other directory symlinks, special
+files and unsupported paths are rejected.
 
 Put test roots and environment settings in `[tool.pytest_telescope]`, shared settings in
 `[tool.pytest_telescope.defaults]`, and reusable declarations in
@@ -116,6 +117,14 @@ Result keys cover each scoped case's actual node identity, effective literal dec
 
 Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts by route, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static preview and explicitly does not claim real collected-case enumeration.
 
+Implicit structural files are collection boundaries, not explicit requests for a case.
+A validated collection establishes file coverage independently of collected-case aliases.
+An explicit file target can therefore yield zero cases, including when collection skips
+the file; retain actual collection skip evidence without inventing a selected case. An
+explicit `file::node` selector must match a genuinely collected alias: coverage of its file
+alone does not satisfy it. This applies to ordinary and scoped collection and to reused
+scoped inventory.
+
 ### Frozen Git identity (development contract)
 
 The explicit `git="frozen-checkout-v1"` declaration adds the verified frozen Git
@@ -134,6 +143,75 @@ failure after bounded retries; they never create reusable success or trigger ord
 fallback. Pending records become eligible only after owned cleanup succeeds; a terminal
 cleanup failure suppresses all new pending records while preserving prior valid records.
 See the [view and state limits](bubblewrap.md#frozen-git-checkout-development-contract).
+
+## Frozen tool capture and reuse
+
+Literal `tools` names compose through the same inheritance, default and bundle rules as
+other scope inputs. Registration/defaults alone do not change an ordinary route. Only
+tools needed by structurally possible consumers have their manifests and external
+closure prepared. The [versioned manifest](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+lists exact supported bytes, types, source modes, link text and runtime relations.
+
+Scoped discovery may receive the union of potential tools for its files, including a
+compatible union of command maps and closed library trees. No case body executes there.
+Each case or identical-scope batch receives only its complete effective closure, before
+imports and recollection. Missing execution dependencies cannot be borrowed from another
+case. Tool names and identities participate in [batch equality](batching.md#exact-scope-and-deterministic-membership).
+Conflicting aliases, loader mappings or command names refuse the union; there is no
+arbitrary winner or relaxed execution view.
+
+Consumer identity includes selected manifest bytes, automatically included lock files
+and project-link relations, coverage mode, source/logical mappings, normalized entry
+records, actual content/modes/link texts, executable and Python runtime relations,
+loader/cache/search trees and command lookup. The collection identity uses its required
+union; case/group keys do not inherit unrelated external bytes from that union. Updating
+a valid manifest and its matching installation refreshes the affected consumer. A stale
+pin refuses. An unrelated narrow case remains reusable when only another tool's external
+contents or manifest changes; editing project configuration retains its existing broader
+invalidation. A source mutation during an invocation is never accepted as a new context.
+
+Capture runs under the invocation's stable cache lock and owned staging. It performs
+bounded no-follow entry reads, before/after source checks, a complete final source-record
+pass and independent staged-content verification. It never hard-links mutable source
+files. Immutable owned material may be shared between its views. Recheck relevant source,
+manifest, lock and frozen records before accepting inventory/result hits, before execution,
+and before new record publication. Corrupt or partial owned material is infrastructure
+failure, not a valid snapshot. Old valid cache records survive unsuccessful new work.
+
+| Frozen-tool bound | Maximum |
+| --- | --- |
+| Registered/referenced tools | 64 |
+| Source anchors per tool | 32 |
+| Entries / traversal visits across selected tools | 100,000 / 200,000 |
+| Path components / UTF-8 path or link bytes / link hops | 64 / 4,096 / 32 |
+| Individual file / bytes per tool / aggregate tool bytes | 512 MiB / 2 GiB / 4 GiB |
+| Manifest encoding per tool / aggregate manifest bytes | 16 MiB / 32 MiB |
+| Executable, library, resource and subprocess relations per tool | 4,096 |
+| Declared installed Python distributions | 64 |
+| Command names per tool / selected scope | 256 / 1,024 |
+| Native loader search-directory declarations per tool | 64 |
+
+These tool-file bounds are separate from the project snapshot's source-file bound.
+Hash/copy uses bounded chunks; a large admitted executable is not read into one buffer.
+Each capture attempt has the lesser of the configured session timeout and 120 seconds,
+with cancellation checks during traversal and hashing. There are at most two attempts,
+each with fresh exclusive staging. Bounds refuse explicitly without truncating entries
+or installing a smaller/different executable.
+
+Missing declared inputs or malformed declarations are declaration errors. Unsupported
+versions/layouts, exceeded bounds and incompatible declared pins use `tool:frozen-v1`,
+`tool:layout`, `tool:bounds` and `tool:identity` respectively. Observed source mutation,
+I/O failure or corrupt owned capture gets bounded infrastructure recovery. Cleanup
+uncertainty is terminal: stop new work, drain owned children, preserve existing records
+and publish none of the invocation's pending successes. Remove only owned staging/views;
+restore directory traversal/write permissions only on verified owned material after
+views finish, never on source paths or symlink targets. A refusal does not authorize an
+ordinary replay or prove earlier ordinary cases never ran.
+
+Public evidence identifies tool names and failure categories, never external source
+paths, file contents, secret values or raw tool stderr. The cache and worker protocol
+retain opaque context identities, not raw tool-source inventories. The invoking runtime,
+normal phase/lifecycle validation and output/session/cardinality limits remain in force.
 
 ## Bounds and performance
 
@@ -185,8 +263,8 @@ Paths are project-relative. Inputs accept explicit files, directories and globs.
 Missing declared inputs, unknown fields/bundles, cyclic bundle references, malformed
 values and paths escaping the project are errors. Expected-absent paths must be
 absent in the source project and participate in identity. Relative leaf symlinks
-require their destination in the effective scope; absolute links and directory
-symlinks are unsupported. Explicit hidden glob components are supported.
+require their destination in the effective scope; other links require the exact
+selected frozen-tool binding described above. Explicit hidden glob components are supported.
 
 The default suite keeps pytest configuration in this pyproject's `[tool.pytest.ini_options]`.
 [Independent suite declarations](scoped-execution.md) also support explicit

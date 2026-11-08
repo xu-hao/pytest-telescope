@@ -1,7 +1,7 @@
 # Optional identical-scope batches
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Schema 4, per-scope environment inputs, frozen Git and frozen tools are unreleased
+> development interfaces. Published version 0.1.0a6 does not provide them.
 
 Batch mode lets scoped tests share a pytest session and its fixtures. It can reduce
 startup and fixture setup time when tests in the same module need exactly the same
@@ -39,6 +39,11 @@ exactly equal readable files, declared absence, generated metadata, effective en
 names and captured presence/value context, and cache policy.
 The development frozen Git declaration and its context also participate in equality;
 Git consumers and nonconsumers remain in separate groups.
+Frozen tools likewise require exactly equal selected names and complete closure identity:
+manifest/lock records, bytes/modes/links, original and logical aliases, command mappings,
+Python/executable runtime relations and closed native-loader views. Different tool sets
+or contents never share a batch. Collection's compatible union is discovery-only;
+execution and recollection receive the group's own complete tools.
 File comparisons include contents and supported modes. Two declarations can be written
 differently and still produce the same scope after expansion. Cases with different
 scopes stay in separate batches; pytest-telescope does not combine their inputs.

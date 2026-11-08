@@ -1,7 +1,7 @@
 # pytest-telescope
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Schema 4, per-scope environment inputs, frozen Git and frozen tools are unreleased
+> development interfaces. Published version 0.1.0a6 does not provide them.
 
 pytest-telescope caches pytest results so repeated checks spend less time running tests
 whose inputs haven't changed. If coding agents are adding changes to a merge queue,
@@ -103,7 +103,7 @@ conftest files, helpers and data need declarations.
 This makes the test *scoped*: it sees the declared project files read-only, plus the
 installed environment and system directories. Undeclared project files are absent.
 Writes belong in private scratch, for example through pytest's `tmp_path` fixture.
-Tests without an `inputs`, `bundles`, `distributions` or `env` declaration remain ordinary,
+Tests without an `inputs`, `bundles`, `distributions`, `env`, `tools` or `git` declaration remain ordinary,
 including other tests in the same file.
 
 ### 4. Run the test twice
@@ -177,6 +177,30 @@ A development-only `git="frozen-checkout-v1"` declaration is being added for cas
 that require a frozen checkout and history. It is not part of the published 0.1.0a6
 package. See the [Git view contract](bubblewrap.md#frozen-git-checkout-development-contract)
 for its precise supported states and limits.
+
+## Opt into frozen external tools (development contract)
+
+For a candidate implementing frozen tools, register an existing installation manifest
+and add the selection to its consuming test:
+
+```toml
+[tool.pytest_telescope.tools.frontend]
+format = "frozen-tool-v1"
+manifest = "tool-locks/frontend.json"
+```
+
+```python
+@pytest.mark.telescope(tools=["frontend"])
+```
+
+The manifest pins the actual installation bytes and required runtime, command, link and
+lock relations. The test keeps its existing body and subprocess calls. Selecting it
+exposes only the frozen closure and binds its identity to those consumers. An unchanged
+package version or a read-only live mount is insufficient. Start with the
+[complete data-only example](bubblewrap-api.md#a-complete-data-only-example), then use
+the [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+for native, browser or installed Python closures. Unsupported layouts refuse; this
+feature does not install tools. Published 0.1.0a6 does not implement this opt-in.
 
 ## Use it in CI
 

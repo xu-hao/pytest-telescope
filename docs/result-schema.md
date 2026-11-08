@@ -1,7 +1,7 @@
 # Run results and explicit refusals
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Schema 4, per-scope environment inputs, frozen Git and frozen tools are unreleased
+> development interfaces. Published version 0.1.0a6 does not provide them.
 
 This reference describes result schema 4. Start with the practical
 [quickstart](index.md). The [API and configuration reference](bubblewrap-api.md) lists the
@@ -54,6 +54,10 @@ succeeds. A row not collected has `outcome: "not-started"`, `collected: null`, a
 inventory digest. `collection.collected` counts unique cases, and `collection.worker_seconds`
 sums scoped collection time only. Known files do
 not establish a complete case inventory: dynamic and parametrized items require pytest.
+A validated structural file can collect no cases, including after a collection skip;
+implicit files and explicit file targets do not invent selected cases. An explicit node
+selector still requires a genuinely collected alias, even when its file is covered. File
+coverage and collection skip evidence remain separate from case inventory and selection.
 With `structural_files`, these are the effective exact file lists. Files outside them
 produce neither case rows nor `not-selected` counts; a complete inventory does not claim
 coverage of those files. Adding a new file outside an explicit list does not add it to
@@ -249,6 +253,17 @@ never executed reports or passes. The existing nonce and exact request identity 
 worker response to its invocation.
 
 ## Refusal envelope
+
+Frozen-tool context binds the existing opaque case/group and inventory identities; it
+does not add raw source-path, runtime-file or environment-value maps to this schema.
+Tool names and project-relative manifest paths may appear in the static plan. Tool
+refusals use `tool:frozen-v1`, `tool:layout`, `tool:bounds` or `tool:identity` as listed in
+the [capability reference](bubblewrap-api.md#capability-codes). Missing/invalid inputs
+remain declaration errors; observed mutation or failed owned capture is infrastructure
+failure. A late failure retains available accounting and cannot make an incomplete
+group reusable. Cleanup uncertainty prevents all new pending publication and preserves
+previously valid records. Diagnostics never include external source paths, file contents
+or raw tool output.
 
 If no complete inventory can be established for a typed refusal, the CLI emits:
 
