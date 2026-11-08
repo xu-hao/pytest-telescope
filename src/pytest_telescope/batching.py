@@ -40,7 +40,7 @@ def group_row(job, mode):
         suite=job["suite"].name,
         files=[job["item"]["file"]],
         route="scoped",
-        profile=mode + "-v1",
+        profile=mode + "-v2",
         case_ids=job["case_ids"],
         outcome="infrastructure_error",
         complete=False,
@@ -56,6 +56,7 @@ def group_row(job, mode):
         not_run=len(job["case_ids"]),
         unresolved=0,
         failures=[],
+        collection_skips=[],
     )
 
 
@@ -67,14 +68,20 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
         if attempts:
             group.update(not_run=0, unresolved=len(job["case_ids"]))
         cases = [
-            dict(case_id=case, outcome=None if attempts else "not-run", complete=False)
+            dict(case_id=case, outcome=None if attempts else "not-run", complete=False, reports=[])
             for case in job["case_ids"]
         ]
     elif mode == "batch":
         cases = result["case_results"]
     else:
-        status = next((name for name in ("failed", "skipped", "passed") if result[name]), "not-run")
-        cases = [dict(case_id=job["case_ids"][0], outcome=status, complete=result["complete"])]
+        cases = result["case_results"] or [
+            dict(
+                case_id=job["case_ids"][0],
+                outcome="not-run",
+                complete=False,
+                reports=[],
+            )
+        ]
     if result is not None:
         complete = result["complete"]
         group.update(
@@ -90,7 +97,8 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
             stop_reason=None
             if complete
             else "collection"
-            if any(failure["phase"] == "collect" for failure in result["failures"])
+            if result["collection_skips"]
+            or any(failure["phase"] == "collect" for failure in result["failures"])
             else "pytest-stop"
             if result["exit_code"] in (1, 2)
             else "infrastructure",
@@ -100,6 +108,7 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
             skipped=result["skipped"],
             not_run=sum(row["outcome"] == "not-run" for row in cases),
             failures=result["failures"],
+            collection_skips=[{**skip, "phase": "collect"} for skip in result["collection_skips"]],
         )
     rows = []
     for (index, item), case in zip(job["members"], cases):
@@ -128,6 +137,7 @@ def project_result(job, result, mode, *, attempts=0, reused=False, reason="", at
                     group_id=job["key"],
                     result_status=status,
                     complete=case["complete"],
+                    reports=case["reports"],
                     outcome=outcome,
                     reason=reason,
                     attempts=attempts,
