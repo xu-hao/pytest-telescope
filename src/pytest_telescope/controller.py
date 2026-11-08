@@ -33,8 +33,8 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 5
-RESULT_SCHEMA = 3
+SCHEMA = 6
+RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
 
@@ -83,6 +83,8 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
         if len(data) > limit:
             return None
         record = json.loads(data)
+        if type(record) is not dict or set(record) != {"schema", "key", "result", "checksum"}:
+            return None
         result = record["result"]
         if (
             type(record["schema"]) is not int
@@ -94,11 +96,13 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
         from .result import validate_batch, validate_collection, validate_result
 
         valid = (
-            validate_collection(result, successful_only=True)
+            validate_collection(result, successful_only=True, context_id=key)
             if kind == "collection"
-            else validate_batch(result, successful_only=True, group_id=group_id, case_ids=case_ids)
+            else validate_batch(
+                result, successful_only=True, group_id=group_id, case_ids=case_ids, context_id=key
+            )
             if kind == "batch"
-            else validate_result(result, successful_only=True, case_id=case_id)
+            else validate_result(result, successful_only=True, case_id=case_id, context_id=key)
         )
         if not valid:
             return None
@@ -108,7 +112,7 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
 
 
 def write_record(path, key, result, *, kind="execution"):
-    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 2 else 1_048_576
+    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 6 else 1_048_576
     record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
     content = json.dumps(record, sort_keys=True).encode()
     if len(content) > limit:
@@ -316,6 +320,8 @@ def selected_arguments(arguments, unit, all_tests):
 
 def inventory_matches_manifest(result, manifest):
     files = set(manifest.inventory)
+    if any(skip["file"] not in files for skip in result["collection_skips"]):
+        return False
     registry = manifest.registry_by_id
     required = {}
     for row in manifest.registry:
@@ -363,6 +369,7 @@ def _row(item, suite, route, outcome, reason=""):
         group_id=None,
         result_status=None,
         complete=False,
+        reports=[],
     )
 
 
@@ -400,18 +407,11 @@ def _ordinary_group(suite, files, result, effective, attempt_seconds):
     """One ordinary suite session; never cache eligible and never retried."""
     complete, code = result["complete"], result["exit_code"]
     return dict(
-        group_id=fingerprint(
-            {
-                "profile": "ordinary-v1",
-                "suite": suite.identity(),
-                "case_ids": result["case_ids"],
-                "args": effective,
-            }
-        ),
+        group_id=result["context_id"],
         suite=suite.name,
         files=sorted(files),
         route="ordinary",
-        profile="ordinary-v1",
+        profile="ordinary-v2",
         case_ids=result["case_ids"],
         outcome="executed"
         if complete and code in (0, 5)
@@ -433,6 +433,7 @@ def _ordinary_group(suite, files, result, effective, attempt_seconds):
         not_run=sum(row["outcome"] == "not-run" for row in result["case_results"]),
         unresolved=0,
         failures=result["failures"],
+        collection_skips=[{**skip, "phase": "collect"} for skip in result["collection_skips"]],
     )
 
 
@@ -472,7 +473,7 @@ def run(
     manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
     mode = choose_mode(manifest.execution, execution_mode)
     concurrency = worker_count(manifest.execution, workers)
-    profile = mode + "-v1"
+    profile = mode + "-v2"
     configured = list(zip(manifest.suites, manifest.units))
     all_tests = set().union(*(set(suite.inventory) for suite, _ in configured))
     all_unit = Unit("all", sorted(all_tests), [], [], True)
@@ -485,7 +486,14 @@ def run(
         hashed = [hashlib.sha256(selector.encode()).hexdigest() for selector in own]
         requested_selectors.update(hashed)
         invocations[suite.name] = (effective, options, hashed, bool(selectors and not own))
-    environment = {name: os.environ.get(name) for name in manifest.env}
+    declared_environment = set(manifest.env) | set(manifest.defaults.env)
+    for declaration in manifest.declarations.values():
+        declared_environment.update(declaration.env)
+    environment = {name: os.environ.get(name) for name in sorted(declared_environment)}
+
+    def unit_environment(unit):
+        return {name: environment[name] for name in unit.env}
+
     observations = [
         dict(
             name=suite.name,
@@ -495,6 +503,7 @@ def run(
             collected=None,
             inventory_digest=None,
             worker_seconds=None if route == "ordinary" else 0,
+            skips=[],
         )
         for suite, _ in configured
         for route, files in (
@@ -584,6 +593,11 @@ def run(
                 row["worker_seconds"] or 0 for row in observations if row["route"] == "scoped"
             ),
             suites=observations,
+            skips=[
+                dict(suite=row["name"], route=row["route"], **skip)
+                for row in observations
+                for skip in row["skips"]
+            ],
         )
         return dict(
             schema=RESULT_SCHEMA,
@@ -645,6 +659,7 @@ def run(
                 raise DeclarationError(
                     "unsupported or changed declarations during ordinary collection"
                 )
+            row["skips"] = [{**skip, "phase": "collect"} for skip in result["collection_skips"]]
             if not result["inventory_complete"]:
                 # Includes pytest's own startup errors, such as a failing conftest import.
                 row["outcome"] = "failed"
@@ -707,6 +722,7 @@ def run(
                     group_id=group["group_id"],
                     result_status=status,
                     complete=outcomes[item["case_id"]]["complete"],
+                    reports=outcomes[item["case_id"]]["reports"],
                 )
                 results.append(unit)
             groups.append(group)
@@ -744,7 +760,6 @@ def run(
         "schema": SCHEMA,
         "sandbox": box.identity,
         "runner": runner_identity(),
-        "environment": environment,
         "snapshot_owner": [os.getuid(), os.getgid()],
         "profile": profile,
     }
@@ -784,6 +799,7 @@ def run(
                             for entry in manifest.registry
                             if entry["file"] in collection_unit.tests
                         ]
+                        collection_environment = unit_environment(collection_unit)
                         inventory_key = fingerprint(
                             {
                                 **common,
@@ -795,6 +811,7 @@ def run(
                                 "metadata": metadata_identity(collection_unit.distributions),
                                 "files": collection_unit.tests,
                                 "registry": registry,
+                                "environment": fingerprint(collection_environment),
                             }
                         )
                         inventory_path = inventory_state / (inventory_key + ".json")
@@ -830,7 +847,7 @@ def run(
                                             options,
                                             ["/project/" + name for name in collection_unit.tests],
                                         ),
-                                        environment,
+                                        collection_environment,
                                         timeout,
                                         root=manifest.root,
                                         invocation_directory=directory,
@@ -844,6 +861,7 @@ def run(
                                             "mode": "collection",
                                             "registry": registry,
                                             "selectors": selectors,
+                                            "context_id": inventory_key,
                                         },
                                     )
                                 break
@@ -852,6 +870,9 @@ def run(
                                     row["outcome"] = "infrastructure_error"
                                     stop("infrastructure_error", str(exc))
                                     return summary()
+                        row["skips"] = [
+                            {**skip, "phase": "collect"} for skip in collected["collection_skips"]
+                        ]
                         if collected["exit_code"] == 4:
                             raise DeclarationError(
                                 "unsupported or changed declarations during sandboxed collection"
@@ -926,6 +947,7 @@ def run(
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
+                                        "environment": fingerprint(unit_environment(unit)),
                                     }
                                 ),
                             )
@@ -950,6 +972,7 @@ def run(
                                 index=index,
                                 item=item,
                                 unit=unit,
+                                environment=unit_environment(unit),
                                 suite=suite,
                                 options=options,
                                 registry=[
@@ -1031,6 +1054,7 @@ def run(
                                         mode="batch" if mode == "batch" else "execution",
                                         registry=job["registry"],
                                         expected_digest=job["digest"],
+                                        context_id=job["key"],
                                     )
                                     if mode == "batch":
                                         request.update(
@@ -1044,7 +1068,7 @@ def run(
                                         _session_arguments(
                                             suite, job["options"], ["/project/" + item["file"]]
                                         ),
-                                        environment,
+                                        job["environment"],
                                         timeout,
                                         root=manifest.root,
                                         invocation_directory=directory,
