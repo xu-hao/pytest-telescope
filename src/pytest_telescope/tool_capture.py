@@ -299,8 +299,9 @@ class Capture:
                     if row["kind"] == "directory":
                         (frozen / row["path"]).chmod(row["mode"] & 0o555)
             target.chmod(0o555)
-            graph = Graph(tool, target)
-            graph.validate_links()
+            graph_budget = self._budget(deadline)
+            graph = Graph(tool, target, graph_budget)
+            graph.validate_links(graph_budget)
             runtime = Runtime(graph, self._budget(deadline))
             validate_python(graph, self._budget(deadline))
             self.graphs[name], self.runtimes[name] = graph, runtime

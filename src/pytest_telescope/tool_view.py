@@ -20,6 +20,7 @@ def minimal(paths):
 class Projection:
     def __init__(self, capture, names):
         self.capture = capture
+        self.budget = capture._budget()
         self.names = names
         self.bindings = {}
         self.commands = {}
@@ -40,6 +41,7 @@ class Projection:
                 if root["coverage"] == "tree":
                     trees.append(root["source"])
                 for row in root["entries"]:
+                    self.budget.tick()
                     key = (root["id"], row["path"])
                     filename = graph.original(key)
                     previous = originals.get(filename)
@@ -63,12 +65,13 @@ class Projection:
         if len(controls) > 1:
             layout("selected native loader caches disagree")
         for name in names:
-            capture.runtimes[name].validate_union(originals)
+            capture.runtimes[name].validate_union(originals, self.budget)
         if controls:
             if capture.system is None:
                 raise InfrastructureError("native tool view lacks its admitted system composition")
             self.system = capture.system
         for filename, (graph, key) in originals.items():
+            self.budget.tick()
             if graph.nodes[key]["kind"] == "symlink" and not inside(filename, trees):
                 parent = str(Path(filename).parent)
                 if parent != "/etc" or self.system is None:
@@ -87,6 +90,7 @@ class Projection:
         self.directory = capture.directory / ".views" / self.identity
         self.directory.mkdir(mode=0o700)
         for index, destination in enumerate(self.closed):
+            self.budget.tick()
             source = self.directory / ("closed-" + str(index))
             source.mkdir(mode=0o700)
             self.directories.add(source)
@@ -137,6 +141,7 @@ class Projection:
         self.directory.chmod(0o555)
 
     def materialize(self, graph, key, destination):
+        self.budget.tick(visit=True)
         row = graph.nodes[key]
         source = graph.directory / key[0] / key[1]
         # Owned empty ancestors confer no host siblings. Every actual member comes
@@ -162,6 +167,7 @@ class Projection:
             self.entries[destination] = ("file", info.st_dev, info.st_ino, row["mode"] & 0o555, row["size"])
 
     def verify(self):
+        budget = self.capture._budget()
         if self.directory.is_symlink() or not self.directory.is_dir() or self.directory.stat().st_mode & 0o222:
             raise InfrastructureError("owned tool projection root changed")
         expected = set(self.entries) | self.directories
@@ -171,6 +177,7 @@ class Projection:
             directory = pending.pop()
             with os.scandir(directory) as children:
                 for child in children:
+                    budget.tick(visit=True)
                     path = Path(child.path)
                     actual.add(path)
                     if child.is_dir(follow_symlinks=False):
@@ -178,6 +185,7 @@ class Projection:
         if actual != expected:
             raise InfrastructureError("owned tool projection membership changed")
         for filename, row in self.entries.items():
+            budget.tick()
             info = filename.lstat()
             if row[0] == "symlink":
                 valid = stat.S_ISLNK(info.st_mode) and os.readlink(filename) == row[1]
@@ -188,5 +196,6 @@ class Projection:
             if not valid:
                 raise InfrastructureError("owned tool projection mapping changed")
         for directory in self.directories:
+            budget.tick()
             if not directory.is_dir() or directory.is_symlink() or directory.stat().st_mode & 0o222:
                 raise InfrastructureError("owned tool projection directory changed")

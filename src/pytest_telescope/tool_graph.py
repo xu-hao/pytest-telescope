@@ -17,7 +17,7 @@ def layout(message="frozen-tool paths do not form a closed declared view"):
 
 
 class Graph:
-    def __init__(self, tool, directory):
+    def __init__(self, tool, directory, budget):
         self.tool = tool
         self.directory = directory
         self.nodes = {}
@@ -35,6 +35,7 @@ class Graph:
                 if right.is_relative_to(left) and root["coverage"] != "files":
                     layout("overlapping frozen-tool roots require an explicit files anchor")
             for row in root["entries"]:
+                budget.tick()
                 key = (root["id"], row["path"])
                 self.nodes[key] = row
                 self._map(self.logical(key), key)
@@ -131,8 +132,9 @@ class Graph:
             layout("frozen-tool runtime reference has the wrong file type")
         return key
 
-    def validate_links(self):
+    def validate_links(self, budget):
         for key, row in self.nodes.items():
+            budget.tick()
             if row["kind"] != "symlink":
                 continue
             logical = self.resolve(self.logical(key))

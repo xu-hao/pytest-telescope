@@ -25,6 +25,7 @@ class Runtime:
         self.control = None
         self.lookup_names = {}
         for filename in graph.mapping:
+            budget.tick()
             self.lookup_names.setdefault(posixpath.basename(filename), []).append(filename)
         self.validate()
 
@@ -102,10 +103,11 @@ class Runtime:
             self.graph.preserve(loader)
         self.dependencies[key] = found
 
-    def validate_union(self, originals):
+    def validate_union(self, originals, budget):
         """A discovery union cannot introduce a different loader search winner."""
         lookup_names = {}
         for filename in originals:
+            budget.tick()
             lookup_names.setdefault(posixpath.basename(filename), []).append(filename)
         def resolve(filename):
             seen = set()
@@ -126,7 +128,9 @@ class Runtime:
             layout("selected tool union link traversal exceeds its bound")
 
         for key, info in self.elfs.items():
+            budget.tick()
             for name in info.needed:
+                budget.tick()
                 expected = self.needed_targets[key, name]
                 for alias in (self.graph.logical(key), self.graph.original(key)):
                     for filename in self.candidates(info, name, alias, lookup_names):
