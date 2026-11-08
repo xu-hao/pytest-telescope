@@ -417,3 +417,82 @@ def test_item(): pass
     )
     with pytest.raises(DeclarationError):
         controller.run(tmp_path)
+
+
+def test_opt_in_skipif_transitions_and_unrelated_case_remains_reusable(tmp_path, monkeypatch):
+    configure(tmp_path)
+    monkeypatch.delenv("SYNTHETIC_OPT_IN", raising=False)
+    put(
+        tmp_path,
+        "tests/test_opt_in.py",
+        """import os
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+@pytest.mark.telescope(env=["SYNTHETIC_OPT_IN"])
+@pytest.mark.skipif(os.environ.get("SYNTHETIC_OPT_IN") != "1", reason="opt in required")
+def test_opt_in():
+    assert os.environ["SYNTHETIC_OPT_IN"] == "1"
+def test_unrelated():
+    assert "SYNTHETIC_OPT_IN" not in os.environ
+""",
+    )
+    first = controller.run(tmp_path)
+    selected = "tests/test_opt_in.py::test_opt_in"
+    other = "tests/test_opt_in.py::test_unrelated"
+    assert first["status"] == "passed" and unit(first, selected)["result_status"] == "skipped"
+    assert unit(first, selected)["reports"][0]["skip_reason"] == digest("Skipped: opt in required")
+    assert controller.run(tmp_path)["counts"]["reused"] == 2
+    monkeypatch.setenv("SYNTHETIC_OPT_IN", "")
+    empty = controller.run(tmp_path)
+    assert unit(empty, selected)["outcome"] == "executed"
+    assert unit(empty, selected)["result_status"] == "skipped"
+    assert unit(empty, other)["outcome"] == "reused"
+    monkeypatch.setenv("SYNTHETIC_OPT_IN", "1")
+    enabled = controller.run(tmp_path)
+    assert enabled["status"] == "passed"
+    assert unit(enabled, selected)["outcome"] == "executed"
+    assert unit(enabled, selected)["result_status"] == "passed"
+    assert unit(enabled, other)["outcome"] == "reused"
+    assert controller.run(tmp_path)["counts"]["reused"] == 2
+
+
+def test_parameter_and_environment_sensitive_reason_is_digest_only(tmp_path, monkeypatch, capsys):
+    configure(tmp_path)
+    monkeypatch.setenv("REASON_OPTION", "synthetic-env-reason")
+    put(
+        tmp_path,
+        "tests/test_private.py",
+        """import os
+import pytest
+pytestmark = pytest.mark.telescope(env=["REASON_OPTION"])
+@pytest.mark.parametrize("value", [pytest.param("synthetic-param-value", id="synthetic-param-id")])
+def test_item(value):
+    pytest.skip(value + ":" + os.environ["REASON_OPTION"])
+""",
+    )
+    requests = []
+    original = sandbox.execute
+
+    def execute(*args, request, **kwargs):
+        requests.append(json.dumps(request))
+        return original(*args, request=request, **kwargs)
+
+    monkeypatch.setattr(sandbox, "execute", execute)
+    cold = controller.run(tmp_path)
+    warm = controller.run(tmp_path)
+    assert cold["status"] == warm["status"] == "passed"
+    assert cold["counts"]["executed"] == warm["counts"]["reused"] == 1
+    first, second = cold["units"][0], warm["units"][0]
+    assert first["reports"] == second["reports"]
+    assert first["reports"][1]["skip_reason"] == digest(
+        "Skipped: synthetic-param-value:synthetic-env-reason"
+    )
+    captured = capsys.readouterr()
+    evidence = (
+        json.dumps([cold, warm, requests]).encode()
+        + b"".join(path.read_bytes() for path in (tmp_path / ".pytest-telescope").rglob("*.json"))
+        + captured.out.encode()
+        + captured.err.encode()
+    )
+    for raw in (b"synthetic-param-id", b"synthetic-param-value", b"synthetic-env-reason"):
+        assert raw not in evidence
