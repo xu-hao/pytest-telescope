@@ -151,9 +151,14 @@ File bytes, read/execute bits and link text remain significant.
 Links retain their type and exact text. Relative and absolute text are allowed only
 when bounded resolution terminates in pinned entries of that same tool. Logical and
 original aliases must resolve to the same pinned target. Cycles, dangling targets,
-escapes and links into undeclared baseline system/environment contents refuse. Root
-symlinks are represented by a canonical target root and explicit pinned link records,
-including supported `/bin` and `/lib*` prefix aliases; they are not guessed from names.
+escapes and links into undeclared baseline system/environment contents refuse. Declared
+root symlinks must instead be represented through canonical target roots and pinned link
+entries. When a selected tool needs one of the fixed baseline prefixes `/bin`, `/sbin`,
+`/lib`, `/lib32`, `/lib64` or `/libx32`, its existing symlink becomes a capture-derived
+mapping record outside the manifest root entries. Its exact type, link text and resolved
+mapping bind that tool's identity and are revalidated before hits and execution. The
+target must terminate in the tool's declared pinned original mapping. This does not
+introduce an arbitrary alias field, a manifest root at `/`, or a live parent mount.
 Narrow original paths below `/tmp` or `/dev/shm` may be preserved, with empty owned
 ancestors; the writable mount roots themselves cannot be replaced. Aliases cannot
 overlap project or controller paths, `/tools`, `/proc` or protected device namespaces.
@@ -197,7 +202,10 @@ subtrees. The list must cover every normalized default search root of the suppor
 loader, every selected ELF RPATH/RUNPATH location, and every cache candidate directory
 for a required SONAME. Nested roots normalize to minimal ancestors without widening into
 nonlibrary system roots. Literal absolute search paths and `$ORIGIN` relative to the
-executable/library's exact original alias are supported; other variables, audit/preload
+executable/library's exact path are supported. Lookup, including `$ORIGIN`, must resolve
+to the same pinned bytes from both its logical and original paths, because command-map
+symlinks execute logical targets. An incompatible split-root layout refuses; it is not
+repaired by rewriting the executable or its search paths. Other variables, audit/preload
 modes and unsupported ABI/search syntax refuse with `tool:layout`.
 
 Each listed directory is replaced read-only with an owned tree synthesized solely from
