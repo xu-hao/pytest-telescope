@@ -251,12 +251,51 @@ not claimed. The loader cannot read or execute the host preload contents, and ex
 declared nonempty preload inputs are unsupported. The exact overlay destination must
 be verified; unsupported path indirection refuses. Other required loader-control inputs
 must be precisely controlled or explicitly pinned. The rest of `/etc`, including the
-baseline DNS view, is not replaced. Nonconsumers retain their baseline view. All selected
-loader profiles, cache bytes/paths and colliding search entries must agree.
+baseline DNS view, retains its existing path grants through the private composition
+below; the original directory mount itself is not required. Nonconsumers retain their
+baseline view. All selected loader profiles, cache bytes/paths and colliding search
+entries must agree.
 
 Runtime `dlopen`, data, imports and subprocess dependencies remain the caller's explicit
 responsibility. Byte validation and mandatory ELF/shebang relations do not infer arbitrary
 program dependencies or certify package-manager installation semantics.
+
+### Preserving baseline system configuration
+
+When the native profile needs its fixed loader controls, the controller may compose a
+private `/etc` directory containing only the already-granted baseline direct entries,
+the explicitly frozen `ld.so.cache` and the fixed empty `ld.so.preload`. This permits a
+control file to exist even when its host counterpart is absent. Existing declared tool
+roots and entries at or below `/etc` remain authoritative overlays. The composition
+preserves the baseline DNS and other path grants; it neither selects another host path
+nor introduces an arbitrary live parent-directory bind.
+
+Capture enumerates only direct entry metadata under the
+[composition bounds](execution-contract.md#frozen-tool-capture-and-reuse). It records
+membership, entry types, permissions and ownership, literal link text, source identities
+and destination mappings privately. It does not recursively inspect directories, read
+baseline regular-file or credential contents, or copy them into a tool snapshot. The
+cache and preload slots use their frozen or fixed inputs instead of host contents.
+Unsupported special entries or loader-control path indirection refuse. Enumeration
+must detect changes and refuse rather than omit entries or truncate the description.
+
+Admission opens `/etc` and each admitted regular file or directory through verified
+no-follow handles, checks the held entry against its observed metadata, and retains the
+stable handle for readonly mount setup. It never reopens an unchecked source pathname
+that a replacement link could redirect. Symlinks retain verified literal text without
+resolving or granting an additional host target. Baseline directory contents retain
+their existing readonly source semantics; this composition does not claim to freeze
+their bytes. Explicit frozen tool overlays retain their stronger byte identity.
+
+The bounded membership, type, metadata, link and mapping description participates in
+each consuming context's identity and is revalidated against held source identities
+before relevant hits, execution and publication. Mutation refuses with bounded
+infrastructure evidence. Entry names and source maps stay controller-private: public
+reports, logs, worker requests and cache payloads carry no host-entry list. Handles
+remain controller-owned until consuming children drain, are unavailable to pytest and
+tool children after mount setup, and are closed through bounded owned cleanup.
+Nonconsumers keep the existing readonly `/etc` view. No environment, network, resource
+controller or host-content grant is added.
 
 ### Scripts and pinned command lookup
 

@@ -190,9 +190,14 @@ failure, not a valid snapshot. Old valid cache records survive unsuccessful new 
 | Declared installed Python distributions | 64 |
 | Command names per tool / selected scope | 256 / 1,024 |
 | Native loader search-directory declarations per tool | 64 |
+| Preserved baseline `/etc` direct entries / encoded composition metadata | 4,096 / 1 MiB |
 
 These tool-file bounds are separate from the project snapshot's source-file bound.
 Hash/copy uses bounded chunks; a large admitted executable is not read into one buffer.
+Baseline `/etc` composition counts only direct entry metadata, never recursive contents.
+Its encoded description uses the canonical JSON rules defined for root digests; the
+entry and byte limits are enforced while enumerating. It shares the capture deadline
+and cancellation checks, and all admitted source handles have bounded owned cleanup.
 Each capture attempt has the lesser of the configured session timeout and 120 seconds,
 with cancellation checks during traversal and hashing. There are at most two attempts,
 each with fresh exclusive staging. Bounds refuse explicitly without truncating entries
