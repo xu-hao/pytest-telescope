@@ -1,4 +1,4 @@
-"""Required real native commands, env shebangs, and full Chromium child transport."""
+"""Explicitly invoked host-runtime controls; these are outside the functional gate."""
 
 import copy
 import os
@@ -18,7 +18,7 @@ def project(tmp_path):
 
 
 def installed_node():
-    value = os.environ.get("TELESCOPE_TEST_NODE") or shutil.which("node")
+    value = os.environ.get("TELESCOPE_TEST_NODE")
     if value is None or not Path(value).is_file():
         pytest.fail("required installed Node prerequisite is absent; set TELESCOPE_TEST_NODE")
     return Path(value).resolve(strict=True)
@@ -52,7 +52,9 @@ def node_runtime(project, *, browser=False):
             runtime.executable(crashpad)
         # Named font inputs are runtime resources; arbitrary /usr/share is never copied.
         runtime.add_tree("fontconfig", Path("/etc/fonts"))
-        runtime.add_tree("fonts", Path("/usr/share/fonts/truetype/dejavu"))
+        runtime.add_tree("fontconfig_defaults", Path("/usr/share/fontconfig/conf.avail"))
+        runtime.add_tree("fonts", Path("/usr/share/fonts"))
+        runtime.add_tree("local_fonts", Path("/usr/local/share/fonts"))
     runtime.finish(commands={"node": node}, scripts=[
         (scripts / "command.js", env, "node"),
         (scripts / "browser.js", env, "node"),
