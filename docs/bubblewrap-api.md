@@ -244,10 +244,15 @@ accepted only with static ELF and no dynamic loader. Every candidate for a requi
 SONAME must resolve to the exact declared frozen file or be absent in the closed view;
 candidates outside closed directories refuse. Irrelevant cache entries need not have
 files. Multiple available compatible candidates require verified loader ordering or an
-ambiguity refusal, never a plausible name match. `/etc/ld.so.preload` and other loader
-control inputs are precisely masked absent or explicitly pinned; the rest of `/etc`,
-including the baseline DNS view, is not replaced. All selected loader profiles, cache
-bytes/paths and colliding search entries must agree.
+ambiguity refusal, never a plausible name match. The profile overlays
+`/etc/ld.so.preload` with an owned zero-byte readonly regular file, mode `0444`.
+Its exact empty contents, type, mode and destination bind identity; physical absence is
+not claimed. The loader cannot read or execute the host preload contents, and explicitly
+declared nonempty preload inputs are unsupported. The exact overlay destination must
+be verified; unsupported path indirection refuses. Other required loader-control inputs
+must be precisely controlled or explicitly pinned. The rest of `/etc`, including the
+baseline DNS view, is not replaced. Nonconsumers retain their baseline view. All selected
+loader profiles, cache bytes/paths and colliding search entries must agree.
 
 Runtime `dlopen`, data, imports and subprocess dependencies remain the caller's explicit
 responsibility. Byte validation and mandatory ELF/shebang relations do not infer arbitrary
