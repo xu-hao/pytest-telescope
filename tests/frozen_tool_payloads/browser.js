@@ -115,9 +115,16 @@ async function main() {
             const kill = setTimeout(() => {
                 try { process.kill(-browser.pid, "SIGKILL"); } catch {}
             }, 6000);
-            await exited;
-            clearTimeout(terminate);
-            clearTimeout(kill);
+            let cleanupTimer;
+            try {
+                await Promise.race([exited, new Promise((_, reject) => {
+                    cleanupTimer = setTimeout(() => reject(new Error("browser cleanup deadline exceeded")), 9000);
+                })]);
+            } finally {
+                clearTimeout(terminate);
+                clearTimeout(kill);
+                clearTimeout(cleanupTimer);
+            }
         }
         fail("fixture is closed");
         rmSync(profile, {recursive: true});
@@ -133,6 +140,7 @@ async function main() {
         const session = attached.sessionId;
         await request("Page.enable", {}, session);
         const loaded = event(session, "Page.loadEventFired");
+        loaded.catch(() => {}); // The same rejection is observed below after navigation.
         const html = "<!doctype html><button id='button' onclick=\"document.getElementById('result').textContent='clicked'\">Click</button><p id='result'>waiting</p>";
         await request("Page.navigate", {url: "data:text/html," + encodeURIComponent(html)}, session);
         await loaded;
