@@ -54,6 +54,10 @@ succeeds. A row not collected has `outcome: "not-started"`, `collected: null`, a
 inventory digest. `collection.collected` counts unique cases, and `collection.worker_seconds`
 sums scoped collection time only. Known files do
 not establish a complete case inventory: dynamic and parametrized items require pytest.
+A validated structural file can collect no cases, including after a collection skip;
+implicit files and explicit file targets do not invent selected cases. An explicit node
+selector still requires a genuinely collected alias, even when its file is covered. File
+coverage and collection skip evidence remain separate from case inventory and selection.
 With `structural_files`, these are the effective exact file lists. Files outside them
 produce neither case rows nor `not-selected` counts; a complete inventory does not claim
 coverage of those files. Adding a new file outside an explicit list does not add it to

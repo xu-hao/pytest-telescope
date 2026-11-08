@@ -114,6 +114,14 @@ Result keys cover each scoped case's actual node identity, effective literal dec
 
 Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts by route, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static preview and explicitly does not claim real collected-case enumeration.
 
+Implicit structural files are collection boundaries, not explicit requests for a case.
+A validated collection establishes file coverage independently of collected-case aliases.
+An explicit file target can therefore yield zero cases, including when collection skips
+the file; retain actual collection skip evidence without inventing a selected case. An
+explicit `file::node` selector must match a genuinely collected alias: coverage of its file
+alone does not satisfy it. This applies to ordinary and scoped collection and to reused
+scoped inventory.
+
 ## Bounds and performance
 
 Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited entries while expanding declared directories and globs; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.

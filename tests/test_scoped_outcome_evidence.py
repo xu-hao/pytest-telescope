@@ -252,6 +252,7 @@ pytest.skip("collection optional", allow_module_level=True)
 """,
     )
     report = controller.run(tmp_path)
+    assert report["status"] == "no_tests" and report["inventory_complete"]
     assert report["units"] == [] and report["counts"]["selected"] == 0
     assert report["collection"]["skips"] == [
         {
@@ -496,3 +497,117 @@ def test_item(value):
     )
     for raw in (b"synthetic-param-id", b"synthetic-param-value", b"synthetic-env-reason"):
         assert raw not in evidence
+
+
+def test_skipped_file_selector_is_covered_without_a_fabricated_case(tmp_path):
+    configure(tmp_path)
+    put(
+        tmp_path,
+        "tests/test_skipped.py",
+        """import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+pytest.skip("file unavailable", allow_module_level=True)
+""",
+    )
+    selected = controller.run(tmp_path, arguments=["tests/test_skipped.py"])
+    assert selected["status"] == "no_tests" and selected["inventory_complete"]
+    assert selected["units"] == [] and selected["counts"]["selected"] == 0
+    assert selected["collection"]["skips"] == [
+        {
+            "suite": "default",
+            "route": "scoped",
+            "file": "tests/test_skipped.py",
+            "phase": "collect",
+            "reason": digest("Skipped: file unavailable"),
+        }
+    ]
+
+
+@pytest.mark.parametrize("file", ["tests/test_skipped.py", "tests/test_passing.py"])
+def test_missing_explicit_node_is_not_satisfied_by_file_coverage(tmp_path, file):
+    configure(tmp_path)
+    put(
+        tmp_path,
+        "tests/test_skipped.py",
+        """import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+pytest.skip("file unavailable", allow_module_level=True)
+""",
+    )
+    put(
+        tmp_path,
+        "tests/test_passing.py",
+        """import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_real(): pass
+""",
+    )
+    with pytest.raises(DeclarationError):
+        controller.run(tmp_path, arguments=[file + "::test_nonexistent"])
+
+
+@pytest.mark.parametrize("skipped", [False, True])
+def test_ordinary_file_without_collected_cases_has_honest_file_coverage(tmp_path, skipped):
+    configure(tmp_path)
+    source = (
+        'import pytest\npytest.skip("ordinary unavailable", allow_module_level=True)\n'
+        if skipped
+        else "def helper(): pass\n"
+    )
+    put(tmp_path, "tests/test_ordinary_empty.py", source)
+    report = controller.run(tmp_path, arguments=["tests/test_ordinary_empty.py"])
+    assert report["status"] == "no_tests" and report["inventory_complete"]
+    assert report["units"] == [] and report["counts"]["selected"] == 0
+    expected = (
+        [
+            {
+                "suite": "default",
+                "route": "ordinary",
+                "file": "tests/test_ordinary_empty.py",
+                "phase": "collect",
+                "reason": digest("Skipped: ordinary unavailable"),
+            }
+        ]
+        if skipped
+        else []
+    )
+    assert report["collection"]["skips"] == expected
+
+
+def test_mixed_collection_skips_survive_inventory_reuse_without_fake_members(tmp_path):
+    configure(tmp_path)
+    put(
+        tmp_path,
+        "tests/test_skipped.py",
+        """import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+pytest.skip("file unavailable", allow_module_level=True)
+""",
+    )
+    put(
+        tmp_path,
+        "tests/test_passing.py",
+        """import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_real(): pass
+""",
+    )
+    cold = controller.run(tmp_path)
+    warm = controller.run(tmp_path)
+    assert cold["status"] == warm["status"] == "passed"
+    assert len(cold["units"]) == len(warm["units"]) == 1
+    assert cold["counts"]["executed"] == warm["counts"]["reused"] == 1
+    assert warm["collection"]["outcome"] == "reused"
+    assert (
+        cold["collection"]["skips"]
+        == warm["collection"]["skips"]
+        == [
+            {
+                "suite": "default",
+                "route": "scoped",
+                "file": "tests/test_skipped.py",
+                "phase": "collect",
+                "reason": digest("Skipped: file unavailable"),
+            }
+        ]
+    )
