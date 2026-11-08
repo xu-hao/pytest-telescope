@@ -223,8 +223,9 @@ source files, installs a runtime or infers arbitrary program dependencies.
 | Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. |
 | `/tools/.commands/SCOPE_DIGEST` | Readonly command-name symlinks to exact pinned executables; first in the controlled PATH. |
 | Declared native library-search directories | Closed readonly trees synthesized from the selected runtime entries; all other host siblings are absent. |
+| Native profile's private `/etc` composition | Existing baseline direct-entry grants, overlaid by explicit frozen tool entries, the pinned loader cache and fixed empty readonly preload file. |
 
-Source modes bind identity; frozen files/directories use the source rwx mode with write
+For declared frozen entries, source modes bind identity; files/directories use the source rwx mode with write
 bits removed. Writes to any of these views fail. A link remains a link with the exact
 declared text: a project `node_modules` link is not replaced by a directory. Logical and
 original aliases must resolve only to pinned entries of the same closure. A selected
@@ -245,6 +246,13 @@ loader uses actual pinned cache and loader bytes; declared search directories ex
 unbound host libraries, including competing hardware-capability candidates. Unsupported
 or ambiguous lookup refuses. The selected closure must also include the invoking Python
 worker's native/runtime needs; a preflight failure occurs before project imports.
+The profile may privately compose `/etc` to provide its exact loader controls while
+preserving the existing baseline grants, including DNS. This uses bounded direct-entry
+metadata and stable no-follow source handles, without recursive inspection or baseline
+content capture. The [composition contract](bubblewrap-api.md#preserving-baseline-system-configuration)
+defines identity, revalidation and descriptor cleanup; it does not require retaining the
+original directory mount. Explicit frozen entries take precedence, and nonconsumers
+retain their baseline view.
 
 Browser executables, driver/bootstrap scripts, subprocesses and resources follow these
 same records. A browser name or version is not sufficient. Its actual executable must
