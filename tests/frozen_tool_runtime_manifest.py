@@ -33,7 +33,7 @@ class RuntimeManifest:
         self.add_files("system", Path("/usr"))
         self.add_files("loader_control", Path("/etc"))
         self.add_files("invoking_environment", self.interpreter.parent.parent.resolve())
-        self.add_tree("stdlib", self.stdlib)
+        self.add_runtime_files(self.stdlib)
         self.pin(self.interpreter)
         self.pin(self.interpreter.parent.parent / "pyvenv.cfg")
         self.pin(Path("/etc/ld.so.cache"))
@@ -68,6 +68,29 @@ class RuntimeManifest:
             ):
                 self.native_resources.add(path)
         return source
+
+    def add_runtime_files(self, source):
+        """Enumerate this named stdlib only; preserve its relative library topology.
+
+        Its exact entries share the /usr files anchor with pinned native libraries.
+        This avoids splitting a relative stdlib-to-library link across logical roots.
+        No other child of the system anchor is recursively discovered.
+        """
+        source = Path(source).resolve(strict=True)
+        if not source.is_relative_to(Path("/usr")) or any(
+            (source / child).exists() for child in ("site-packages", "dist-packages")
+        ):
+            raise ValueError("fixture requires the explicit narrow system stdlib layout")
+        self.tree_bytes += bounded_tree_size(source)
+        if self.tree_bytes > 768 * 1024 * 1024:
+            raise ValueError("fixture runtime exceeds its reviewed byte ceiling")
+        for row in entries(source):
+            path = source / row["path"]
+            self.pin(path)
+            if row["kind"] in {"file", "symlink"} and (
+                path.suffix == ".so" or ".so." in path.name
+            ):
+                self.native_resources.add(path.resolve(strict=True))
 
     def _root(self, name, source, coverage, rows):
         if name in self.roots:

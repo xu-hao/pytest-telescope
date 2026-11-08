@@ -3,12 +3,99 @@
 import json
 import pytest
 
-from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, canonical, digest, put
+from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, canonical, digest, entries, put
 
 
 @pytest.fixture
 def project(tmp_path):
     return ToolProject(tmp_path / "project", tmp_path / "installed")
+
+
+def test_sparse_original_symlink_uses_closed_owned_parent_with_no_live_siblings(project):
+    source = project.add_tree("frontend", preserve=True, files={
+        "bin/real.txt": "pinned", "bin/unselected.txt": "live sibling",
+    })
+    (source / "bin/alias.txt").symlink_to("real.txt")
+    project.refresh("frontend")
+    root = project.documents["frontend"]["roots"][0]
+    root["coverage"] = "files"
+    root["entries"] = [row for row in root["entries"] if row["path"] != "bin/unselected.txt"]
+    project.save("frontend")
+    project.module("test_sparse_links.py", f"""import os
+import stat
+from pathlib import Path
+import pytest
+pytestmark = pytest.mark.telescope(tools=['frontend'])
+def test_links():
+    for directory in (Path('/tools/frontend/install/bin'), Path({str(source / 'bin')!r})):
+        assert sorted(path.name for path in directory.iterdir()) == ['alias.txt', 'real.txt']
+        link = directory / 'alias.txt'
+        assert stat.S_ISLNK(link.lstat().st_mode)
+        assert os.readlink(link) == 'real.txt'
+        assert link.read_text() == 'pinned'
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o555
+        with pytest.raises(OSError):
+            (directory / 'new.txt').write_text('not writable')
+""")
+    assert_counts(project.run(), executed=1)
+    assert (source / "bin/unselected.txt").read_text() == "live sibling"
+    assert (source / "bin/alias.txt").is_symlink()
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_link_resolves_to_another_explicit_root_in_same_tool(project, absolute):
+    source = project.add_tree("frontend", preserve=True)
+    shared = project.external / "shared"
+    target = put(shared, "data.txt", "shared-one")
+    text = str(target) if absolute else "../shared/data.txt"
+    (source / "shared.txt").symlink_to(text)
+    project.documents["frontend"]["roots"].append({
+        "id": "shared", "source": str(shared), "coverage": "tree",
+        "preserve_source": True, "entries": entries(shared),
+    })
+    project.refresh("frontend")
+    project.module("test_shared.py", f"""import os
+from pathlib import Path
+import pytest
+pytestmark = pytest.mark.telescope(tools=['frontend'])
+def test_shared():
+    for link in (Path('/tools/frontend/install/shared.txt'), Path({str(source / 'shared.txt')!r})):
+        assert link.is_symlink()
+        assert os.readlink(link) == {text!r}
+        assert link.read_text().startswith('shared-')
+    assert Path('/tools/frontend/shared/data.txt').read_text().startswith('shared-')
+""")
+    assert_counts(project.run(), executed=1)
+    assert_counts(project.run(), reused=1)
+    target.write_text("shared-two")
+    previous = cache_bytes(project.root)
+    refused = project.run()
+    assert refused["status"] == "unsupported" and refused["capability"] == "tool:identity", refused
+    assert cache_bytes(project.root) == previous
+    project.refresh("frontend")
+    assert_counts(project.run(), executed=1)
+
+
+@pytest.mark.parametrize("layout", ["undeclared", "wrong_logical_root"])
+def test_cross_root_link_never_discovers_target_or_invents_logical_bridge(project, layout):
+    source = project.add_tree("frontend", preserve=True)
+    shared = project.external / "shared"
+    put(shared, "data.txt", "present on source only")
+    (source / "shared.txt").symlink_to("../shared/data.txt")
+    if layout == "wrong_logical_root":
+        project.documents["frontend"]["roots"].append({
+            "id": "different", "source": str(shared), "coverage": "tree",
+            "preserve_source": True, "entries": entries(shared),
+        })
+    project.refresh("frontend")
+    project.module("test_refused_link.py", """import pytest
+pytestmark = pytest.mark.telescope(tools=['frontend'])
+raise RuntimeError('project import must not run for an unresolved frozen link')
+def test_link(): pass
+""")
+    report = project.run()
+    assert report["status"] in {"unsupported", "declaration_error"}, report
+    assert not cache_bytes(project.root)
 
 
 def test_real_view_preserves_project_link_text_and_readonly_frozen_target(project):

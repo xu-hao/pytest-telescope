@@ -1,4 +1,4 @@
-"""Normally installed package bytes and metadata in actual isolated child processes."""
+"""Installed-package host-runtime controls, invoked separately from functional tests."""
 
 import base64
 import csv
