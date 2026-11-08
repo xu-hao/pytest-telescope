@@ -124,7 +124,7 @@ itself and all required entries. Root IDs are unique within the tool.
   these narrow entries. The logical directory contains only the declared entries.
 - `preserve_source` is a boolean. Every root appears at `/tools/TOOL/ROOT`; `true` also
   preserves its verified original paths. Files-mode aliases expose only pinned entries,
-  except where the closed library-directory rules below require a synthesized directory.
+  using individual file mounts or the closed directory projections described below.
 
 Whole filesystem, home, environment prefix, site-packages, live checkout, repository
 metadata, credential and control trees are unsupported sources. A narrow installed
@@ -173,6 +173,17 @@ introduce an arbitrary alias field, a manifest root at `/`, or a live parent mou
 Narrow original paths below `/tmp` or `/dev/shm` may be preserved, with empty owned
 ancestors; the writable mount roots themselves cannot be replaced. Aliases cannot
 overlap project or controller paths, `/tools`, `/proc` or protected device namespaces.
+
+A files-mode original alias containing a symlink needs an owned directory projection
+because binding the link as a file follows its target. Project the link's nearest
+declared parent directory with only the explicitly pinned entries beneath it, preserving
+their exact link text and frozen file/directory modes. For example, selected launcher
+links may require a closed `/usr/bin` or environment `bin` view; no unselected sibling
+survives in that projected directory. The complete projected contents, source-directory
+mode and original/logical mappings bind identity. Conflicting selected projections
+refuse; mount order cannot choose a winner. This neither mounts a whole source anchor
+nor enumerates or exposes its live siblings. The same rule composes with the closed
+library-search directories below, and protected mount roots remain excluded.
 
 A root's tree digest is SHA-256 of its lexically sorted normalized entry list encoded
 as UTF-8 JSON with sorted object keys, `ensure_ascii=True` and separators `(',', ':')`.
