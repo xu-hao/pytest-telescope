@@ -477,11 +477,12 @@ def run(
     configured = list(zip(manifest.suites, manifest.units))
     all_tests = set().union(*(set(suite.inventory) for suite, _ in configured))
     all_unit = Unit("all", sorted(all_tests), [], [], True)
-    invocations, requested_selectors, seen_aliases = {}, set(), set()
+    invocations, requested_selectors, seen_aliases, seen_files = {}, set(), set(), set()
     for suite, _ in configured:
         effective = suite_arguments(suite, arguments)
-        parsed = selected_arguments(effective, all_unit, all_tests) or []
-        options, selectors = split_arguments(parsed)
+        selected_arguments(effective, all_unit, all_tests)
+        # Structural membership is not an explicit request for a collected case.
+        options, selectors = split_arguments(effective)
         own = [selector for selector in selectors if selector.split("::", 1)[0] in suite.inventory]
         hashed = [hashlib.sha256(selector.encode()).hexdigest() for selector in own]
         requested_selectors.update(hashed)
@@ -671,6 +672,7 @@ def run(
                 return False
             if not inventory_matches_manifest(result, manifest):
                 raise InfrastructureError("ordinary inventory disagrees with literal declarations")
+            seen_files.update(hashlib.sha256(name.encode()).hexdigest() for name in files)
             if len(results) + len(scoped) + len(result["items"]) > 100_000:
                 raise DeclarationError("combined suite inventory exceeds 100000 cases")
             group = _ordinary_group(
@@ -738,7 +740,7 @@ def run(
     if not manifest.scope_possible:
         # All-ordinary: no sandbox, frozen copy, cache directory or lock.
         if ordinary_sessions(scoped):
-            if requested_selectors - seen_aliases:
+            if requested_selectors - seen_aliases - seen_files:
                 raise DeclarationError("selector does not identify a collected case")
             progress["grouping_complete"] = True
         return summary()
@@ -887,6 +889,10 @@ def run(
                             raise InfrastructureError(
                                 "collected inventory disagrees with frozen declarations"
                             )
+                        seen_files.update(
+                            hashlib.sha256(name.encode()).hexdigest()
+                            for name in collection_unit.tests
+                        )
                         if enabled_inventory and collected["exit_code"] == 0 and not reused:
                             pending.stage(
                                 inventory_path, inventory_key, collected, kind="collection"
@@ -913,7 +919,7 @@ def run(
                             scoped.append((suite, item, collected["items"]))
                     if not ordinary_sessions(scoped):
                         return summary()
-                    if requested_selectors - seen_aliases:
+                    if requested_selectors - seen_aliases - seen_files:
                         raise DeclarationError("selector does not identify a collected case")
 
                     jobs, scopes, digests = [], {}, {}
