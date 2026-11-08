@@ -151,7 +151,9 @@ def test_execution_success_cannot_claim_zero_cases():
     from pytest_telescope.result import validate_result
 
     empty = good_result()
-    empty.update(collected=0, passed=0, case_ids=[])
+    empty.update(collected=0, passed=0, case_ids=[], case_results=[])
+    # An empty completed response is valid for no-tests, but not as a successful execution.
+    assert validate_result(empty | {"exit_code": 5})
     assert not validate_result(empty, successful_only=True)
 
 
