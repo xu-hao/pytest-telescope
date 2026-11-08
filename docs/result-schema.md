@@ -96,7 +96,7 @@ under the current identity, not a newly executed case.
 
 ## Atomic groups and member outcomes
 
-Schema 3 applies to both modes and both routes. When `grouping_complete` is true, every selected known case belongs to exactly one group.
+Schema 4 applies to both modes and both routes. When `grouping_complete` is true, every selected known case belongs to exactly one group.
 Unselected cases have `group_id: null`; selected known cases can also have null group IDs
 when an earlier inventory or group-size refusal prevents completed planning. Groups appear in deterministic suite/module/
 first-selected-member order. `case_ids` retains actual selected pytest order after
