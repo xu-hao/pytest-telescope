@@ -5,14 +5,14 @@
       "case_outcomes": {
         "cached_passed": 0,
         "cached_skipped": 0,
-        "fresh_passed": 3,
-        "fresh_skipped": 0
+        "fresh_passed": 2,
+        "fresh_skipped": 1
       },
       "cases": {
         "collected": 3,
         "failed": 0,
-        "passed": 3,
-        "skipped": 0
+        "passed": 2,
+        "skipped": 1
       },
       "collection": {
         "collected": 3,
@@ -135,10 +135,10 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "not_run": 0,
           "outcome": "executed",
-          "passed": 1,
+          "passed": 0,
           "profile": "case-v2",
           "route": "scoped",
-          "skipped": 0,
+          "skipped": 1,
           "stop_reason": null,
           "suite": "default",
           "timing_complete": true,
@@ -230,7 +230,7 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "name": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
           "outcome": "executed",
-          "passed": 1,
+          "passed": 0,
           "reason": "",
           "reports": [
             {
@@ -239,9 +239,13 @@
               "skip_reason": null
             },
             {
-              "outcome": "passed",
+              "outcome": "skipped",
               "phase": "call",
-              "skip_reason": null
+              "skip_reason": {
+                "kind": "skip",
+                "profile": "pytest-reason-sha256-v1",
+                "sha256": "2f0ee7f1fc690b5f7edd118cbf8ccde7030420743324ee687de1fd9e92b8aa8b"
+              }
             },
             {
               "outcome": "passed",
@@ -249,10 +253,10 @@
               "skip_reason": null
             }
           ],
-          "result_status": "passed",
+          "result_status": "skipped",
           "route": "scoped",
           "selected": true,
-          "skipped": 0,
+          "skipped": 1,
           "suite": "default",
           "worker_seconds": 0.36
         },
@@ -297,16 +301,16 @@
     },
     "mixed_warm_run": {
       "case_outcomes": {
-        "cached_passed": 2,
-        "cached_skipped": 0,
+        "cached_passed": 1,
+        "cached_skipped": 1,
         "fresh_passed": 1,
         "fresh_skipped": 0
       },
       "cases": {
         "collected": 3,
         "failed": 0,
-        "passed": 3,
-        "skipped": 0
+        "passed": 2,
+        "skipped": 1
       },
       "collection": {
         "collected": 3,
@@ -429,10 +433,10 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "not_run": 0,
           "outcome": "reused",
-          "passed": 1,
+          "passed": 0,
           "profile": "case-v2",
           "route": "scoped",
-          "skipped": 0,
+          "skipped": 1,
           "stop_reason": null,
           "suite": "default",
           "timing_complete": true,
@@ -524,7 +528,7 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "name": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
           "outcome": "reused",
-          "passed": 1,
+          "passed": 0,
           "reason": "",
           "reports": [
             {
@@ -533,9 +537,13 @@
               "skip_reason": null
             },
             {
-              "outcome": "passed",
+              "outcome": "skipped",
               "phase": "call",
-              "skip_reason": null
+              "skip_reason": {
+                "kind": "skip",
+                "profile": "pytest-reason-sha256-v1",
+                "sha256": "2f0ee7f1fc690b5f7edd118cbf8ccde7030420743324ee687de1fd9e92b8aa8b"
+              }
             },
             {
               "outcome": "passed",
@@ -543,10 +551,10 @@
               "skip_reason": null
             }
           ],
-          "result_status": "passed",
+          "result_status": "skipped",
           "route": "scoped",
           "selected": true,
-          "skipped": 0,
+          "skipped": 1,
           "suite": "default",
           "worker_seconds": 0
         },
