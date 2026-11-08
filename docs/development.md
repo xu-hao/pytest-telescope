@@ -38,6 +38,15 @@ corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test 
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 
+Functional tests use controlled inputs. An owned native tool or browser integration
+belongs in that suite only when its relevant runtime and input closure are explicit and
+the result does not depend on nonportable ambient installations. Pinning whatever a
+developer happens to have installed does not make that installation a portable fixture.
+Host-dependent runtime compatibility checks run separately under
+[`benchmarks/frozen_runtime`](benchmark.md#installed-runtime-compatibility-benchmarks),
+outside the default functional gate. The frozen-tool declaration, data-view, identity
+and injected lifecycle controls remain required functional tests.
+
 For documentation alone:
 
 ```sh
