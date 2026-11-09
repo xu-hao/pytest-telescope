@@ -126,7 +126,7 @@ def wheel_identity(path):
 def source_identity(root):
     def git(*args):
         result = subprocess.run(["git", "-C", str(root), *args], check=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+                                capture_output=True, timeout=30)
         if len(result.stdout) > MAX_METADATA or len(result.stderr) > MAX_METADATA:
             raise ValueError("source identity output exceeds its bound")
         return result.stdout.decode().strip()

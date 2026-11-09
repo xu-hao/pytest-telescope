@@ -6,7 +6,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-from gate import Stages, candidate_binding, file_identity, node_identity, source_identity, write_json
+from gate import (
+    Stages,
+    candidate_binding,
+    file_identity,
+    node_identity,
+    source_identity,
+    write_json,
+)
 
 
 def main() -> None:
