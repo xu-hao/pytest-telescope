@@ -7,6 +7,7 @@ import pytest
 from test_helper_registry import project_at, put
 from test_helper_registry_contract import passed
 
+
 def helper_with_environment(root):
     put(
         root,
@@ -37,7 +38,9 @@ def test_helper_environment_is_not_a_grant_or_an_unrelated_cache_dependency(tmp_
     for name in ("HELPER_OPTION", "CONSUMER_OPTION"):
         monkeypatch.delenv(name, raising=False)
     for name, environment in (("active", ["CONSUMER_OPTION"]), ("unrelated", [])):
-        expected = '(None, "", "owned-first-option", "owned-second-option")' if environment else "(None,)"
+        expected = (
+            '(None, "", "owned-first-option", "owned-second-option")' if environment else "(None,)"
+        )
         put(
             root,
             f"tests/test_{name}.py",
@@ -143,7 +146,9 @@ def test_teardown(optional_teardown):
     assert warm["case_outcomes"]["cached_skipped"] == 3
     assert cold["cases"]["skipped"] == warm["cases"]["skipped"] == 3
     for phase in ("setup", "call", "teardown"):
-        encoded = json.dumps(["default", f"tests/test_consumer.py::test_{phase}"], separators=(",", ":"))
+        encoded = json.dumps(
+            ["default", f"tests/test_consumer.py::test_{phase}"], separators=(",", ":")
+        )
         case_id = hashlib.sha256(encoded.encode()).hexdigest()
         first = next(row for row in cold["units"] if row["case_id"] == case_id)
         second = next(row for row in warm["units"] if row["case_id"] == case_id)
@@ -164,5 +169,10 @@ def test_teardown(optional_teardown):
     recorded = json.dumps([cold, warm, changed]).encode() + b"".join(
         path.read_bytes() for path in (root / ".pytest-telescope/cache").rglob("*.json")
     )
-    for raw in (b"owned helper setup optional", b"owned helper call optional", b"owned helper teardown optional", b"owned-helper-only-option"):
+    for raw in (
+        b"owned helper setup optional",
+        b"owned helper call optional",
+        b"owned helper teardown optional",
+        b"owned-helper-only-option",
+    ):
         assert raw not in recorded
