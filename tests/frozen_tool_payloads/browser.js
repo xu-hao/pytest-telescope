@@ -23,6 +23,7 @@ async function main() {
     let exitCode = null;
     let exitSignal = null;
     let spawnError = null;
+    const transportErrors = [];
     let closed = false;
     const exited = new Promise((resolve) => browser.once("close", (code, signal) => {
         exitCode = code;
@@ -57,6 +58,12 @@ async function main() {
         fail("browser process could not start");
     });
     browser.once("exit", () => fail("browser transport closed"));
+    for (const [name, stream] of [["stderr", browser.stderr], ["request", browser.stdio[3]], ["response", browser.stdio[4]]]) {
+        stream.once("error", (error) => {
+            transportErrors.push({stream: name, code: error.code, errno: error.errno, syscall: error.syscall});
+            fail("browser " + name + " pipe failed");
+        });
+    }
     browser.stderr.on("data", (chunk) => {
         stderrBytes += chunk.length;
         stderrHash.update(chunk);
@@ -185,7 +192,7 @@ async function main() {
             if (commandError !== null || cleanupError !== null || exitCode !== 0) {
                 try {
                     process.stderr.write("OWNED_BROWSER_OBSERVATION " + JSON.stringify({
-                        exitCode, exitSignal, spawnError, commandError, cleanupError,
+                        exitCode, exitSignal, spawnError, transportErrors, commandError, cleanupError,
                         stderr: {bytes: stderrBytes, sha256: stderrHash.digest("hex"),
                             truncated: stderrBytes > stderrRetained,
                             base64: Buffer.concat(stderrPrefix).toString("base64")},
