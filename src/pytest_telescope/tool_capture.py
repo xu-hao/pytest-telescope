@@ -2,7 +2,6 @@
 
 import hashlib
 import os
-import shutil
 import stat
 import threading
 import time
@@ -161,39 +160,52 @@ def _tree_names(source, budget):
     return found
 
 
-def _writable_owned(directory):
-    """Only a capture-owned tree is passed here, after all consuming views are gone."""
+def _remove(directory):
+    """Remove verified owned entries once, with one deadline for the whole cleanup."""
     from .sandbox import CleanupError
 
-    pending = [directory]
+    deadline = time.monotonic() + 60
     visited = 0
-    while pending:
-        path = pending.pop()
+
+    def check():
+        if time.monotonic() >= deadline:
+            raise CleanupError("owned frozen-tool cleanup deadline exceeded")
+
+    def remove(parent, leaf):
+        nonlocal visited
+        check()
         visited += 1
         if visited > declaration.MAX_VISITS:
             raise CleanupError("owned frozen-tool cleanup exceeds its entry limit")
-        with _parent(path) as (parent, leaf):
+        before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if before.st_uid != os.getuid():
+            raise CleanupError("frozen-tool cleanup encountered unowned material")
+        if stat.S_ISDIR(before.st_mode):
             descriptor = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-        try:
-            info = os.fstat(descriptor)
-            os.fchmod(descriptor, stat.S_IMODE(info.st_mode) | 0o700)
-            with os.scandir(descriptor) as children:
-                for entry in children:
-                    visited += 1
-                    if visited > declaration.MAX_VISITS:
-                        raise CleanupError("owned frozen-tool cleanup exceeds its entry limit")
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(path / entry.name)
-        finally:
-            os.close(descriptor)
-
-
-def _remove(directory):
-    from .sandbox import CleanupError
+            try:
+                opened = os.fstat(descriptor)
+                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                    raise CleanupError("owned frozen-tool cleanup directory changed")
+                os.fchmod(descriptor, stat.S_IMODE(opened.st_mode) | 0o700)
+                with os.scandir(descriptor) as children:
+                    for entry in children:
+                        remove(descriptor, entry.name)
+                check()
+                current = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise CleanupError("owned frozen-tool cleanup directory moved")
+                os.rmdir(leaf, dir_fd=parent)
+            finally:
+                os.close(descriptor)
+        elif stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+            check()
+            os.unlink(leaf, dir_fd=parent)
+        else:
+            raise CleanupError("owned frozen-tool cleanup encountered an unsupported type")
 
     try:
-        _writable_owned(directory)
-        shutil.rmtree(directory)
+        with _parent(directory) as (parent, leaf):
+            remove(parent, leaf)
     except OSError as exc:
         raise CleanupError("owned frozen-tool cleanup failed") from exc
 
@@ -223,6 +235,7 @@ class Capture:
         self.views = {}
         self.view_lock = threading.RLock()
         self.sandbox = sandbox
+        self.materialized = set()
 
     def _budget(self, deadline=None):
         return Budget(time.monotonic() + self.timeout if deadline is None else deadline, self.cancellation)
@@ -235,6 +248,7 @@ class Capture:
             self.graphs = {}
             self.runtimes = {}
             self.views = {}
+            self.reserve(self._copy_paths(), self._budget())
             self.directory.mkdir(mode=0o700)
             try:
                 deadline = time.monotonic() + self.timeout
@@ -253,6 +267,30 @@ class Capture:
 
     def _cleanup(self):
         _remove(self.directory)
+        self.materialized.clear()
+
+    def _copy_paths(self):
+        yield self.directory
+        yield self.directory / ".views"
+        for name, tool in self.manifest.tools.items():
+            target = self.directory / name
+            yield target
+            for root in tool.document["roots"]:
+                for row in root["entries"]:
+                    yield target / root["id"] / row["path"]
+
+    def reserve(self, paths, budget):
+        """Accept the complete addition atomically before any new path is created."""
+        addition = set()
+        for path in paths:
+            budget.tick()
+            if not path.is_relative_to(self.directory):
+                raise InfrastructureError("materialization escaped its owned capture")
+            if path not in self.materialized:
+                addition.add(path)
+            if len(self.materialized) + len(addition) > declaration.MAX_VISITS:
+                declaration.unsupported("bounds", "aggregate frozen-tool material exceeds its path limit")
+        self.materialized.update(addition)
 
     def _pins(self, tool):
         for lock in tool.document["locks"]:

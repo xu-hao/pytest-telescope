@@ -123,6 +123,7 @@ class Projection:
         ]
         self.identity = digest(payload)
         self.directory = capture.directory / ".views" / self.identity
+        capture.reserve(self.planned_paths(originals), self.budget)
         self.directory.mkdir(mode=0o700)
         for index, destination in enumerate(self.closed):
             self.budget.tick()
@@ -168,6 +169,31 @@ class Projection:
             row = self.entries.get(directory)
             directory.chmod(row[1] & 0o555 if row and row[0] == "directory" else 0o555)
         self.directory.chmod(0o555)
+
+    def planned_paths(self, originals):
+        """Enumerate all new projection paths, including empty ancestors and controls."""
+        yield self.directory
+        for index, destination in enumerate(self.closed):
+            root = self.directory / ("closed-" + str(index))
+            yield root
+            for filename in originals:
+                self.budget.tick()
+                if not Path(filename).is_relative_to(destination):
+                    continue
+                if self.native and filename == "/etc/ld.so.preload":
+                    continue
+                path = root / Path(filename).relative_to(destination)
+                yield path
+                while path != root:
+                    path = path.parent
+                    yield path
+            if self.native and destination == "/etc":
+                yield root / "ld.so.preload"
+        if self.commands:
+            directory = self.directory / "commands"
+            yield directory
+            for command in self.commands:
+                yield directory / command
 
     def materialize(self, graph, key, destination):
         self.budget.tick(visit=True)
