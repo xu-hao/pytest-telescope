@@ -77,6 +77,35 @@ class TestVariants:
 The parameter receives all four names plus its defaults, bundles and global names.
 Another case does not receive `PARAM_FEATURE` unless it declares or inherits it.
 
+Inheritance follows the actual collected case's module, applicable class ancestry and
+defining test function. A normally inherited method can therefore inherit declarations
+from its defining base class and other applicable classes in the method resolution
+order; its source owner need not be a prefix of the collected subclass's name.
+These declarations must still belong to the case's containing test source.
+
+A marker inside a literal `pytest.param` belongs only to that alternative in its
+enclosing parametrization dimension. Class-level and function-level dimensions compose,
+including stacked dimensions and dimensions with several argument names. Equal values,
+duplicate or explicit parameter IDs, and the enclosing class/function name do not make
+two alternatives interchangeable. A marks list does not change which alternative owns
+its Telescope declaration. An unmarked alternative receives no declaration from its
+marked sibling.
+
+Authenticating a literal call does not authorize moving its resulting Mark to another
+case. For example, if `test_left` declares `left.txt` and sibling `test_right` declares
+`right.txt`, appending `test_left.pytestmark` to `test_right.pytestmark` is unsupported,
+even when the Mark is unchanged and both functions occupy the same source file.
+Put shared declarations on their legitimate module/class ancestor or repeat a direct
+literal declaration on each consumer instead. The development contract requires a
+declaration refusal before an unrelated declaration changes the consumer's route,
+inputs, metadata, environment, absence assertions or cache policy.
+
+Every applicable declaration remains required, including explicit empty scope lists
+and inherited `cache=False`. Missing required declarations and invalid extra
+declarations both refuse; ignoring the extra marker is not a supported recovery.
+The [collection agreement](execution-contract.md#static-discovery-and-real-pytest-agreement)
+defines ownership validation and collection-profile limits.
+
 Keep shared import-time and parametrization dependencies in each consumer's scope.
 Collection of wholly scoped modules runs with the union of their potential scopes; an
 individual execution never borrows another case's inputs. Each execution must collect
@@ -187,7 +216,13 @@ The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
 Only named user variables are forwarded; runtime-controlled variables remain reserved.
 Each `env` is a literal list of at most 4,096 nonempty identifiers of at most 4,096
 characters each. `PYTHONPATH`, `PYTHONHOME`, `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`,
-`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, and names beginning `TELESCOPE_` are reserved.
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, `PATH`, `HOME`, `TMPDIR`,
+`PYTHONDONTWRITEBYTECODE`, and names beginning `TELESCOPE_` are reserved.
+Every declaration route rejects these names before any session starts, whether the
+invoking variable is absent, empty or populated: top-level `env`, defaults, every
+bundle (including unused and nested bundles), and module, class, function and parameter
+markers. The Python API raises `DeclarationError`; the CLI reports
+`declaration_error` with exit status 4. A declaration cannot replace a fixed setting.
 The invoking environment is captured once. Absence, an empty value and a nonempty value
 are distinct; a change invalidates only consumers of that name, except that top-level
 `env` names apply to every scoped case. Defaults add names to scoped cases but do not

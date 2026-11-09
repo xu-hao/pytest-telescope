@@ -34,7 +34,7 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 6
+SCHEMA = 7
 RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
@@ -320,27 +320,14 @@ def selected_arguments(arguments, unit, all_tests):
 
 
 def inventory_matches_manifest(result, manifest):
+    from .result import ownership_matches
+
     files = set(manifest.inventory)
     if any(skip["file"] not in files for skip in result["collection_skips"]):
         return False
-    registry = manifest.registry_by_id
-    required = {}
-    for row in manifest.registry:
-        if row["kind"] in {"scope", "decorator"}:
-            owner = "::".join([row["file"], *row["owner"]])
-            required.setdefault(hashlib.sha256(owner.encode()).hexdigest(), set()).add(row["id"])
     for item in result["items"]:
-        if item["file"] not in files:
+        if item["file"] not in files or not ownership_matches(item, manifest.ownership_index):
             return False
-        origins = set(item["origins"])
-        if any(
-            origin not in registry or registry[origin]["file"] != item["file"] for origin in origins
-        ):
-            return False
-        aliases = set(item["aliases"])
-        for alias in aliases:
-            if not required.get(alias, set()).issubset(origins):
-                return False
     return True
 
 
@@ -395,7 +382,7 @@ def _file_digest(inventory, filename):
     return fingerprint(
         sorted(
             (
-                {"case_id": entry["case_id"], "origins": entry["origins"]}
+                {key: entry[key] for key in ("case_id", "origins", "owners", "parameters")}
                 for entry in inventory
                 if entry["file"] == filename
             ),

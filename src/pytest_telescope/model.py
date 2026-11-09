@@ -78,6 +78,12 @@ class Manifest:
     def registry_by_id(self):
         return {row["id"]: row for row in self.registry}
 
+    @cached_property
+    def ownership_index(self):
+        from .result import ownership_index
+
+        return ownership_index(self.registry)
+
     @property
     def scope_possible(self):
         """Any scope declaration in the effective structural boundary needs the sandbox."""
@@ -106,6 +112,10 @@ def sequence(value, label):
 def environment_names(value):
     names = sequence(value, "env")
     forbidden = {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "PYTHONDONTWRITEBYTECODE",
         "PYTHONPATH",
         "PYTHONHOME",
         "PYTEST_ADDOPTS",
@@ -633,12 +643,11 @@ def validate_scope(root, unit):
 
 def scoped_item(manifest, item):
     """A collected case is scoped when any inherited literal origin declares a scope."""
+    from .result import ownership_matches
+
     registry = manifest.registry_by_id
-    if any(
-        origin not in registry or registry[origin]["file"] != item["file"]
-        for origin in item["origins"]
-    ):
-        raise InfrastructureError("collected marker origin disagrees with static declarations")
+    if not ownership_matches(item, manifest.ownership_index):
+        raise InfrastructureError("collected marker ownership disagrees with static declarations")
     return any(scoping(registry[origin]) for origin in item["origins"])
 
 
