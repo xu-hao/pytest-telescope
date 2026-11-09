@@ -30,7 +30,7 @@ def project_at(tmp_path):
     put(
         root,
         "helpers/support.py",
-        'import pytest\nfrom pathlib import Path\n'
+        "import pytest\nfrom pathlib import Path\n"
         'pytestmark = pytest.mark.telescope(inputs=["helper-private.txt"])\n'
         'def answer(): return Path("data/answer.txt").read_text().strip()\n',
     )
@@ -111,3 +111,57 @@ def test_declared_helper_hidden_dynamic_marker_is_refused(tmp_path):
         controller.run(root, workers=1)
 
     no_new_records(root)
+
+
+@pytest.mark.parametrize("target", ["implementation.py", "implementation.source"])
+def test_declared_helper_leaf_alias_preserves_import_origin(tmp_path, target):
+    root = project_at(tmp_path)
+    put(
+        root,
+        "helpers/" + target,
+        f"""
+import stat
+from pathlib import Path
+import pytest
+
+MODULE_FILE = __file__
+assert Path(__file__).name == "alias.py"
+assert stat.S_ISLNK(Path(__file__).lstat().st_mode)
+assert Path(__file__).readlink().as_posix() == {target!r}
+pytestmark = pytest.mark.telescope(inputs=["helper-private.txt"])
+
+def answer():
+    return Path("data/answer.txt").read_text().strip()
+""",
+    )
+    (root / "helpers/alias.py").symlink_to(target)
+    inputs = ["helpers/__init__.py", "helpers/alias.py", "helpers/" + target, "data/answer.txt"]
+    put(
+        root,
+        "tests/test_consumer.py",
+        f"""
+import stat
+from pathlib import Path
+import pytest
+pytestmark = pytest.mark.telescope(inputs={inputs!r})
+from helpers.alias import MODULE_FILE, answer
+
+def test_answer():
+    assert answer() == "42"
+    assert Path(MODULE_FILE).name == "alias.py"
+    assert stat.S_ISLNK(Path(MODULE_FILE).lstat().st_mode)
+    assert Path(MODULE_FILE).readlink().as_posix() == {target!r}
+    assert not Path("helper-private.txt").exists()
+    assert not Path("helpers/support.py").exists()
+""",
+    )
+
+    report = controller.run(root, workers=1)
+
+    assert report["status"] == "passed", report
+    assert report["inventory_complete"] is True
+    assert report["counts"]["selected"] == report["counts"]["executed"] == 1
+    assert report["cases"]["passed"] == 1
+    assert [row["file"] for row in report["units"]] == ["tests/test_consumer.py"]
+    assert (root / "helpers/alias.py").is_symlink()
+    assert (root / "helpers/alias.py").readlink().as_posix() == target
