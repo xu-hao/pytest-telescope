@@ -36,6 +36,9 @@ make_plan(root, *, suites=None, structural_files=None)
   `root`.
 - `run` raises `DeclarationError` for invalid declarations and `UnsupportedCapability`
   (a `DeclarationError` subclass with a `capability` attribute) for refusals.
+  After a session has started, these typed exceptions can retain immutable, versioned
+  [refusal accounting](result-schema.md#retained-observations-after-a-late-refusal).
+  Early refusals leave their explicit `accounting` property `None`.
   `error_result(error)` turns either, or an `InfrastructureError`, into the refusal
   envelope.
 

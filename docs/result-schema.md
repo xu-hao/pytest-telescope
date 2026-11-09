@@ -277,6 +277,82 @@ Refusal status is `unsupported`, `declaration_error`, or `infrastructure_error`.
 `sandbox:bubblewrap`, `sandbox:namespaces` and `sandbox:environment`. A refusal creates no
 reusable result. The runner does not widen the view or fall back to ordinary execution.
 
+### Retained observations after a late refusal
+
+The development contract preserves the typed refusal when a declaration or capability
+error occurs after a collection or execution session has started. The Python API still
+raises `DeclarationError` or its `UnsupportedCapability` subclass; the latter retains
+its capability. CLI conversion still produces `kind: "refusal"`, the existing refusal
+status and exit code. Inventory fields keep their existing meaning: complete validated
+membership for every selected suite, independently of success. Early refusals have
+`inventory_complete: false` and `inventory_digest: null`; late refusals retain the actual
+known inventory facts. Available observations do not turn this into a successful run.
+
+Such a refusal adds `accounting` only when a session actually started and retention of
+its observations was attempted. Early preflight/declaration refusals omit this field.
+They do not fabricate a zero-run summary. Accounting has exactly one of these shapes:
+
+```json
+{"version": 1, "state": "unavailable", "reason": "bounds"}
+```
+
+The available variant has exactly `version: 1`, `state: "available"` and
+`observations`. `observations` has exactly these existing run-accounting fields:
+
+| Fields | Retained meaning |
+| --- | --- |
+| `execution`, `suites` | Existing mode/profile/workers and selected suite names. |
+| `inventory_complete`, `inventory_digest`, `grouping_complete` | Actual known membership and planning state; inventory fields agree with the outer refusal. |
+| `counts`, `route_counts`, `cases`, `case_outcomes` | Existing counts of known, selected, attempted, fresh and reused cases. |
+| `collection`, `units`, `groups` | Existing collection observations and actual case/group phase, outcome and lifecycle evidence. |
+| `elapsed_seconds`, `setup_seconds` | Existing controller timing measurements. |
+
+It has no `schema`, `kind`, overall `status`, `error`, `capability` or `sandbox` field.
+It adds no raw source paths, environment values, output or cache/context maps. Actual
+member `result_status: "passed"` and group outcomes remain meaningful observations;
+there is no second overall success verdict. Known unrun cases, unresolved attempts,
+null measurements and actual attempt counts retain their existing distinctions.
+All known collected cases remain represented even if group planning stopped partway;
+an attempted session with unavailable observations is not an unattempted session.
+Pending groups do not become cache eligible, and the refusal publishes no new pending
+successes. Previously valid records and previously accepted reuse evidence survive.
+
+The variant and every nested record are strict: unknown versions, states, reasons,
+fields or profiles, booleans in integer fields, malformed paths/digests, nonfinite or
+negative timing, and inconsistent counts or references are invalid. Existing schema 4
+cardinality, path, digest and phase rules apply. Route counts sum to total counts;
+case/phase/outcome totals reconcile with observed units; group members and suite
+references identify known rows. Incomplete planning cannot invent a group or a pass.
+
+The complete refusal, including its diagnostic metadata and accounting wrapper, must
+fit the existing 64 MiB output budget. Encoding is bounded incrementally. If complete
+observations exceed an encoding or cardinality bound, emit the exact `unavailable`
+variant above, without truncated observations, fabricated zero counts or silent omission
+of the known late session. Reserve the actual refusal metadata before accepting an
+available payload. Invalid producer types or inconsistent observations are terminal
+internal failures, not a reason to coerce data into `state: "unavailable"`.
+The unavailable variant does not erase independently established inventory facts:
+retain a proved complete inventory and its digest, or false/null when completeness
+was not established. It supplies no invented case, group or attempt counts.
+
+`DeclarationError` explicitly owns `accounting: RefusalAccounting | None`, initialized
+when the exception is constructed; `UnsupportedCapability` preserves that property.
+The producer attaches only a validated `RefusalAccounting` value through its declared
+interface. Retained observations are deeply immutable between attachment and rendering;
+arbitrary mutable dictionaries, guessed attributes and fallback keys are not accepted.
+`error_result` reads this explicit property and serializes the same strict variant.
+
+For example, an ordinary body increments a counter once and a later scoped view raises
+`UnsupportedCapability("tool:layout", ...)`. Previously the bare refusal lost the
+available case accounting. The development result keeps that exception class, capability
+and CLI exit 4, and adds `accounting.version: 1`, `state: "available"` with
+`observations.route_counts.ordinary.executed: 1` and the actual ordinary unit/group
+evidence. These named values are an excerpt, not a complete sample payload. The counter
+is not incremented again, known scoped work stays unrun, and no pending record is
+published. Structurally knowable environment/tool conflicts are checked before ordinary
+bodies; genuinely deferred errors retain observations rather than promise universal
+preflight discovery.
+
 A refusal or `inventory_complete: false` alone does not prove that no earlier case
 executed: ordinary sessions may already have run. Sandbox prerequisites are checked
 before any session starts, so a `sandbox:*` refusal happens before test code runs. Do not

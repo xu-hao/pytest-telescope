@@ -198,6 +198,8 @@ failure, not a valid snapshot. Old valid cache records survive unsuccessful new 
 | Registered/referenced tools | 64 |
 | Source anchors per tool | 32 |
 | Entries / traversal visits across selected tools | 100,000 / 200,000 |
+| Aggregate materialized owned paths, including every view | 200,000 |
+| Normal owned-tool cleanup / abandoned recovery | 60 seconds each |
 | Path components / UTF-8 path or link bytes / link hops | 64 / 4,096 / 32 |
 | Individual file / bytes per tool / aggregate tool bytes | 512 MiB / 2 GiB / 4 GiB |
 | Manifest encoding per tool / aggregate manifest bytes | 16 MiB / 32 MiB |
@@ -240,6 +242,28 @@ and publish none of the invocation's pending successes. Remove only owned stagin
 restore directory traversal/write permissions only on verified owned material after
 views finish, never on source paths or symlink targets. A refusal does not authorize an
 ordinary replay or prove earlier ordinary cases never ran.
+
+Materialization reserves a complete bounded set of new owned paths before creating it.
+The aggregate includes capture copies, tool and projection roots, empty ancestors,
+closed-view members, command directories/symlinks and fixed loader controls. Count each
+directory-entry path once; separate hardlink destinations count separately even when
+they share an already-owned inode. Reusing an existing view adds no paths. A reservation
+that would exceed 200,000 refuses with `tool:bounds` before accepting the view or
+publishing results, without truncation or leaving new view members behind.
+
+After a partial failure, retain the reservation until verified owned cleanup removes
+its paths. A fresh capture attempt resets accounting only after complete cleanup.
+Normal removal and abandoned recovery use the same capacity and a 60-second deadline,
+counting each owned path once rather than counting a directory again when traversing
+its children. Neither follows symlink targets nor changes source permissions. Cleanup
+uncertainty is terminal and preserves previously valid records. These bounds govern
+owned tool material, not caller CPU, memory, process or filesystem resource policy.
+
+A late typed declaration/capability refusal preserves its type and capability while
+retaining available session observations in the strict versioned
+[refusal accounting](result-schema.md#retained-observations-after-a-late-refusal)
+object. It is still a refusal, with no nested overall success verdict and no pending
+publication. An early refusal has no accounting object; bounded unavailability is explicit.
 
 Public evidence identifies tool names and failure categories, never external source
 paths, file contents, secret values or raw tool stderr. The cache and worker protocol
