@@ -13,8 +13,8 @@ FIELDS = frozenset({
     "counts", "route_counts", "cases", "case_outcomes", "collection", "units", "groups",
     "elapsed_seconds", "setup_seconds",
 })
-OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
-COUNTS = {*OUTCOMES, "selected"}
+OUTCOMES = ("executed", "reused", "failed", "infrastructure_error", "not-selected")
+COUNTS = {*OUTCOMES, "unsupported", "selected"}
 
 
 class AccountingBounds(ValueError):
@@ -76,6 +76,7 @@ def skips(rows, *, suites=None):
 
 def counts(rows):
     result = {name: sum(row["outcome"] == name for row in rows) for name in OUTCOMES}
+    result["unsupported"] = 0
     result["selected"] = sum(row["selected"] for row in rows)
     return result
 
@@ -123,7 +124,10 @@ def validate_observations(value):
         else:
             require(timing(row["worker_seconds"]))
         if not row["selected"]:
-            require(row["group_id"] is None and row["attempts"] == 0 and status is None and row["collected"] == 0)
+            require(row["group_id"] is None)
+        if row["group_id"] is None:
+            require(row["attempts"] == 0 and status is None and row["collected"] == 0)
+            require(row["outcome"] == ("infrastructure_error" if row["selected"] else "not-selected"))
         if row["outcome"] == "reused":
             require(row["route"] == "scoped" and row["attempts"] == 0 and row["complete"] and status in ("passed", "skipped"))
     count_record(value["counts"], counts(units))
