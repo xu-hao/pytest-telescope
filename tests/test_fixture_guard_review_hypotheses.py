@@ -280,4 +280,4 @@ def test_review_h2_default_unguarded_schema_and_cache(tmp_path):
         json.loads(path.read_text())
         for path in (tmp_path / ".pytest-telescope/cache").glob("*.json")
     ]
-    assert records and all(record["schema"] == 6 for record in records)
+    assert records and all(record["schema"] == 7 for record in records)
