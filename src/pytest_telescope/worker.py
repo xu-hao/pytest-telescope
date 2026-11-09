@@ -134,6 +134,7 @@ def main(request=None, *, ordinary=False):
     if type(registry) is not list or len(registry) > 100_000:
         raise ValueError("invalid declaration registry")
     registry_ids, scoped_origins = set(), set()
+    origin_files = {}
     for row in registry:
         if type(row) is not dict or set(row) != {
             "id",
@@ -164,6 +165,7 @@ def main(request=None, *, ordinary=False):
         if key in source_calls:
             raise ValueError("duplicate declaration position")
         registry_ids.add(row["id"])
+        origin_files[row["id"]] = filename
         source_calls[key] = (row["id"], canonical(row["kwargs"]))
         if SCOPE_FIELDS.intersection(row["kwargs"]):
             scoped_origins.add(row["id"])
@@ -268,6 +270,8 @@ def main(request=None, *, ordinary=False):
                     unchanged = False
                 if mark.args or not unchanged:
                     invalid("unregistered or modified telescope declaration")
+                if origin_files[origin[0]] != filename:
+                    invalid("a collected case inherited a foreign helper declaration")
                 declaration_ids.add(origin[0])
             chain = item.listchain()
             owner = [node.name for node in chain if isinstance(node, pytest.Class)]
