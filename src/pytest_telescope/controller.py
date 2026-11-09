@@ -507,8 +507,10 @@ def _guard_conditions(fixture_guard, condition_checks):
                 raise DeclarationError("invalid fixture guard condition")
             try:
                 size = len(value.encode("utf-8"))
-            except UnicodeError as exc:
-                raise DeclarationError("invalid fixture guard condition") from exc
+            except UnicodeError:
+                size = None
+            if size is None:
+                raise DeclarationError("invalid fixture guard condition")
             total += size
             if size > 4096 or total > 1_048_576:
                 raise DeclarationError("fixture guard condition limit exceeded")
