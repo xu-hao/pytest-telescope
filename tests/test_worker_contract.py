@@ -24,7 +24,8 @@ ENVIRONMENT = {"PATH": os.defpath}
 
 def good_result():
     return {
-        "protocol": 5,
+        "protocol": 8,
+        "declaration_error": False,
         "context_id": "d" * 64,
         "collection_skips": [],
         "case_results": [
@@ -167,7 +168,8 @@ def test_execution_case_binding_accepts_only_the_expected_case():
 
 def collection_record():
     return {
-        "protocol": 7,
+        "protocol": 10,
+        "declaration_error": False,
         "context_id": "d" * 64,
         "collection_skips": [],
         "kind": "collection",
