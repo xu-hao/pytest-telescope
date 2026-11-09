@@ -152,3 +152,30 @@ def test_item(): pass
         assert secret not in error.args
         assert repr(secret) not in repr(error)
         pending.extend([error.__context__, error.__cause__])
+
+
+def test_unguarded_post_body_exit_four_reports_declaration_error(tmp_path, monkeypatch):
+    configure(tmp_path)
+    put(tmp_path, "tests/test_late.py", '''import os
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_item():
+    os.write(1, b"F3_PLAIN_BODY\\n")
+    pytest.exit("synthetic exit", returncode=4)
+''')
+    original = sandbox.capture
+    events = []
+
+    def observe(argv, timeout, **kwargs):
+        code, output = original(argv, timeout, **kwargs)
+        if sandbox.REQUEST in argv:
+            request = json.loads(Path(argv[argv.index(sandbox.REQUEST) - 1]).read_text())
+            if request["mode"] == "batch":
+                events.append((code, b"F3_PLAIN_BODY\n" in output))
+        return code, output
+
+    monkeypatch.setattr(sandbox, "capture", observe)
+    with pytest.raises(DeclarationError) as error:
+        controller.run(tmp_path, arguments=["-s"])
+    assert type(error.value) is DeclarationError
+    assert events == [(4, True)]
