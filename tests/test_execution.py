@@ -217,17 +217,29 @@ def test_session_fixture_is_fresh_for_every_case(project):
 @pytest.mark.parametrize("corruption", ["zero-cases", "wrong-case"])
 def test_single_case_cache_cannot_reuse_empty_or_unrelated_success(project, corruption):
     from pytest_telescope.model import fingerprint
+    from pytest_telescope.result import validate_result
 
     assert run(project)["counts"]["executed"] == 1
     path = next((project / ".pytest-telescope/cache").glob("*.json"))
     stored = json.loads(path.read_text())
-    assert controller.read_record(path, stored["key"]) == stored["result"]
+    expected_case = stored["result"]["case_ids"][0]
+    assert controller.read_record(path, stored["key"], case_id=expected_case) == stored["result"]
     if corruption == "zero-cases":
-        stored["result"].update(collected=0, passed=0, failed=0, skipped=0, case_ids=[])
+        stored["result"].update(
+            collected=0, passed=0, failed=0, skipped=0, case_ids=[], case_results=[]
+        )
+        # The same empty evidence is valid as no-tests; it cannot claim successful execution.
+        assert validate_result(stored["result"] | {"exit_code": 5}, context_id=stored["key"])
     else:
-        stored["result"]["case_ids"] = ["f" * 64]
+        unrelated = "0" * 64 if expected_case != "0" * 64 else "1" * 64
+        stored["result"]["case_ids"] = [unrelated]
+        stored["result"]["case_results"][0]["case_id"] = unrelated
     stored["checksum"] = fingerprint(stored["result"])
     path.write_text(json.dumps(stored))
+    if corruption == "wrong-case":
+        # The record is a valid success in isolation; only its requested case binding fails.
+        assert controller.read_record(path, stored["key"]) == stored["result"]
+    assert controller.read_record(path, stored["key"], case_id=expected_case) is None
     rerun = run(project)
     assert rerun["counts"]["executed"] == 1
     assert rerun["counts"]["reused"] == 0

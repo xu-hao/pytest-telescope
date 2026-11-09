@@ -24,7 +24,20 @@ ENVIRONMENT = {"PATH": os.defpath}
 
 def good_result():
     return {
-        "protocol": 1,
+        "protocol": 5,
+        "context_id": "d" * 64,
+        "collection_skips": [],
+        "case_results": [
+            {
+                "case_id": "b" * 64,
+                "outcome": "passed",
+                "complete": True,
+                "reports": [
+                    {"phase": phase, "outcome": "passed", "skip_reason": None}
+                    for phase in ("setup", "call", "teardown")
+                ],
+            }
+        ],
         "nonce": "a" * 32,
         "exit_code": 0,
         "complete": True,
@@ -124,10 +137,12 @@ def test_valid_outcome_modes_and_nonce():
     assert not validate_result(record, nonce="c" * 32)
     failure = copy.deepcopy(record)
     failure.update(exit_code=1, passed=0, failed=1)
+    failure["case_results"][0]["outcome"] = "failed"
+    failure["case_results"][0]["reports"][1]["outcome"] = "failed"
     assert validate_result(failure)
     assert not validate_result(failure, successful_only=True)
     empty = copy.deepcopy(record)
-    empty.update(exit_code=5, collected=0, passed=0, case_ids=[])
+    empty.update(exit_code=5, collected=0, passed=0, case_ids=[], case_results=[])
     assert validate_result(empty)
     assert not validate_result(empty, successful_only=True)
 
@@ -136,7 +151,9 @@ def test_execution_success_cannot_claim_zero_cases():
     from pytest_telescope.result import validate_result
 
     empty = good_result()
-    empty.update(collected=0, passed=0, case_ids=[])
+    empty.update(collected=0, passed=0, case_ids=[], case_results=[])
+    # An empty completed response is valid for no-tests, but not as a successful execution.
+    assert validate_result(empty | {"exit_code": 5})
     assert not validate_result(empty, successful_only=True)
 
 
@@ -150,7 +167,9 @@ def test_execution_case_binding_accepts_only_the_expected_case():
 
 def collection_record():
     return {
-        "protocol": 4,
+        "protocol": 7,
+        "context_id": "d" * 64,
+        "collection_skips": [],
         "kind": "collection",
         "nonce": "a" * 32,
         "exit_code": 0,
@@ -235,12 +254,23 @@ def ordinary_record():
     return {
         **good_result(),
         "kind": "ordinary",
+        "protocol": 2,
         "inventory_complete": True,
         "dispatch_started": True,
         "declaration_error": False,
         "items": collection_record()["items"],
         "case_ids": ["c" * 64],
-        "case_results": [{"case_id": "c" * 64, "outcome": "passed", "complete": True}],
+        "case_results": [
+            {
+                "case_id": "c" * 64,
+                "outcome": "passed",
+                "complete": True,
+                "reports": [
+                    {"phase": phase, "outcome": "passed", "skip_reason": None}
+                    for phase in ("setup", "call", "teardown")
+                ],
+            }
+        ],
     }
 
 
@@ -351,7 +381,9 @@ def test_fresh_execution_result_must_match_requested_case(tmp_path, monkeypatch)
     def wrong_case(argv, timeout, **kwargs):
         request = Path(argv[argv.index(sandbox.REQUEST) - 1])
         result = good_result()
-        result.update(nonce=json.loads(request.read_text())["nonce"], case_ids=["c" * 64])
+        payload = json.loads(request.read_text())
+        result.update(nonce=payload["nonce"], context_id=payload["context_id"], case_ids=["c" * 64])
+        result["case_results"][0]["case_id"] = "c" * 64
         return 0, b"TELESCOPE_RESULT " + json.dumps(result).encode() + b"\n"
 
     monkeypatch.setattr(sandbox, "capture", wrong_case)
@@ -370,6 +402,7 @@ def test_fresh_execution_result_must_match_requested_case(tmp_path, monkeypatch)
                 invocation_directory=directory,
                 request={
                     "mode": "execution",
+                    "context_id": "d" * 64,
                     "registry": [],
                     "case_id": "d" * 64,
                     "expected_digest": "a" * 64,
@@ -405,7 +438,12 @@ def run_worker(root, box, source, *, arguments=(), timeout=10, registry=None):
                 max(timeout, 10),
                 root=root,
                 invocation_directory=directory,
-                request={"mode": "collection", "registry": registry, "selectors": []},
+                request={
+                    "mode": "collection",
+                    "context_id": "d" * 64,
+                    "registry": registry,
+                    "selectors": [],
+                },
             )
         digest = hashlib.sha256(
             json.dumps(
@@ -437,6 +475,7 @@ def run_worker(root, box, source, *, arguments=(), timeout=10, registry=None):
                             invocation_directory=directory,
                             request={
                                 "mode": "execution",
+                                "context_id": "e" * 64,
                                 "registry": registry,
                                 "case_id": item["case_id"],
                                 "expected_digest": digest,
@@ -575,7 +614,7 @@ with sandbox.invocation(root) as directory:
     with sandbox.invocation(root) as worker:
         sandbox.execute(box, project, ['test_subject.py'], {{}}, 40, root=root,
                         invocation_directory=worker,
-                        request={{'mode': 'execution', 'registry': [],
+                        request={{'mode': 'execution', 'context_id': 'd' * 64, 'registry': [],
                                  'case_id': case_id, 'expected_digest': digest}})
 """
     process = subprocess.Popen(
