@@ -46,6 +46,101 @@ def _digest(value):
     return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
+def owner_identity(filename, names):
+    return hashlib.sha256("::".join([filename, *names]).encode()).hexdigest()
+
+
+def dimension_identity(filename, position):
+    encoded = json.dumps([filename, position], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _ownership(item):
+    if (
+        type(item) is not dict
+        or not {"file", "owners", "parameters"}.issubset(item)
+        or not _path(item["file"])
+    ):
+        return False
+    owners, parameters = item["owners"], item["parameters"]
+    if (
+        type(owners) is not list
+        or not 1 <= len(owners) <= 128
+        or any(not _digest(owner) for owner in owners)
+        or owners != sorted(set(owners))
+        or owner_identity(item["file"], []) not in owners
+        or type(parameters) is not list
+        or len(parameters) > 128
+    ):
+        return False
+    dimensions = []
+    for parameter in parameters:
+        if (
+            type(parameter) is not dict
+            or set(parameter) != {"dimension", "index"}
+            or not _digest(parameter["dimension"])
+            or type(parameter["index"]) is not int
+            or not 0 <= parameter["index"] < 100_000
+        ):
+            return False
+        dimensions.append(parameter["dimension"])
+    return dimensions == sorted(set(dimensions))
+
+
+def ownership_index(registry):
+    """Index authenticated static owners once, rather than scanning every case pair."""
+    index = {}
+    for row in registry:
+        owner = owner_identity(row["file"], row["owner"])
+        spec = index.setdefault(owner, {"origins": set(), "dimensions": {}})
+        if row["kind"] != "parameter":
+            spec["origins"].add(row["id"])
+            continue
+        binding = row["parameter"]
+        dimension = dimension_identity(row["file"], binding["position"])
+        parameter = spec["dimensions"].setdefault(
+            dimension, {"count": binding["count"], "alternatives": {}}
+        )
+        parameter["alternatives"].setdefault(binding["index"], set()).add(row["id"])
+    return index
+
+
+def ownership_matches(item, index):
+    """Require every grant, and only grants of the actual lineage/alternatives.
+
+    The worker produces the bounded lineage and generation-time choices; consumers
+    repeat this converse check before routing, materialization or inventory reuse.
+    """
+    if not _ownership(item) or not {"origins", "aliases"}.issubset(item):
+        return False
+    for field, maximum in (("origins", 100_000), ("aliases", 128)):
+        values = item[field]
+        if (
+            type(values) is not list
+            or len(values) > maximum
+            or any(not _digest(value) for value in values)
+            or values != sorted(set(values))
+        ):
+            return False
+    owners = set(item["owners"])
+    choices = {row["dimension"]: row["index"] for row in item["parameters"]}
+    dimensions, expected = set(), set()
+    # Collected lexical ancestry cannot be omitted from ownership evidence.
+    if any(alias in index and alias not in owners for alias in item["aliases"]):
+        return False
+    for owner in owners:
+        if owner not in index:
+            continue
+        spec = index[owner]
+        expected.update(spec["origins"])
+        for dimension, parameter in spec["dimensions"].items():
+            dimensions.add(dimension)
+            if dimension not in choices or not 0 <= choices[dimension] < parameter["count"]:
+                return False
+            expected.update(parameter["alternatives"].get(choices[dimension], ()))
+    return set(choices) == dimensions and set(item["origins"]) == expected
+
+
 def _reason(value, *, collection=False):
     return (
         type(value) is dict
@@ -240,7 +335,7 @@ def validate_collection(result, nonce=None, successful_only=False, context_id=No
     """Validate real item inventory without interpreting it as executed test success."""
     if type(result) is not dict or set(result) != COLLECTION_FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 7:
+    if type(result["protocol"]) is not int or result["protocol"] != 8:
         return False
     if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5), context_id):
         return False
@@ -269,7 +364,11 @@ def _inventory(items):
             "aliases",
             "selected",
             "order",
+            "owners",
+            "parameters",
         }:
+            return False
+        if not _ownership(item):
             return False
         if (
             (type(item["case_id"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", item["case_id"]))
@@ -331,7 +430,7 @@ def validate_ordinary(result, nonce=None, context_id=None):
         return False
     if (
         type(result["protocol"]) is not int
-        or result["protocol"] != 2
+        or result["protocol"] != 3
         or result["kind"] != "ordinary"
     ):
         return False
