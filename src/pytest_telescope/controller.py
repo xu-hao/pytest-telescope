@@ -33,7 +33,7 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 6
+SCHEMA = 7
 RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
@@ -112,7 +112,7 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
 
 
 def write_record(path, key, result, *, kind="execution"):
-    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 6 else 1_048_576
+    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 9 else 1_048_576
     record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
     content = json.dumps(record, sort_keys=True).encode()
     if len(content) > limit:
