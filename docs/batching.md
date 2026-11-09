@@ -200,7 +200,10 @@ create a shared lifetime across those groups. This includes
 fixtures available through autouse, inheritance, imports, overrides and dynamic
 `request.getfixturevalue`, even when a fixture is absent from the static dependency
 closure. Uncertain owners or bindings and possible cross-file, package or suite sharing
-refuse conservatively. Extra refusals are permitted. Function-scoped fixtures do not
+refuse conservatively. Class lifetimes can be treated conservatively across the containing
+module when another selected group's class owner cannot be established. The present
+development adapter refuses package-scoped user fixture ownership rather than guessing
+the package owner. Extra refusals are permitted. Function-scoped fixtures do not
 create a shared instance across cases.
 
 The discovery union is only an inventory view. Before bodies, collect each candidate
