@@ -1,5 +1,6 @@
 """Actual CPython/pytest startup and consumer results with an explicit frozen runtime."""
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -33,6 +34,72 @@ def observe_native(monkeypatch):
     return observations
 
 
+def observe_worker_capture(monkeypatch, directory):
+    """Retain bounded private evidence; never alter the existing capture call/result."""
+    original = sandbox.capture
+    destination = directory / "worker-capture.jsonl"
+    destination.open("xb").close()
+    state = {"calls": 0, "bytes": 0, "overflow": False}
+    maximum = 2 * 1024 * 1024
+
+    def record(argv, result=None, error=None):
+        state["calls"] += 1
+        if state["overflow"]:
+            return
+        row = {"call": state["calls"]}
+        encoded_argv = json.dumps(argv, ensure_ascii=True).encode()
+        oversized = state["calls"] > 4 or len(encoded_argv) > 65536
+        if len(encoded_argv) <= 65536:
+            row["argv"] = argv
+        else:
+            row.update(argv_bytes=len(encoded_argv), argv_sha256=hashlib.sha256(encoded_argv).hexdigest())
+        if error is not None:
+            row["exception_type"] = type(error).__module__ + "." + type(error).__qualname__
+        else:
+            code, output = result
+            row.update(returncode=code, output_bytes=len(output), output_sha256=hashlib.sha256(output).hexdigest())
+            if len(output) <= 1024 * 1024:
+                row["output_base64"] = base64.b64encode(output).decode("ascii")
+            else:
+                oversized = True
+        encoded = json.dumps(row, ensure_ascii=True, separators=(",", ":")).encode() + b"\n"
+        if oversized or state["bytes"] + len(encoded) > maximum - 1024:
+            state["overflow"] = True
+            encoded = json.dumps({"diagnostic_bound_exceeded": True, "call": state["calls"],
+                                  "complete_output_recorded": False}).encode() + b"\n"
+        with destination.open("ab") as stream:
+            stream.write(encoded)
+        state["bytes"] += len(encoded)
+
+    def capture(argv, *args, **kwargs):
+        matched = bool(argv) and Path(argv[0]).name == "bwrap" and argv[-1] == sandbox.WORKER_PATH
+        try:
+            result = original(argv, *args, **kwargs)
+        except BaseException as error:
+            if matched:
+                try:
+                    record(argv, error=error)
+                except Exception:
+                    # Evidence failure must never replace the original exception.
+                    try:
+                        print("PRIVATE_WORKER_DIAGNOSTIC_WRITE_FAILED", flush=True)
+                    except Exception:
+                        pass
+            raise
+        if matched:
+            try:
+                record(argv, result=result)
+            except Exception:
+                # The wrapper treats missing/incomplete evidence as a diagnostic fault.
+                try:
+                    print("PRIVATE_WORKER_DIAGNOSTIC_WRITE_FAILED", flush=True)
+                except Exception:
+                    pass
+        return result
+
+    monkeypatch.setattr(sandbox, "capture", capture)
+
+
 def test_actual_dynamic_worker_reads_only_declared_configuration_and_reuses(worker, monkeypatch):
     expected_cache = (worker.config / "ld.so.cache").read_bytes()
     digest = hashlib.sha256(expected_cache).hexdigest()
@@ -58,6 +125,7 @@ def test_configuration():
         with pytest.raises(OSError): path.write_bytes(b'forbidden')
     assert os.getpid() == 1 and os.readlink('/proc/self') == '1'
 """)
+    observe_worker_capture(monkeypatch, worker.project.external)
     observed = observe_native(monkeypatch)
     assert_counts(worker.project.run(timeout=60), executed=1)
     assert observed and all(native and dynamic and projected and "/etc" in closed for native, dynamic, projected, closed in observed)
