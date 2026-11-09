@@ -140,6 +140,9 @@ files listed by `plan` and add the missing dependency. Pytest fixtures still run
 but their files must be declared. If Bubblewrap is missing or namespaces are unavailable, the
 run refuses; use a host that meets the [requirements](bubblewrap-api.md#host-requirements).
 A refusal can occur after earlier tests have run, so inspect the result before retrying.
+A plugin's nonzero session verdict can fail a run even when its case bodies passed.
+Those observed passes remain visible; a declaration refusal is identified separately
+by the [strict worker protocol](result-schema.md#internal-protocol-and-cache-versions).
 
 ### 5. Change an input and run again
 

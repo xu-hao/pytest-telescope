@@ -1251,6 +1251,7 @@ def main(request=None, *, ordinary=False):
     common = {
         "nonce": request["nonce"],
         "exit_code": exit_code,
+        "declaration_error": declaration_error,
         "leaked_descendants": bool(leaked),
         "worker_seconds": time.monotonic() - started,
         "failures": failures,
@@ -1344,7 +1345,7 @@ def main(request=None, *, ordinary=False):
         ]
         result = {
             **common,
-            "protocol": 7,
+            "protocol": 10,
             "kind": "collection",
             "items": items,
             "complete": observer.checkpoint
@@ -1356,7 +1357,7 @@ def main(request=None, *, ordinary=False):
     else:
         result = {
             **common,
-            "protocol": 5,
+            "protocol": 8,
             "collected": len(selected_ids),
             "case_ids": selected_ids,
             "case_results": [member(case) for case in selected_ids],
@@ -1372,7 +1373,7 @@ def main(request=None, *, ordinary=False):
     if mode in ("batch", "guard-batch"):
         requested = request["case_ids"]
         result.update(
-            protocol=6,
+            protocol=9,
             group_id=request["group_id"],
             case_ids=requested,
             collected=len(requested),
@@ -1393,7 +1394,6 @@ def main(request=None, *, ordinary=False):
             protocol=2,
             kind="ordinary",
             dispatch_started=observer.dispatch_started,
-            declaration_error=declaration_error,
             inventory_complete=observer.checkpoint
             and not declaration_error
             and not collection_failed,

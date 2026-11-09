@@ -34,7 +34,7 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 6
+SCHEMA = 7
 RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
@@ -143,7 +143,7 @@ def read_record(
 def write_record(path, key, result, *, kind="execution"):
     limit = (
         64 * 1024 * 1024
-        if kind in {"collection", "guarded-batch"} or result["protocol"] == 6
+        if kind in {"collection", "guarded-batch"} or result["protocol"] == 9
         else 1_048_576
     )
     record = {

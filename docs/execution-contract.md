@@ -108,6 +108,15 @@ Each scoped execution begins a new sandbox with only that case's effective scope
 
 Inventory and execution have distinct strict result schemas. A successful sandboxed collection reports collected nodes and declaration assignments, never executed passes. It becomes reusable only after the sandbox exits cleanly with validated bounded records. Ordinary session inventories are never reused.
 
+The strict worker `declaration_error` boolean distinguishes a validated failed pytest
+session from an actual declaration refusal. A plugin setting exit 4 after a passing body
+fails the group and run while preserving its observed reports; it does not trigger a
+declaration refusal or cancellation of unrelated work. A true declaration error requires
+exit 4 and incomplete evidence. The controller retains available evidence before the
+typed refusal, drains owned work and publishes no pending successes. Missing or invalid
+flags are refused without inference from exit codes. See the
+[protocol and cache versions](result-schema.md#internal-protocol-and-cache-versions).
+
 The scoped inventory key covers the exact frozen collection view, current test-file membership, static declaration registry, pytest configuration, relevant environment, full effective arguments/selectors, the sandbox identity (policy, interpreter, installed distributions and the environment's references into the project) and runner implementation/version. Every invocation re-freezes current declared inputs before accepting an inventory hit. File addition/deletion, declared-resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present scoped cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
 
 Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes or environment values merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
