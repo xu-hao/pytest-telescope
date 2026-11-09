@@ -1241,6 +1241,12 @@ def run(
                             else "no valid successful group record"
                         )
                         attempt_started = time.monotonic()
+                        sessions_started = 0
+
+                        def session_started():
+                            nonlocal sessions_started
+                            sessions_started += 1
+
                         for attempt in range(2):
                             try:
                                 if cancellation.is_set():
@@ -1293,6 +1299,7 @@ def run(
                                         metadata_directory=metadata,
                                         cancellation=cancellation,
                                         request=request,
+                                        on_session_start=session_started,
                                     )
                                 if result["exit_code"] == 4:
                                     if fixture_guard:
@@ -1306,7 +1313,7 @@ def run(
                                     job,
                                     result,
                                     mode,
-                                    attempts=attempt + 1,
+                                    attempts=sessions_started,
                                     reason=reason if explain else "",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
@@ -1319,7 +1326,7 @@ def run(
                                     job,
                                     None,
                                     mode,
-                                    attempts=attempt + 1,
+                                    attempts=sessions_started,
                                     reason="guarded execution capability became unavailable",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
@@ -1336,7 +1343,7 @@ def run(
                                         job,
                                         None,
                                         mode,
-                                        attempts=attempt + 1,
+                                        attempts=sessions_started,
                                         reason=str(exc)
                                         if isinstance(exc, InfrastructureError)
                                         else "owned storage operation failed",

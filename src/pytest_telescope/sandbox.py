@@ -157,7 +157,7 @@ def _terminate(process):
             stream.close()
 
 
-def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None):
+def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None, on_start=None):
     """Run one child with bounded merged output; never retain more than the limit.
 
     A timeout of None sets no deadline: the caller's own job bounds that session.
@@ -176,6 +176,8 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
             env=env,
             cwd=cwd,
         )
+        if on_start is not None:
+            on_start()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
@@ -649,6 +651,7 @@ def execute(
     cancellation=None,
     selection_disabled=False,
     allow_unknown_selectors=False,
+    on_session_start=None,
 ):
     """Run one worker in a fresh view of `view` and return its validated result."""
     view = Path(view).resolve()
@@ -815,6 +818,7 @@ def execute(
         in {"collection", "batch", "guard-capture", "guard-inspection", "guard-batch"}
         else MAX_OUTPUT,
         cancellation=cancellation,
+        on_start=on_session_start,
     )
     try:
         unsupported = [
