@@ -758,7 +758,8 @@ def execute(
         if type(native) is not bool:
             raise InfrastructureError("tool view has an invalid native profile")
         if native:
-            from .tool_startup import environment as startup_environment, signature
+            from .tool_startup import environment as startup_environment
+            from .tool_startup import signature
 
             if signature(box) != tool_view.startup_identity:
                 raise InfrastructureError("native startup environment changed after projection")
