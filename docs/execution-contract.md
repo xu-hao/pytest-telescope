@@ -89,6 +89,8 @@ on private pytest internals remaining stable.
 
 For a scoped view, this source guard also authenticates literal calls in explicitly
 readable frozen Python helpers, including package initializers and nested imports.
+This helper declaration support is unreleased development; published 0.1.0a6 does not
+provide it.
 Declare every required helper, initializer and import-time resource in the consumer's
 scope; the controller does not resolve imports or search undeclared source. A helper
 outside structural test membership can be imported without collecting its tests.
@@ -96,7 +98,9 @@ outside structural test membership can be imported without collecting its tests.
 Authentication and inheritance serve different purposes. A helper's literal marker
 can be valid at its own exact source position without becoming a declaration inherited
 by the consumer. Importing that helper does not grant its own inputs, bundles, local
-metadata, absence assertions or cache policy to the importing case. Attaching a foreign
+metadata, environment names, absence assertions or cache policy to the importing case.
+Its own `env` declaration does not forward or key host values for that consumer; the
+consumer must declare or inherit those names independently. Attaching a foreign
 helper marker to a selected case is unsupported; effective case declarations belong to
 that case's containing test source.
 
