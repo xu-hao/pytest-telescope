@@ -65,6 +65,8 @@ def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=
                 failures=[],
             )
         assert request["mode"] == "batch"
+        # A successful synthetic launch precedes behavior/result faults.
+        kwargs["on_session_start"]()
         result = result_for(request)
         behavior(request, kwargs, result)
         assert validate_batch(result, group_id=request["group_id"], case_ids=request["case_ids"])

@@ -29,6 +29,9 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
                 worker_seconds=0.1,
                 failures=[],
             )
+        # This stand-in models a successfully started worker, including an
+        # unavailable result after that start. Pre-start faults use other doubles.
+        kwargs["on_session_start"]()
         behavior(request["case_id"], kwargs)
         return dict(
             protocol=5,
