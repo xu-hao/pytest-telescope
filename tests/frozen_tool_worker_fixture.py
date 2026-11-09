@@ -125,6 +125,13 @@ class WorkerConfiguration:
         pending = [root]
         while pending:
             path = pending.pop()
+            # This known worker runs Python/pytest; it does not embed or build CPython.
+            # Exclude the named development subtree (python.o, archives and Makefile)
+            # from its declared runtime, before scanning files for ELF dependencies.
+            # Runtime executables/extensions still undergo the strict ELF reader.
+            build_support = f"config-{sys.version_info.major}.{sys.version_info.minor}-x86_64-linux-gnu"
+            if stdlib and path.parent == root and path.name == build_support:
+                continue
             if path.name == "__pycache__" or (stdlib and path.name in {"site-packages", "dist-packages", "sitecustomize.py", "usercustomize.py"}):
                 continue
             self.pin(path)
