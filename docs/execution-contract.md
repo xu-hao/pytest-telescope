@@ -286,8 +286,9 @@ reusable success.
 
 The optional [fixture guard](batching.md#required-fixture-guard-unreleased) is a required
 future contract, not a shipped or qualified capability. It validates all available user
-fixture definitions in each exact group view before selected bodies and conservatively
-refuses shared lifetimes split across groups without broadening declared inputs. Mutable
+fixture definitions and actual package-collector xunit lifetimes in each exact group view
+before selected bodies and conservatively refuses shared lifetimes split across groups
+without broadening declared inputs. Mutable
 framework fixtures retain their documented per-group lifetime. The discovery union is
 not an execution view, and collection hooks can have side effects. Execution-side drift
 preserves actual prior attempts and prevents new cache publication. Unguarded behavior

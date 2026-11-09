@@ -196,7 +196,23 @@ lifetime owner in one group; otherwise the invocation refuses before dispatching
 bodies. Definition provenance and lifetime ownership are distinct: an imported
 module-scoped fixture can have the same definition in two modules but a separate
 instance in each module. Independently proven distinct owners do not, by themselves,
-create a shared lifetime across those groups. This includes
+create a shared lifetime across those groups.
+
+The same rule applies to a pytest `Package` collector's non-fixture xunit setup and
+teardown in `__init__.py`. Either a setup or a teardown establishes an owned collector
+lifetime. If selected items actually share that package collector owner, all users of
+that lifetime must be in one group or the guard refuses before selected bodies. Nested
+packages can share an ancestor collector while also having distinct child owners;
+compare the actual collector ancestry rather than the source filename alone. Distinct
+package owners, or a package with no such lifecycle, do not alone require a refusal;
+other user fixture constraints still apply. The presence of `__init__.py` alone does not
+establish that pytest collected or executed a package lifecycle. The guard must validate
+the relevant actual collector and source evidence in the supported frozen view; unknown
+ownership or changed evidence is a conservative refusal. This preserves the collector's
+lifetime within the selected boundary, not a promise of global ordinary-session
+equivalence or of detecting arbitrary Python mutations.
+
+The fixture rule includes
 fixtures available through autouse, inheritance, imports, overrides and dynamic
 `request.getfixturevalue`, even when a fixture is absent from the static dependency
 closure. Uncertain owners or bindings and possible cross-file, package or suite sharing
