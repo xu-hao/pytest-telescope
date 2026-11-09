@@ -27,7 +27,8 @@ class Projection:
         self.command_path = None
         self.entries = {}
         self.directories = set()
-        self.system = None
+        self.native = any(capture.runtimes[name].native for name in names)
+        self.startup = None
         originals = {}
         trees, closed = [], []
         controls = set()
@@ -66,25 +67,52 @@ class Projection:
             layout("selected native loader caches disagree")
         for name in names:
             capture.runtimes[name].validate_union(originals, self.budget)
-        if controls:
-            if capture.system is None:
-                raise InfrastructureError("native tool view lacks its admitted system composition")
-            self.system = capture.system
+        if self.native:
+            from .tool_startup import Startup
+
+            self.startup = Startup(capture.sandbox, originals, self.budget, capture.manifest.root)
+            closed.extend(self.startup.roots)
+            closed.append("/etc")
         for filename, (graph, key) in originals.items():
             self.budget.tick()
             if graph.nodes[key]["kind"] == "symlink" and not inside(filename, trees):
                 parent = str(Path(filename).parent)
-                if parent != "/etc" or self.system is None:
+                if not (self.native and Path(parent).is_relative_to("/etc")):
                     closed.append(parent)
         self.closed = minimal(closed)
         protected = ("/", "/usr", "/etc", "/tmp", "/dev/shm", str(capture.manifest.root))
         for filename in self.closed:
-            if filename in protected or Path(capture.manifest.root).is_relative_to(filename) or Path(filename).is_relative_to(capture.manifest.root):
+            native_root = self.native and (filename == "/etc" or filename in self.startup.roots)
+            if (filename in protected and not native_root) or Path(capture.manifest.root).is_relative_to(filename) or Path(filename).is_relative_to(capture.manifest.root):
                 layout("closed tool directory overlaps a protected mount or project")
+        if self.native:
+            from .tool_startup import environment
+
+            environment(capture.sandbox, self.closed)
+        for filename, (graph, key) in originals.items():
+            self.budget.tick()
+            for parent in Path(filename).parents:
+                previous = originals.get(str(parent))
+                if previous is not None and previous[0].nodes[previous[1]]["kind"] != "directory":
+                    layout("selected tool mapping has a nondirectory ancestor")
+        if self.native:
+            preload = originals.get("/etc/ld.so.preload")
+            if preload is not None:
+                row = preload[0].nodes[preload[1]]
+                if row["kind"] != "file" or row["size"] != 0 or row["mode"] & 0o555 != 0o444:
+                    layout("native preload declaration conflicts with its fixed empty control")
+            etc = originals.get("/etc")
+            if etc is not None and etc[0].nodes[etc[1]]["kind"] != "directory":
+                layout("native configuration root must be a directory")
+            cache = originals.get("/etc/ld.so.cache")
+            if cache is not None and cache[0].nodes[cache[1]]["kind"] != "file":
+                layout("native loader cache control must be a direct regular file")
         payload = [
             [[name, capture.manifest.tools[name].document, capture.graphs[name].prefix_identity()] for name in names],
             self.closed, sorted(self.commands.items()),
-            None if self.system is None else [self.system.identity, "/etc/ld.so.preload", "file", 0o444, 0],
+            [self.native, [[name, capture.runtimes[name].dynamic] for name in names]],
+            None if not self.native else ["declared-configuration-v1", "/etc/ld.so.preload", "file", 0o444, 0],
+            None if self.startup is None else self.startup.identity,
         ]
         self.identity = digest(payload)
         self.directory = capture.directory / ".views" / self.identity
@@ -96,6 +124,8 @@ class Projection:
             self.directories.add(source)
             members = [(path, value) for path, value in originals.items() if Path(path).is_relative_to(destination)]
             for filename, (graph, key) in sorted(members, key=lambda item: (len(Path(item[0]).parts), item[0])):
+                if self.native and filename == "/etc/ld.so.preload":
+                    continue
                 self.materialize(graph, key, source / Path(filename).relative_to(destination))
             self.bindings[destination] = source
         for name in names:
@@ -121,20 +151,12 @@ class Projection:
                 self.entries[leaf] = ("symlink", target)
             self.command_path = "/tools/.commands/" + self.identity
             self.bindings[self.command_path] = directory
-        if controls:
-            # No ambient preload can introduce an unpinned library. An explicit
-            # nonempty preload/audit configuration needs a different runtime profile.
-            preload = originals.get("/etc/ld.so.preload")
-            if preload is not None:
-                row = preload[0].nodes[preload[1]]
-                if row["kind"] != "file" or row["size"] != 0 or row["mode"] & 0o555 != 0o444:
-                    layout("native preload declaration conflicts with its fixed empty control")
-            empty = self.directory / "empty-preload"
+        if self.native:
+            empty = self.bindings["/etc"] / "ld.so.preload"
             empty.touch(mode=0o444, exist_ok=False)
             empty.chmod(0o444)
             info = empty.stat(follow_symlinks=False)
             self.entries[empty] = ("file", info.st_dev, info.st_ino, 0o444, 0)
-            self.bindings["/etc/ld.so.preload"] = empty
         for directory in sorted(self.directories, key=lambda path: len(path.parts), reverse=True):
             row = self.entries.get(directory)
             directory.chmod(row[1] & 0o555 if row and row[0] == "directory" else 0o555)

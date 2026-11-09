@@ -37,8 +37,6 @@ MAX_INVOCATIONS = 64
 WORKER = Path(__file__).with_name("worker.py")
 REQUEST = "/telescope/request.json"
 WORKER_PATH = "/telescope/worker.py"
-TOOL_BOOTSTRAP = Path(__file__).with_name("tool_bootstrap.py")
-TOOL_BOOTSTRAP_PATH = "/telescope/tool-bootstrap.py"
 READY = "TELESCOPE_SANDBOX_READY"
 SYSTEM_DIRECTORIES = ("/usr", "/etc")
 SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
@@ -109,6 +107,17 @@ print(json.dumps({
         for dist in metadata.distributions()
     ),
     "references": references(sys.argv[1]),
+    "startup": {
+        "prefix": sys.prefix, "exec_prefix": sys.exec_prefix,
+        "base_prefix": sys.base_prefix, "base_exec_prefix": sys.base_exec_prefix,
+        "base_executable": getattr(sys, "_base_executable", sys.executable),
+        "stdlib": sysconfig.get_path("stdlib"),
+        "platstdlib": sysconfig.get_path("platstdlib"),
+        "purelib": sysconfig.get_path("purelib"),
+        "platlib": sysconfig.get_path("platlib"),
+        "platlibdir": sys.platlibdir,
+        "sites": site.getsitepackages(),
+    },
 }, sort_keys=True))
 """
 
@@ -333,7 +342,7 @@ def _probe(executable, project):
         valid = (
             type(data) is dict
             and set(data)
-            == {"executable", "prefixes", "path", "identity", "distributions", "references"}
+            == {"executable", "prefixes", "path", "identity", "distributions", "references", "startup"}
             and type(data["executable"]) is str
             and all(
                 type(data[key]) is list and all(type(entry) is str for entry in data[key])
@@ -346,6 +355,7 @@ def _probe(executable, project):
                 for row in data["distributions"]
             )
             and type(data["references"]) is list
+            and type(data["startup"]) is dict
             and all(
                 type(row) is list and len(row) == 3 and all(type(value) is str for value in row)
                 for row in data["references"]
@@ -451,13 +461,11 @@ def _project_paths(description, project):
     return sorted(found)
 
 
-def _base_arguments(box, project=None, *, frozen_prefixes=(), tool_system=None):
+def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False):
     """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
-        if directory == "/etc" and tool_system is not None:
-            arguments += tool_system.arguments()
-        else:
+        if directory != "/etc" or not native:
             arguments += ["--ro-bind", directory, directory]
     prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
@@ -712,7 +720,7 @@ def execute(
     request_path.chmod(0o444)
     project = Path(root).resolve()
     prefixes = ()
-    tool_system = None
+    native = False
     if tool_view is not None:
         from .tool_capture import ToolView
 
@@ -732,16 +740,25 @@ def execute(
             if not source.is_relative_to(tool_view.directory) or source.is_symlink():
                 raise InfrastructureError("tool binding is outside its owned frozen material")
         prefixes = tool_view.prefixes
-        tool_system = tool_view.system
-        if tool_system is not None:
-            from .tool_system import BaselineEtc
+        native = tool_view.native
+        if type(native) is not bool:
+            raise InfrastructureError("tool view has an invalid native profile")
+        if native:
+            from .tool_startup import environment as startup_environment, signature
 
-            if type(tool_system) is not BaselineEtc or tool_system.closed:
-                raise InfrastructureError("native view requires owned system composition handles")
+            if signature(box) != tool_view.startup_identity:
+                raise InfrastructureError("native startup environment changed after projection")
+            destinations = {destination: source for source, destination in tool_view.bindings}
+            if "/etc" not in tool_view.closed or any(name not in destinations for name in tool_view.closed):
+                raise InfrastructureError("native view lacks its closed startup projections")
+            for destination in tool_view.closed:
+                if not destinations[destination].is_dir():
+                    raise InfrastructureError("native closed projection is not an owned directory")
+            box = replace(box, binds=startup_environment(box, tool_view.closed))
         from .tool_context import validate_environment
 
         validate_environment(environment, tool_view.names)
-    argv = [*_base_arguments(box, project, frozen_prefixes=prefixes, tool_system=tool_system), *_project_arguments(box, view, project)]
+    argv = [*_base_arguments(box, project, frozen_prefixes=prefixes, native=native), *_project_arguments(box, view, project)]
     if tool_view is not None:
         for source, destination in tool_view.bindings:
             argv += ["--ro-bind", str(source), destination]
@@ -751,9 +768,6 @@ def execute(
     if tool_view is not None and tool_view.command_path is not None:
         controlled = replace(box, path=tool_view.command_path + ":" + box.path)
     startup = [box.executable, "-I", WORKER_PATH]
-    if tool_system is not None:
-        argv += ["--ro-bind", str(TOOL_BOOTSTRAP), TOOL_BOOTSTRAP_PATH]
-        startup = [box.executable, "-I", "-S", TOOL_BOOTSTRAP_PATH]
     argv += [
         "--ro-bind",
         str(WORKER),
@@ -777,8 +791,6 @@ def execute(
         cancellation=cancellation,
     )
     try:
-        if tool_system is not None and code == 4 and output.splitlines() == [b"TELESCOPE_TOOL_VIEW_REFUSAL"]:
-            raise UnsupportedCapability("tool:layout", "native tool views require a private process filesystem and closed startup descriptors")
         unsupported = [
             line[len(b"TELESCOPE_UNSUPPORTED ") :]
             for line in output.splitlines()

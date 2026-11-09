@@ -782,7 +782,7 @@ def run(
             with PendingRecords(store, inventory_store) as pending:
                 with (
                     sandbox.invocation(manifest.root) as pool_directory,
-                    Capture(manifest, pool_directory, timeout, cancellation) as tools,
+                    Capture(manifest, pool_directory, timeout, cancellation, sandbox=box) as tools,
                 ):
                     pool = pool_directory / "project"
                     records = snapshot(manifest, manifest.pool, pool)

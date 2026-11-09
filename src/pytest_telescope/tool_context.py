@@ -277,7 +277,7 @@ def parse(project, name, registration):
             original = str(PurePosixPath(root["source"]) / entry["path"])
             if original == "/etc/ld.so.preload" and (entry["kind"] != "file" or entry["size"] != 0):
                 unsupported("layout", "nonempty or indirect native preload inputs are unsupported")
-            if root["preserve_source"] and original in {"/etc/ld.so.cache", "/etc/ld.so.preload"} and document["loader"] is None:
+            if root["preserve_source"] and original == "/etc/ld.so.cache" and document["loader"] is None:
                 unsupported("layout", "loader control aliases require the explicit native profile")
     if sum(len(row["entries"]) for row in roots) > MAX_ENTRIES:
         unsupported("bounds", "too many frozen-tool entries")

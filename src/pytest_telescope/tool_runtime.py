@@ -23,6 +23,8 @@ class Runtime:
         self.commands = {}
         self.executables = {}
         self.control = None
+        self.native = False
+        self.dynamic = False
         self.lookup_names = {}
         for filename in graph.mapping:
             budget.tick()
@@ -175,6 +177,10 @@ class Runtime:
                     self.elf(key)
         loader = document["loader"]
         dynamic = any(info is not None and info.dynamic for info in self.elfs.values())
+        self.dynamic = dynamic
+        self.native = bool(self.elfs) or loader is not None
+        if not self.native and "/etc/ld.so.preload" in self.graph.mapping:
+            layout("loader control aliases require an explicit native selection")
         if dynamic and (loader is None or loader["cache"] is None):
             layout("dynamic native tools require their pinned loader cache")
         if loader is not None:
@@ -190,6 +196,7 @@ class Runtime:
             if dynamic:
                 if any(not self.covered(name) for name in native.DEFAULT_SEARCH):
                     layout("native profile does not close every default search directory")
+            if loader["cache"] is not None:
                 cache_key = self.graph.reference(loader["cache"], kind="file")
                 self.graph.preserve(cache_key)
                 if self.graph.token(self.graph.resolve("/etc/ld.so.cache")) != self.graph.token(cache_key):
