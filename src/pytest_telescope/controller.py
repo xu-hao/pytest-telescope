@@ -1133,7 +1133,7 @@ def run(
                             candidate["inspection"] = inspect_candidate(candidate, "guard-inspection")
                             require_capture_match(candidate["capture"], candidate["inspection"])
                             inspections.append(candidate["inspection"])
-                        require_conservation(inspections)
+                        require_conservation(inspections, candidates)
                         guard_state["conditions"] = evaluate_conditions(condition_checks, candidates)
                         guard_state["admitted"] = True
                     jobs = []
