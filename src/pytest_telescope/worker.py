@@ -399,6 +399,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
     """
     import types
 
+    from _pytest.python import Package, _get_first_non_fixture_func, importtestmodule
     from _pytest.scope import Scope
 
     if len(items) != len(case_ids) or len(items) > 4096:
@@ -413,6 +414,52 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
     available, _ = available_fixture_definitions(session, items)
     for (item, definitions), case in zip(available, case_ids):
         fixtures = []
+        packages = []
+        for parent in item.iter_parents():
+            if not isinstance(parent, Package):
+                continue
+            if type(parent) is not Package:
+                raise ValueError("unsupported package collector")
+            package_path = project_file(parent.path)
+            init_path = parent.path / "__init__.py"
+            module = importtestmodule(init_path, session.config)
+            lifecycle = []
+            for names in (
+                ("setUpModule", "setup_module"),
+                ("tearDownModule", "teardown_module"),
+            ):
+                function = _get_first_non_fixture_func(module, names)
+                if function is None:
+                    lifecycle.append(None)
+                    continue
+                if type(function) is not types.FunctionType:
+                    raise ValueError("unsupported package lifecycle")
+                code = function.__code__
+                if (
+                    type(function.__qualname__) is not str
+                    or len(function.__qualname__.encode("utf-8")) > 4096
+                ):
+                    raise ValueError("invalid package lifecycle identity")
+                lifecycle.append(
+                    identity(
+                        canonical(
+                            {
+                                "source": project_file(code.co_filename),
+                                "line": code.co_firstlineno,
+                                "name": function.__qualname__,
+                            }
+                        )
+                    )
+                )
+            packages.append(
+                {
+                    "owner_id": identity(
+                        canonical({"suite": suite, "scope": "package", "path": package_path})
+                    ),
+                    "lifecycle": lifecycle,
+                }
+            )
+        packages.sort(key=lambda row: row["owner_id"])
         callspec = item.__dict__.get("callspec")
         if callspec is not None and (
             type(callspec.indices) is not dict or type(callspec._arg2scope) is not dict
@@ -507,7 +554,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
         )
         if len({canonical(row) for row in fixtures}) != len(fixtures):
             raise ValueError("duplicate fixture identity")
-        result.append({"case_id": case, "fixtures": fixtures})
+        result.append({"case_id": case, "fixtures": fixtures, "packages": packages})
     return result
 
 
