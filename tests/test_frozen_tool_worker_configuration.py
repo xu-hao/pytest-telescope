@@ -6,12 +6,11 @@ import json
 from pathlib import Path
 
 import pytest
+from frozen_tool_fixtures import assert_counts, cache_bytes, put
+from frozen_tool_worker_fixture import WorkerConfiguration
 
 from pytest_telescope import sandbox, tool_capture
 from pytest_telescope.sandbox import CleanupError
-
-from frozen_tool_fixtures import assert_counts, cache_bytes, put
-from frozen_tool_worker_fixture import WorkerConfiguration
 
 
 @pytest.fixture

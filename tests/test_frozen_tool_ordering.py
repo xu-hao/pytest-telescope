@@ -1,10 +1,9 @@
 """Observable native ordering proof controls; no synthetic ELF is executed."""
 
 import pytest
+from frozen_tool_ordering_fixture import Ordering
 
 from pytest_telescope.model import UnsupportedCapability
-
-from frozen_tool_ordering_fixture import Ordering
 
 
 @pytest.fixture
@@ -182,10 +181,12 @@ def test_union_reproves_winner_and_allows_shadowed_entry(ordered, changed):
                                         if row["path"] in {".", added.split('/')[0], added}]
     ordered.project.save("addition")
     with ordered.capture(("subject",)) as actual:
-        from pytest_telescope.tool_graph import Graph
+        import time
+
         from pytest_telescope.tool_capture import Budget, _measure, _remove
         from pytest_telescope.tool_context import load_selected
-        import time
+        from pytest_telescope.tool_graph import Graph
+
         tool = load_selected(ordered.project.root, ordered.project.definitions, ["addition"])["addition"]
         destination = ordered.project.external / "union-copy"
         destination.mkdir()

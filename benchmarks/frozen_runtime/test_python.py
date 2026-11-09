@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
 from frozen_tool_runtime_fixtures import installed_plugin, owned_command
 from frozen_tool_runtime_manifest import RuntimeManifest

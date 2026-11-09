@@ -3,8 +3,8 @@
 import json
 
 import pytest
-
 from frozen_tool_fixtures import ToolProject, assert_counts
+
 from pytest_telescope import controller, sandbox
 
 

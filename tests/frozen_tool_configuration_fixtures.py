@@ -11,9 +11,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from pytest_telescope import sandbox, tool_capture, tool_context
-
 from frozen_tool_fixtures import ToolProject, entries, manifest, put
+
+from pytest_telescope import sandbox, tool_capture, tool_context
 
 
 def static_reader():

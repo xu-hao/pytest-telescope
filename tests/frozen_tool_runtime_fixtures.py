@@ -19,9 +19,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from frozen_tool_fixtures import put
 
 import pytest_telescope
-from frozen_tool_fixtures import put
 
 PAYLOADS = Path(__file__).with_name("frozen_tool_payloads")
 MAX_FIXTURE_OUTPUT = 1024 * 1024

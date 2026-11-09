@@ -6,13 +6,12 @@ import threading
 from dataclasses import replace
 
 import pytest
+from frozen_tool_configuration_fixtures import StaticConfiguration, direct_static_read
+from frozen_tool_fixtures import put
 
 from pytest_telescope import tool_capture
 from pytest_telescope.model import InfrastructureError, UnsupportedCapability
 from pytest_telescope.sandbox import InvocationInterrupted
-
-from frozen_tool_configuration_fixtures import StaticConfiguration, direct_static_read
-from frozen_tool_fixtures import put
 
 
 @pytest.fixture

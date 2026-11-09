@@ -3,12 +3,11 @@
 import json
 
 import pytest
+from frozen_tool_fixtures import ToolProject, put
 
 from pytest_telescope import model
 from pytest_telescope.model import UnsupportedCapability
 from pytest_telescope.plan import make_plan
-
-from frozen_tool_fixtures import ToolProject, put
 
 
 def bundle_project(tmp_path, files, consumers):

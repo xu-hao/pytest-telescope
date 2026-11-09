@@ -4,10 +4,10 @@ import copy
 import struct
 from types import SimpleNamespace
 
-from pytest_telescope import tool_capture, tool_context, tool_runtime
-
 from frozen_tool_configuration_fixtures import StaticConfiguration, sparse_rows
 from frozen_tool_fixtures import put
+
+from pytest_telescope import tool_capture, tool_context, tool_runtime
 
 
 def elf(*, needed=(), soname=None, rpath=None, runpath=None, extra=()):

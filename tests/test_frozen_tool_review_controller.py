@@ -9,12 +9,11 @@ import time
 from pathlib import Path
 
 import pytest
-import pytest_telescope
+from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, entries, put
 
+import pytest_telescope
 from pytest_telescope import controller, sandbox, tool_capture
 from pytest_telescope.model import UnsupportedCapability
-
-from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, entries, put
 
 
 def two_tools(tmp_path):

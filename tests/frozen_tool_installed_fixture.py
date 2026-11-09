@@ -9,11 +9,16 @@ from contextlib import contextmanager
 from importlib import metadata
 from pathlib import Path
 
-from pytest_telescope import tool_capture
-
 from frozen_tool_fixtures import file_digest, manifest, put
-from frozen_tool_program_fixture import bounded_rows, copy_declared_tree, prerequisite_identity, require_prerequisites
+from frozen_tool_program_fixture import (
+    bounded_rows,
+    copy_declared_tree,
+    prerequisite_identity,
+    require_prerequisites,
+)
 from frozen_tool_worker_fixture import WorkerConfiguration
+
+from pytest_telescope import tool_capture
 
 INSTALLED_BYTES = 16 * 1024 * 1024
 

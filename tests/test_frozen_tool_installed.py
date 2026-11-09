@@ -5,12 +5,11 @@ import stat
 from dataclasses import replace
 
 import pytest
-
-from pytest_telescope import sandbox
-
 from frozen_tool_fixtures import assert_counts, cache_bytes, file_digest
 from frozen_tool_installed_fixture import InstalledConfiguration
 from frozen_tool_program_fixture import capture_evidence
+
+from pytest_telescope import sandbox
 
 
 @pytest.fixture(autouse=True)

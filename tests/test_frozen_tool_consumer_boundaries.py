@@ -5,12 +5,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
-from pytest_telescope import sandbox
-
 from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
 from frozen_tool_program_fixture import capture_evidence
 from frozen_tool_worker_fixture import WorkerConfiguration
+
+from pytest_telescope import sandbox
 
 
 @pytest.fixture(autouse=True)

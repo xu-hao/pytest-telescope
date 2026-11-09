@@ -8,12 +8,11 @@ import sys
 from pathlib import Path
 
 import pytest
-import pytest_telescope
+from frozen_tool_fixtures import ToolProject, assert_counts, entries
 
+import pytest_telescope
 from pytest_telescope import controller, model, sandbox, tool_capture
 from pytest_telescope.model import DeclarationError
-
-from frozen_tool_fixtures import ToolProject, assert_counts, entries
 
 
 def project_with_tool(tmp_path, files=None):

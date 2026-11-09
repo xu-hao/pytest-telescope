@@ -3,8 +3,8 @@
 import json
 
 import pytest
-
 from frozen_tool_fixtures import ToolProject, put
+
 from pytest_telescope.model import DeclarationError
 from pytest_telescope.plan import make_plan
 

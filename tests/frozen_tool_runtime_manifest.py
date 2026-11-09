@@ -14,7 +14,6 @@ from pathlib import Path
 from frozen_tool_elf import SYSTEM_SEARCH, bounded_tree_size, native_relations
 from frozen_tool_fixtures import entries, file_digest, manifest
 
-
 BASELINE_PREFIXES = {"bin", "sbin", "lib", "lib32", "lib64", "libx32"}
 
 

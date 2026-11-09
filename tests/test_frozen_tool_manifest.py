@@ -6,7 +6,6 @@ import os
 import socket
 
 import pytest
-
 from frozen_tool_fixtures import ToolProject, cache_bytes, put
 
 

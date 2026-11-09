@@ -6,8 +6,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-
-from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, file_digest, put
+from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, file_digest
 from frozen_tool_runtime_fixtures import PAYLOADS, native_install
 from frozen_tool_runtime_manifest import RuntimeManifest
 

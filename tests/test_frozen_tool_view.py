@@ -2,11 +2,19 @@
 
 import json
 import stat
+
 import pytest
+from frozen_tool_fixtures import (
+    ToolProject,
+    assert_counts,
+    cache_bytes,
+    canonical,
+    digest,
+    entries,
+    put,
+)
 
 from pytest_telescope import tool_capture
-
-from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, canonical, digest, entries, put
 
 
 @pytest.fixture

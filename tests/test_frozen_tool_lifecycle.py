@@ -5,11 +5,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
 
 from pytest_telescope import tool_capture
 from pytest_telescope.sandbox import CleanupError
-
-from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
 
 
 @pytest.fixture
