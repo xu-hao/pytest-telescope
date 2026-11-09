@@ -46,6 +46,14 @@ matching the wheel and source project. Missing, extra, changed or unverifiable p
 members refuse. An editable install, checkout import or unrelated installed copy cannot
 stand in for the candidate wheel.
 
+The guard bounds wheel/package membership at 4,096 entries, each file at 16 MiB and
+total package or wheel content at 64 MiB. Gate evidence is bounded at 4 MiB. Duplicate
+or noncanonical wheel paths, links and special files refuse. Owned package/ZIP controls
+exercise these guards with explicitly identified source, distribution and origin
+doubles; separate controls use real short child processes for deadlines and cleanup.
+Those unit controls do not establish that the candidate wheel was installed. Only the
+actual installed-candidate gate can provide that evidence.
+
 Install with `--no-compile`, disable bytecode writes during qualification, and reject
 residual `.pyc` files in the installed producer package. Otherwise cached bytecode could
 bypass verification of its Python source bytes. This guard is specific to the candidate
