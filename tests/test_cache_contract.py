@@ -141,6 +141,7 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
                 failures=[],
             )
         # The worker's own scratch fails to clean after this attempt.
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         raise sandbox.CleanupError("owned cleanup failed")
 
     sandbox_double(execute)
@@ -206,6 +207,7 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
         calls.append(request["mode"])
         if request["mode"] == "collection":
             return collected | {"context_id": request["context_id"]}
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         result = success()
         result["context_id"] = request["context_id"]
         result["case_ids"] = [rows[0]["case_id"]]

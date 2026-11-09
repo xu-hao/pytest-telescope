@@ -29,6 +29,7 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
                 worker_seconds=0.1,
                 failures=[],
             )
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         behavior(request["case_id"], kwargs)
         return dict(
             protocol=5,

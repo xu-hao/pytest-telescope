@@ -65,6 +65,7 @@ def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=
                 failures=[],
             )
         assert request["mode"] == "batch"
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         result = result_for(request)
         behavior(request, kwargs, result)
         assert validate_batch(result, group_id=request["group_id"], case_ids=request["case_ids"])

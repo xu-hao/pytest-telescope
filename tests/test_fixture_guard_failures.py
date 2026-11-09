@@ -75,6 +75,7 @@ def test_retry_then_success_and_exhaustion_are_bounded(tmp_path, monkeypatch):
         if request["mode"] == "guard-batch":
             attempts.append("dispatch")
             if len(attempts) == 1:
+                kwargs["on_session_start"]()  # Synthetic started session; no worker is launched.
                 raise InfrastructureError("synthetic unavailable worker")
         return original(*args, request=request, **kwargs)
 
@@ -88,6 +89,7 @@ def test_retry_then_success_and_exhaustion_are_bounded(tmp_path, monkeypatch):
     def unavailable(*args, request, **kwargs):
         if request["mode"] == "guard-batch":
             attempts.append("dispatch")
+            kwargs["on_session_start"]()  # Synthetic started session; no worker is launched.
             raise InfrastructureError("synthetic unavailable worker")
         return original(*args, request=request, **kwargs)
 
@@ -112,6 +114,7 @@ def test_cancellation_drains_and_does_not_dispatch_next_group(tmp_path, monkeypa
     def cancel(*args, request, **kwargs):
         if request["mode"] == "guard-batch":
             attempts.append(request["group_id"])
+            kwargs["on_session_start"]()  # Synthetic started session; no worker is launched.
             raise sandbox.InvocationInterrupted("synthetic cancellation")
         return original(*args, request=request, **kwargs)
 
