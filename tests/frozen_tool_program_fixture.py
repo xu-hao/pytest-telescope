@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -173,15 +174,20 @@ class ProgramConfiguration:
     def __init__(self, worker, *, browser=False, require_receipt=True):
         self.worker = worker
         self.project = worker.project
-        self.roots = {}
-        self.selected = {}
-        self.native = set()
+        # Each dynamic tool is independently closed, even when its consumer also
+        # selects another tool. Reuse the exact known worker inputs, not live binds.
+        self.roots = {root["id"]: copy.deepcopy(root) for root in worker.document["roots"]}
+        self.selected = {name: {path for path in worker.paths if worker.anchor(path) == name}
+                         for name in worker.anchors}
+        self.native = set(worker.native)
         self.executables = {}
         self.document = manifest()
-        self.files_root("system", Path("/usr"))
+        self.executable(Path(sys.executable))
         self.node = self.required_program("TELESCOPE_FIXTURE_NODE")
         if not self.node.is_relative_to("/usr"):
-            self.files_root("node", self.node.parent)
+            if self.node.parent.name != "bin":
+                raise ValueError("controlled Node fixture requires its explicit bin/lib prefix layout")
+            self.files_root("node", self.node.parent.parent)
         self.executable(self.node)
         self.env = Path("/usr/bin/env").resolve(strict=True)
         self.executable(self.env, "env")
@@ -193,11 +199,6 @@ class ProgramConfiguration:
         put(scripts, "input.txt", "frozen frontend input\n")
         self.scripts = scripts
         self.tree_root("driver", scripts)
-        self.roots["config"] = {
-            "id": "config", "source": "/etc", "coverage": "files", "preserve_source": True,
-            "entries": [WorkerConfiguration.row(worker.config, "."),
-                        WorkerConfiguration.row(worker.config / "ld.so.cache", "ld.so.cache")],
-        }
         self.chrome = None
         if browser:
             self.chrome = self.required_program("TELESCOPE_FIXTURE_CHROMIUM")
@@ -293,9 +294,16 @@ class ProgramConfiguration:
         self.executables[path] = kind
 
     def finish(self):
+        # The owned fixture deliberately shares the worker's actual zlib pin. Its
+        # installed Node also has a different candidate in a closed search folder;
+        # that unselected sibling must not become an implicit winner.
+        zlib = Path("/usr/lib/x86_64-linux-gnu/libz.so.1")
+        if zlib not in self.worker.paths:
+            raise ValueError("controlled frontend requires the worker's explicit system zlib pin")
         information, dependencies, paths, search = native_relations(
             sorted(set(self.executables) | self.native),
             sorted({path.parent for path in self.native}),
+            {"libz.so.1": zlib},
         )
         for path in sorted(paths):
             self.pin(path)
