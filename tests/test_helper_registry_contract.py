@@ -12,6 +12,7 @@ from pytest_telescope.model import DeclarationError
 
 def passed(root, *, executed=None, reused=None, selected=None, **options):
     report = controller.run(root, workers=1, explain=True, **options)
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["status"] == "passed", report
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True

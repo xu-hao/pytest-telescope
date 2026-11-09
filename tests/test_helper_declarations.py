@@ -61,7 +61,7 @@ def test_answer():
 
     report = controller.run(project, explain=True, workers=1)
 
-    assert report["schema"] == 3 and report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["status"] == "passed", report
     assert report["inventory_complete"] is True
     assert report["grouping_complete"] is True
@@ -79,7 +79,7 @@ def test_answer():
     assert not any(report["route_counts"]["ordinary"].values())
     assert report["sandbox"]["required"] is True
     assert report["sandbox"]["identity"] is not None
-    assert report["execution"] == {"mode": "case", "profile": "case-v1", "workers": 1}
+    assert report["execution"] == {"mode": "case", "profile": "case-v2", "workers": 1}
     assert report["collection"]["outcome"] == "executed"
     assert report["collection"]["collected"] == 1
     collection_files = [(row["route"], row["files"]) for row in report["collection"]["suites"]]
@@ -91,7 +91,7 @@ def test_answer():
     assert unit["outcome"] == "executed"
     (group,) = report["groups"]
     assert group["case_ids"] == [unit["case_id"]]
-    assert group["profile"] == "case-v1"
+    assert group["profile"] == "case-v2"
     assert group["attempts"] == 1
     assert group["cache_eligible"] is True
     assert not list((project / ".pytest-telescope/scratch").iterdir())

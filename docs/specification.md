@@ -84,6 +84,9 @@ the same containing-file case inventory as discovery before running its selected
 
 ## Imported helpers with declarations
 
+Support for literal markers in readable imported helpers is unreleased development;
+published 0.1.0a6 does not provide it.
+
 An imported Python helper may contain its own supported literal Telescope markers.
 Declare the helper and its import-time dependencies explicitly, just as for an unmarked
 helper. For example, a helper can declare an input for its own tests:
@@ -94,7 +97,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.telescope(inputs=["data/helper-only.txt"])
+pytestmark = pytest.mark.telescope(inputs=["data/helper-only.txt"], env=["HELPER_OPTION"])
 
 
 def answer():
@@ -119,9 +122,12 @@ def test_answer():
 ```
 
 The helper's marker call is authenticated against its exact frozen Python source.
-Importing it neither collects the helper's tests nor grants `data/helper-only.txt` to
-the consumer. Only declarations inherited by the actual consumer case add to its scope
-and policy. A foreign helper marker cannot be attached to that case as another grant.
+Importing it neither collects the helper's tests nor grants `data/helper-only.txt` or
+`HELPER_OPTION` from that marker to the consumer. The helper's own environment values
+are not forwarded or keyed merely by import. Only declarations inherited by the actual
+consumer case add to its scope and policy. A consumer that reads `HELPER_OPTION` declares
+or inherits it independently. A foreign helper marker cannot be attached to that case
+as another grant.
 
 Package initializers, nested helpers and resources read during import remain explicit
 dependencies. The controller does not follow imports to add them automatically. The
