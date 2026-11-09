@@ -913,7 +913,7 @@ def run(
                         row["skips"] = [
                             {**skip, "phase": "collect"} for skip in collected["collection_skips"]
                         ]
-                        if collected["exit_code"] == 4:
+                        if collected["declaration_error"]:
                             raise DeclarationError(
                                 "unsupported or changed declarations during sandboxed collection"
                             )
@@ -1135,7 +1135,7 @@ def run(
                                         on_session_start=session_started,
                                         request=request,
                                     )
-                                if result["exit_code"] == 4:
+                                if result["declaration_error"]:
                                     raise DeclarationError(
                                         "case collection or declarations differ from validated inventory"
                                     )
