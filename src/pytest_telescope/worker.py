@@ -22,20 +22,53 @@ PROJECT_ROOT = Path("/project")
 
 FRAMEWORK_SOURCE_IDENTITIES = {
     "9.1.1": (
-        ("_pytest.doctest", "04261f5b3ddce0c36584f2be42e2938d5a0dbe914414502533a93e8c142dacf9", 720),
-        ("_pytest.fixtures", "f5d4d3f848d97411e456d50400d3aaecc19a9b0c90def9151e395ee8952042b7", 1563),
-        ("_pytest.junitxml", "557b8978c66b8010fafc50ada4bf56333f9927f31b2b5909fe4c1a9df1a3c0f0", 335),
+        (
+            "_pytest.doctest",
+            "04261f5b3ddce0c36584f2be42e2938d5a0dbe914414502533a93e8c142dacf9",
+            720,
+        ),
+        (
+            "_pytest.fixtures",
+            "f5d4d3f848d97411e456d50400d3aaecc19a9b0c90def9151e395ee8952042b7",
+            1563,
+        ),
+        (
+            "_pytest.junitxml",
+            "557b8978c66b8010fafc50ada4bf56333f9927f31b2b5909fe4c1a9df1a3c0f0",
+            335,
+        ),
         ("_pytest.tmpdir", "5099f71d89413191c9e7515c9d4fe9fc7083bb73306f2cf1f73a9f89c862ed90", 275),
-        ("_pytest.legacypath", "fe5eaff1a90d31f4dce53023bdb73a33efedd79ee9f5013afb5d7c58cd0346df", 297),
+        (
+            "_pytest.legacypath",
+            "fe5eaff1a90d31f4dce53023bdb73a33efedd79ee9f5013afb5d7c58cd0346df",
+            297,
+        ),
     ),
     "9.2.0": (
-        ("_pytest.doctest", "20d8d03d1efbf143b4094eab9cf4f2551c40a4ccce53e3e37c8eb626569d2e00", 737),
-        ("_pytest.fixtures", "3847b9bbb05ba2408c3e9e270276ee86a70c1f0d1d420ad14b37b06093a9a330", 1644),
-        ("_pytest.junitxml", "3f3b32bac64d387060d513844db6b70b1b43c5391bfe0cc819cf062d55bc4966", 382),
+        (
+            "_pytest.doctest",
+            "20d8d03d1efbf143b4094eab9cf4f2551c40a4ccce53e3e37c8eb626569d2e00",
+            737,
+        ),
+        (
+            "_pytest.fixtures",
+            "3847b9bbb05ba2408c3e9e270276ee86a70c1f0d1d420ad14b37b06093a9a330",
+            1644,
+        ),
+        (
+            "_pytest.junitxml",
+            "3f3b32bac64d387060d513844db6b70b1b43c5391bfe0cc819cf062d55bc4966",
+            382,
+        ),
         ("_pytest.tmpdir", "5834124a28502a4cbea5a98370c32eb023359163a42b491a7d7ef46c2dec459a", 313),
-        ("_pytest.legacypath", "16ddbb331699b4f81ec7c0ef38ea5a53a691250dfcf5996a3398990a8a0c4966", 297),
+        (
+            "_pytest.legacypath",
+            "16ddbb331699b4f81ec7c0ef38ea5a53a691250dfcf5996a3398990a8a0c4966",
+            297,
+        ),
     ),
 }
+
 
 def reap_completed_children():
     # The sandboxed worker is PID 1 and adopts orphaned children. Reap only those
@@ -183,7 +216,11 @@ def available_fixture_definitions(session, items):
                             raise ValueError("invalid fixture definition")
                         if is_node and not (
                             definition.node is owner
-                            or (owner is session and definition.node is None and definition.baseid == "")
+                            or (
+                                owner is session
+                                and definition.node is None
+                                and definition.baseid == ""
+                            )
                         ):
                             raise ValueError("invalid fixture owner")
                         if not is_node and definition.baseid != owner:
@@ -245,6 +282,7 @@ def qualified_framework_identity(session, definition, identities):
     import inspect
     import types
     from importlib import metadata
+
     from _pytest.fixtures import FixtureFunctionDefinition
 
     function = definition.func
@@ -293,7 +331,8 @@ def qualified_framework_identity(session, definition, identities):
         raise ValueError("pytest distribution mismatch")
     module_file = Path(module.__file__).resolve(strict=True)
     entries = [
-        file for file in distribution.files or ()
+        file
+        for file in distribution.files or ()
         if Path(distribution.locate_file(file)).resolve() == module_file
     ]
     if len(entries) != 1 or entries[0].hash is None or entries[0].hash.mode != "sha256":
@@ -340,10 +379,16 @@ def qualified_framework_identity(session, definition, identities):
             break
     if not registered_object or definition.scope != "session":
         raise ValueError("builtin fixture provenance changed")
-    return identity(canonical({
-        "pytest": pytest.__version__, "module": function.__module__,
-        "source": digest, "line": code.co_firstlineno,
-    }))
+    return identity(
+        canonical(
+            {
+                "pytest": pytest.__version__,
+                "module": function.__module__,
+                "source": digest,
+                "line": code.co_firstlineno,
+            }
+        )
+    )
 
 
 def fixture_inspection_rows(session, items, case_ids, suite, identities):
@@ -353,13 +398,13 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
     Unknown source, scope or parameter metadata refuses rather than being guessed.
     """
     import types
+
     from _pytest.scope import Scope
 
     if len(items) != len(case_ids) or len(items) > 4096:
         raise ValueError("invalid fixture inspection membership")
     if len(set(case_ids)) != len(case_ids) or any(
-        type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case)
-        for case in case_ids
+        type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case) for case in case_ids
     ):
         raise ValueError("invalid fixture inspection membership")
     result = []
@@ -403,11 +448,18 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
             ):
                 raise ValueError("invalid fixture identity")
             framework = qualified_framework_identity(session, definition, identities)
-            definition_id = framework or identity(canonical({
-                "module": function.__module__, "path": str(path),
-                "source": source_hashes[path], "line": code.co_firstlineno,
-                "qualname": function.__qualname__, "argname": definition.argname,
-            }))
+            definition_id = framework or identity(
+                canonical(
+                    {
+                        "module": function.__module__,
+                        "path": str(path),
+                        "source": source_hashes[path],
+                        "line": code.co_firstlineno,
+                        "qualname": function.__qualname__,
+                        "argname": definition.argname,
+                    }
+                )
+            )
             index = None
             scope = definition.scope
             if callspec is not None and definition.argname in callspec.indices:
@@ -433,19 +485,26 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
                     if not isinstance(item.cls, type) or type(item.cls.__qualname__) is not str:
                         raise ValueError("unknown fixture class owner")
                     owner["class"] = item.cls.__qualname__
-            fixtures.append({
-                "definition_id": definition_id,
-                "owner_id": identity(canonical(owner)),
-                "scope": definition.scope,
-                "parameter_index": index,
-                "effective_scope": scope,
-                "framework": framework is not None,
-            })
-        fixtures.sort(key=lambda row: (
-            row["definition_id"], row["owner_id"], row["effective_scope"],
-            -1 if row["parameter_index"] is None else row["parameter_index"],
-            row["scope"], row["framework"],
-        ))
+            fixtures.append(
+                {
+                    "definition_id": definition_id,
+                    "owner_id": identity(canonical(owner)),
+                    "scope": definition.scope,
+                    "parameter_index": index,
+                    "effective_scope": scope,
+                    "framework": framework is not None,
+                }
+            )
+        fixtures.sort(
+            key=lambda row: (
+                row["definition_id"],
+                row["owner_id"],
+                row["effective_scope"],
+                -1 if row["parameter_index"] is None else row["parameter_index"],
+                row["scope"],
+                row["framework"],
+            )
+        )
         if len({canonical(row) for row in fixtures}) != len(fixtures):
             raise ValueError("duplicate fixture identity")
         result.append({"case_id": case, "fixtures": fixtures})
@@ -482,25 +541,29 @@ def fixture_registry_commitment(session, items, identities, observer):
             source_hashes[path] = hashlib.sha256(data).hexdigest()
         owner = definition.node.nodeid if definition.node is not None else definition.baseid
         if (
-            type(owner) is not str or len(owner.encode("utf-8")) > 4096
-            or "[" in owner or "]" in owner
+            type(owner) is not str
+            or len(owner.encode("utf-8")) > 4096
+            or "[" in owner
+            or "]" in owner
             or type(definition.argname) is not str
             or type(function.__qualname__) is not str
             or len(function.__qualname__.encode("utf-8")) > 4096
         ):
             raise ValueError("unsupported fixture registry identity")
         framework = qualified_framework_identity(session, definition, identities)
-        entries.append({
-            "name": definition.argname,
-            "module": function.__module__,
-            "path": str(path),
-            "source": source_hashes[path],
-            "line": function.__code__.co_firstlineno,
-            "qualname": function.__qualname__,
-            "owner": owner,
-            "scope": definition.scope,
-            "framework": framework,
-        })
+        entries.append(
+            {
+                "name": definition.argname,
+                "module": function.__module__,
+                "path": str(path),
+                "source": source_hashes[path],
+                "line": function.__code__.co_firstlineno,
+                "qualname": function.__qualname__,
+                "owner": owner,
+                "scope": definition.scope,
+                "framework": framework,
+            }
+        )
     plugins = []
     for name, plugin in session.config.pluginmanager.list_name_plugin():
         if plugin is observer:
@@ -542,8 +605,15 @@ def fixture_registry_commitment(session, items, identities, observer):
             source_hashes[path] = hashlib.sha256(data).hexdigest()
         if type(kind) is not str or len(kind.encode("utf-8")) > 4096:
             raise ValueError("unsupported plugin identity")
-        plugins.append({"name": name, "module": module.__name__, "kind": kind,
-                        "path": str(path), "source": source_hashes[path]})
+        plugins.append(
+            {
+                "name": name,
+                "module": module.__name__,
+                "kind": kind,
+                "path": str(path),
+                "source": source_hashes[path],
+            }
+        )
         if len(plugins) > 4096:
             raise ValueError("plugin registry limit exceeded")
     plugins.sort(key=lambda entry: entry["name"])
@@ -551,7 +621,9 @@ def fixture_registry_commitment(session, items, identities, observer):
         raise ValueError("duplicate plugin identity")
     # Raw paths, owner strings and names remain inside the worker. The parent
     # receives only the commitment, and validates the separately bound rows.
-    return identity(canonical({"pytest": pytest.__version__, "plugins": plugins, "entries": entries}))
+    return identity(
+        canonical({"pytest": pytest.__version__, "plugins": plugins, "entries": entries})
+    )
 
 
 def main(request=None, *, ordinary=False):
@@ -606,24 +678,38 @@ def main(request=None, *, ordinary=False):
         raise ValueError("invalid request nonce")
     if mode == "guard-capture":
         expected_envelope = {
-            "protocol": "fixture-capture-v1", "nonce": request["nonce"],
-            "base_context_id": request["context_id"], "case_ids": request["case_ids"],
+            "protocol": "fixture-capture-v1",
+            "nonce": request["nonce"],
+            "base_context_id": request["context_id"],
+            "case_ids": request["case_ids"],
         }
-        if type(request.get("guard_envelope")) is not dict or request["guard_envelope"] != expected_envelope:
+        if (
+            type(request.get("guard_envelope")) is not dict
+            or request["guard_envelope"] != expected_envelope
+        ):
             raise ValueError("invalid fixture capture envelope")
     elif mode == "guard-inspection":
         expected_envelope = {
-            "protocol": "fixture-inspection-v1", "nonce": request["nonce"],
-            "context_id": request["context_id"], "group_id": request["group_id"],
-            "case_ids": request["case_ids"], "registry_id": request["registry_id"],
+            "protocol": "fixture-inspection-v1",
+            "nonce": request["nonce"],
+            "context_id": request["context_id"],
+            "group_id": request["group_id"],
+            "case_ids": request["case_ids"],
+            "registry_id": request["registry_id"],
         }
-        if type(request.get("guard_envelope")) is not dict or request["guard_envelope"] != expected_envelope:
+        if (
+            type(request.get("guard_envelope")) is not dict
+            or request["guard_envelope"] != expected_envelope
+        ):
             raise ValueError("invalid fixture inspection envelope")
     if guard_mode:
         cases = request.get("case_ids")
         if (
-            type(cases) is not list or not 0 < len(cases) <= 4096
-            or any(type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case) for case in cases)
+            type(cases) is not list
+            or not 0 < len(cases) <= 4096
+            or any(
+                type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case) for case in cases
+            )
             or len(set(cases)) != len(cases)
             or request.get("group_id") != request.get("context_id")
             or type(request.get("expected_digest")) is not str
@@ -646,7 +732,16 @@ def main(request=None, *, ordinary=False):
     ):
         raise ValueError("invalid request context")
     if (
-        mode not in ("collection", "execution", "batch", "ordinary", "guard-capture", "guard-inspection", "guard-batch")
+        mode
+        not in (
+            "collection",
+            "execution",
+            "batch",
+            "ordinary",
+            "guard-capture",
+            "guard-inspection",
+            "guard-batch",
+        )
         or (mode == "ordinary") != ordinary
     ):
         raise ValueError("invalid request mode")
@@ -902,7 +997,11 @@ def main(request=None, *, ordinary=False):
                 )
                 if identity(canonical(file_inventory)) != request["expected_digest"]:
                     invalid("containing-file inventory differs from discovery")
-                requested = request["case_ids"] if mode in ("batch", "guard-capture", "guard-inspection", "guard-batch") else [request["case_id"]]
+                requested = (
+                    request["case_ids"]
+                    if mode in ("batch", "guard-capture", "guard-inspection", "guard-batch")
+                    else [request["case_id"]]
+                )
                 wanted = set(requested)
                 chosen = [item for item in items if case_identity(item.nodeid) in wanted]
                 if [case_identity(item.nodeid) for item in chosen] != requested:
@@ -937,7 +1036,9 @@ def main(request=None, *, ordinary=False):
                 if identities is None:
                     invalid("unsupported fixture adapter version")
                 try:
-                    self.guard_registry = fixture_registry_commitment(session, session.items, identities, self)
+                    self.guard_registry = fixture_registry_commitment(
+                        session, session.items, identities, self
+                    )
                     self.guard_items = fixture_inspection_rows(
                         session, session.items, selected_ids, request["suite"], identities
                     )
@@ -950,16 +1051,28 @@ def main(request=None, *, ordinary=False):
             if mode == "guard-batch":
                 identities = FRAMEWORK_SOURCE_IDENTITIES.get(pytest.__version__)
                 try:
-                    current_registry = fixture_registry_commitment(session, session.items, identities, self)
+                    current_registry = fixture_registry_commitment(
+                        session, session.items, identities, self
+                    )
                     current_items = fixture_inspection_rows(
                         session, session.items, selected_ids, request["suite"], identities
                     )
-                    current_graph = identity(canonical({
-                        "protocol": "fixture-inspection-v1", "context_id": request["context_id"],
-                        "group_id": request["group_id"], "case_ids": request["case_ids"],
-                        "registry_id": current_registry, "items": current_items,
-                    }))
-                    if current_registry != request["registry_id"] or current_graph != request["graph_id"]:
+                    current_graph = identity(
+                        canonical(
+                            {
+                                "protocol": "fixture-inspection-v1",
+                                "context_id": request["context_id"],
+                                "group_id": request["group_id"],
+                                "case_ids": request["case_ids"],
+                                "registry_id": current_registry,
+                                "items": current_items,
+                            }
+                        )
+                    )
+                    if (
+                        current_registry != request["registry_id"]
+                        or current_graph != request["graph_id"]
+                    ):
                         invalid("fixture plan changed before dispatch")
                 except (AttributeError, KeyError, OSError, TypeError, ValueError, UnicodeError):
                     invalid("fixture plan cannot be revalidated")
@@ -1094,34 +1207,56 @@ def main(request=None, *, ordinary=False):
 
     if mode in ("guard-capture", "guard-inspection"):
         if (
-            exit_code != 0 or leaked or not observer.checkpoint
-            or observer.guard_registry is None or observer.guard_items is None
+            exit_code != 0
+            or leaked
+            or not observer.checkpoint
+            or observer.guard_registry is None
+            or observer.guard_items is None
         ):
-            print("TELESCOPE_UNSUPPORTED " + canonical({"capability": "execution:fixture-metadata"}), flush=True)
+            print(
+                "TELESCOPE_UNSUPPORTED " + canonical({"capability": "execution:fixture-metadata"}),
+                flush=True,
+            )
             return 4 if declaration_error else 3
         if mode == "guard-capture":
             result = {
-                "protocol": "fixture-capture-v1", "nonce": request["nonce"],
-                "base_context_id": request["context_id"], "case_ids": request["case_ids"],
-                "registry_id": observer.guard_registry, "items": observer.guard_items,
-            }
-            result["content_id"] = identity(canonical({
-                "protocol": "fixture-content-v1", "registry_id": observer.guard_registry,
-                "case_ids": request["case_ids"], "items": observer.guard_items,
-            }))
-        else:
-            if observer.guard_registry != request["registry_id"]:
-                print("TELESCOPE_UNSUPPORTED " + canonical({"capability": "execution:fixture-metadata"}), flush=True)
-                return 4
-            result = {
-                "protocol": "fixture-inspection-v1", "nonce": request["nonce"],
-                "context_id": request["context_id"], "group_id": request["group_id"],
-                "case_ids": request["case_ids"], "registry_id": observer.guard_registry,
+                "protocol": "fixture-capture-v1",
+                "nonce": request["nonce"],
+                "base_context_id": request["context_id"],
+                "case_ids": request["case_ids"],
+                "registry_id": observer.guard_registry,
                 "items": observer.guard_items,
             }
-            result["graph_id"] = identity(canonical({
-                key: value for key, value in result.items() if key != "nonce"
-            }))
+            result["content_id"] = identity(
+                canonical(
+                    {
+                        "protocol": "fixture-content-v1",
+                        "registry_id": observer.guard_registry,
+                        "case_ids": request["case_ids"],
+                        "items": observer.guard_items,
+                    }
+                )
+            )
+        else:
+            if observer.guard_registry != request["registry_id"]:
+                print(
+                    "TELESCOPE_UNSUPPORTED "
+                    + canonical({"capability": "execution:fixture-metadata"}),
+                    flush=True,
+                )
+                return 4
+            result = {
+                "protocol": "fixture-inspection-v1",
+                "nonce": request["nonce"],
+                "context_id": request["context_id"],
+                "group_id": request["group_id"],
+                "case_ids": request["case_ids"],
+                "registry_id": observer.guard_registry,
+                "items": observer.guard_items,
+            }
+            result["graph_id"] = identity(
+                canonical({key: value for key, value in result.items() if key != "nonce"})
+            )
         print("TELESCOPE_RESULT " + canonical(result), flush=True)
         return 0
 
@@ -1177,7 +1312,11 @@ def main(request=None, *, ordinary=False):
         )
         result["complete"] = result["complete"] and selected_ids == requested
         if mode == "guard-batch":
-            result.update(guard_protocol="batch-guard-v1", registry_id=request["registry_id"], graph_id=request["graph_id"])
+            result.update(
+                guard_protocol="batch-guard-v1",
+                registry_id=request["registry_id"],
+                graph_id=request["graph_id"],
+            )
     if ordinary:
         selected = {
             item.nodeid: order for order, item in enumerate(observer.actual_selection or ())

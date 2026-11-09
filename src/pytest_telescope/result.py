@@ -382,8 +382,14 @@ def validate_ordinary(result, nonce=None, context_id=None):
 
 
 def validate_batch(
-    result, nonce=None, successful_only=False, group_id=None, case_ids=None, context_id=None,
-    *, _nonce_length=32,
+    result,
+    nonce=None,
+    successful_only=False,
+    group_id=None,
+    case_ids=None,
+    context_id=None,
+    *,
+    _nonce_length=32,
 ):
     """Validate one atomic ordered session, including honest partial pytest stops."""
     if type(result) is not dict or set(result) != FIELDS | {"group_id"}:
@@ -460,6 +466,11 @@ def validate_guarded_batch(
         return False
     ordinary_fields = {key: value for key, value in result.items() if key not in extra}
     return validate_batch(
-        ordinary_fields, nonce=nonce, successful_only=successful_only,
-        group_id=group_id, case_ids=case_ids, context_id=group_id, _nonce_length=64,
+        ordinary_fields,
+        nonce=nonce,
+        successful_only=successful_only,
+        group_id=group_id,
+        case_ids=case_ids,
+        context_id=group_id,
+        _nonce_length=64,
     )

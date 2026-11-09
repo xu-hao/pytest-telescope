@@ -16,9 +16,13 @@ def put(root, name, text):
 
 
 def configure(root):
-    put(root, "pyproject.toml", '[tool.pytest.ini_options]\nmarkers = ["chosen: synthetic selector"]\n'
+    put(
+        root,
+        "pyproject.toml",
+        '[tool.pytest.ini_options]\nmarkers = ["chosen: synthetic selector"]\n'
         '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n')
+        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n',
+    )
 
 
 def case_id(node):
@@ -27,14 +31,21 @@ def case_id(node):
 
 def test_inherited_and_overridden_fixture_chain_runs_and_tears_down(tmp_path):
     configure(tmp_path)
-    put(tmp_path, "tests/conftest.py", '''import pytest
+    put(
+        tmp_path,
+        "tests/conftest.py",
+        """import pytest
 @pytest.fixture(scope="module")
 def shared():
     values = []
     yield values
     assert values == ["base", "body"]
-''')
-    put(tmp_path, "tests/test_override.py", '''import pytest
+""",
+    )
+    put(
+        tmp_path,
+        "tests/test_override.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=["tests/conftest.py"])
 @pytest.fixture(scope="module")
 def shared(shared):
@@ -42,7 +53,8 @@ def shared(shared):
     yield shared
     assert shared == ["base", "body"]
 def test_item(shared): shared.append("body")
-''')
+""",
+    )
     report = controller.run(tmp_path, fixture_guard="available-v1")
     assert report["status"] == "passed" and report["fixture_guard"]["state"] == "admitted"
     assert report["units"][0]["reports"][-1]["phase"] == "teardown"
@@ -53,12 +65,16 @@ def test_item(shared): shared.append("body")
 @pytest.mark.parametrize("selector", [["-m", "chosen"], ["tests/test_select.py::test_chosen"]])
 def test_marker_and_node_selectors_bind_exact_guarded_membership(tmp_path, selector):
     configure(tmp_path)
-    put(tmp_path, "tests/test_select.py", '''import pytest
+    put(
+        tmp_path,
+        "tests/test_select.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.mark.chosen
 def test_chosen(): pass
 def test_other(): pass
-''')
+""",
+    )
     report = controller.run(tmp_path, fixture_guard="available-v1", arguments=selector)
     assert report["status"] == "passed" and report["counts"]["selected"] == 1
     assert report["groups"][0]["case_ids"] == [case_id("tests/test_select.py::test_chosen")]
@@ -68,11 +84,15 @@ def test_other(): pass
 def test_captured_condition_and_worker_environment_survive_ambient_change(tmp_path, monkeypatch):
     configure(tmp_path)
     monkeypatch.setenv("GUARD_SNAPSHOT", "before")
-    put(tmp_path, "tests/test_capture.py", '''import os
+    put(
+        tmp_path,
+        "tests/test_capture.py",
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(env=["GUARD_SNAPSHOT"])
 def test_item(): assert os.environ["GUARD_SNAPSHOT"] == "before"
-''')
+""",
+    )
     original = sandbox.execute
     changed = []
 
@@ -96,10 +116,17 @@ def test_item(): assert os.environ["GUARD_SNAPSHOT"] == "before"
 
 def test_condition_cardinality_and_total_value_limits_are_strict(tmp_path):
     configure(tmp_path)
-    put(tmp_path, "tests/test_case.py", 'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n')
+    put(
+        tmp_path,
+        "tests/test_case.py",
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n",
+    )
     case = case_id("tests/test_case.py::test_item")
     many = [{"case_id": case, "name": f"SYN_{index}", "op": "present"} for index in range(4097)]
-    total = [{"case_id": case, "name": f"SYN_{index}", "op": "equals", "value": "x" * 4096} for index in range(257)]
+    total = [
+        {"case_id": case, "name": f"SYN_{index}", "op": "equals", "value": "x" * 4096}
+        for index in range(257)
+    ]
     for invalid in (many, total):
         with pytest.raises(DeclarationError):
             controller.run(tmp_path, fixture_guard="available-v1", condition_checks=invalid)

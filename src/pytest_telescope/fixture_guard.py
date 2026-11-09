@@ -22,18 +22,50 @@ INSPECTION_FIELDS = frozenset(
 # plugin before assigning any of these identities.
 FRAMEWORK_SOURCE_IDENTITIES = {
     "9.1.1": (
-        ("_pytest.doctest", "04261f5b3ddce0c36584f2be42e2938d5a0dbe914414502533a93e8c142dacf9", 720),
-        ("_pytest.fixtures", "f5d4d3f848d97411e456d50400d3aaecc19a9b0c90def9151e395ee8952042b7", 1563),
-        ("_pytest.junitxml", "557b8978c66b8010fafc50ada4bf56333f9927f31b2b5909fe4c1a9df1a3c0f0", 335),
+        (
+            "_pytest.doctest",
+            "04261f5b3ddce0c36584f2be42e2938d5a0dbe914414502533a93e8c142dacf9",
+            720,
+        ),
+        (
+            "_pytest.fixtures",
+            "f5d4d3f848d97411e456d50400d3aaecc19a9b0c90def9151e395ee8952042b7",
+            1563,
+        ),
+        (
+            "_pytest.junitxml",
+            "557b8978c66b8010fafc50ada4bf56333f9927f31b2b5909fe4c1a9df1a3c0f0",
+            335,
+        ),
         ("_pytest.tmpdir", "5099f71d89413191c9e7515c9d4fe9fc7083bb73306f2cf1f73a9f89c862ed90", 275),
-        ("_pytest.legacypath", "fe5eaff1a90d31f4dce53023bdb73a33efedd79ee9f5013afb5d7c58cd0346df", 297),
+        (
+            "_pytest.legacypath",
+            "fe5eaff1a90d31f4dce53023bdb73a33efedd79ee9f5013afb5d7c58cd0346df",
+            297,
+        ),
     ),
     "9.2.0": (
-        ("_pytest.doctest", "20d8d03d1efbf143b4094eab9cf4f2551c40a4ccce53e3e37c8eb626569d2e00", 737),
-        ("_pytest.fixtures", "3847b9bbb05ba2408c3e9e270276ee86a70c1f0d1d420ad14b37b06093a9a330", 1644),
-        ("_pytest.junitxml", "3f3b32bac64d387060d513844db6b70b1b43c5391bfe0cc819cf062d55bc4966", 382),
+        (
+            "_pytest.doctest",
+            "20d8d03d1efbf143b4094eab9cf4f2551c40a4ccce53e3e37c8eb626569d2e00",
+            737,
+        ),
+        (
+            "_pytest.fixtures",
+            "3847b9bbb05ba2408c3e9e270276ee86a70c1f0d1d420ad14b37b06093a9a330",
+            1644,
+        ),
+        (
+            "_pytest.junitxml",
+            "3f3b32bac64d387060d513844db6b70b1b43c5391bfe0cc819cf062d55bc4966",
+            382,
+        ),
         ("_pytest.tmpdir", "5834124a28502a4cbea5a98370c32eb023359163a42b491a7d7ef46c2dec459a", 313),
-        ("_pytest.legacypath", "16ddbb331699b4f81ec7c0ef38ea5a53a691250dfcf5996a3398990a8a0c4966", 297),
+        (
+            "_pytest.legacypath",
+            "16ddbb331699b4f81ec7c0ef38ea5a53a691250dfcf5996a3398990a8a0c4966",
+            297,
+        ),
     ),
 }
 
@@ -41,7 +73,9 @@ FRAMEWORK_SOURCE_IDENTITIES = {
 def framework_definition_ids(pytest_version):
     """Return independently fixed source identities for the exact pytest release."""
     if type(pytest_version) is not str or pytest_version not in FRAMEWORK_SOURCE_IDENTITIES:
-        raise UnsupportedCapability("execution:fixture-version", "unsupported fixture adapter version")
+        raise UnsupportedCapability(
+            "execution:fixture-version", "unsupported fixture adapter version"
+        )
     return frozenset(
         fingerprint({"pytest": pytest_version, "module": module, "source": source, "line": line})
         for module, source, line in FRAMEWORK_SOURCE_IDENTITIES[pytest_version]
@@ -55,8 +89,12 @@ def _digest(value):
 def _fixture_order(row):
     index = row["parameter_index"]
     return (
-        row["definition_id"], row["owner_id"], row["effective_scope"],
-        -1 if index is None else index, row["scope"], row["framework"],
+        row["definition_id"],
+        row["owner_id"],
+        row["effective_scope"],
+        -1 if index is None else index,
+        row["scope"],
+        row["framework"],
     )
 
 
@@ -93,7 +131,9 @@ def validate_inspection(result, *, nonce, group_id, case_ids, registry_id, frame
         rows = item["fixtures"]
         associations += len(rows)
         if associations > 100_000:
-            raise UnsupportedCapability("execution:fixture-limit", "fixture association limit exceeded")
+            raise UnsupportedCapability(
+                "execution:fixture-limit", "fixture association limit exceeded"
+            )
         for row in rows:
             if (
                 type(row) is not dict
@@ -104,22 +144,29 @@ def validate_inspection(result, *, nonce, group_id, case_ids, registry_id, frame
                 or row["scope"] not in SCOPES
                 or type(row["effective_scope"]) is not str
                 or row["effective_scope"] not in SCOPES
-                or (row["parameter_index"] is not None and (
-                    type(row["parameter_index"]) is not int or row["parameter_index"] < 0
-                ))
+                or (
+                    row["parameter_index"] is not None
+                    and (type(row["parameter_index"]) is not int or row["parameter_index"] < 0)
+                )
                 or type(row["framework"]) is not bool
                 or row["framework"] != (row["definition_id"] in framework_ids)
             ):
                 raise InfrastructureError("invalid fixture inspection definition")
             definitions.add(row["definition_id"])
         if len(definitions) > 4096:
-            raise UnsupportedCapability("execution:fixture-limit", "fixture definition limit exceeded")
+            raise UnsupportedCapability(
+                "execution:fixture-limit", "fixture definition limit exceeded"
+            )
         ordering = [_fixture_order(row) for row in rows]
         if ordering != sorted(ordering) or len(set(ordering)) != len(ordering):
             raise InfrastructureError("invalid fixture inspection ordering")
     committed = {
-        "protocol": result["protocol"], "context_id": group_id, "group_id": group_id,
-        "case_ids": case_ids, "registry_id": registry_id, "items": result["items"],
+        "protocol": result["protocol"],
+        "context_id": group_id,
+        "group_id": group_id,
+        "case_ids": case_ids,
+        "registry_id": registry_id,
+        "items": result["items"],
     }
     if fingerprint(committed) != result["graph_id"]:
         raise InfrastructureError("fixture inspection graph mismatch")
@@ -153,14 +200,18 @@ def require_conservation(inspections, candidates):
             for row in item["fixtures"]:
                 associations += 1
                 if associations > 100_000:
-                    raise UnsupportedCapability("execution:fixture-limit", "fixture association limit exceeded")
+                    raise UnsupportedCapability(
+                        "execution:fixture-limit", "fixture association limit exceeded"
+                    )
                 if row["framework"] or row["effective_scope"] == "function":
                     continue
                 scope = row["effective_scope"]
                 if scope == "module":
                     owner = fingerprint({"suite": suite, "scope": "module", "file": filename})
                     if row["owner_id"] != owner:
-                        raise InfrastructureError("fixture module owner disagrees with selected group")
+                        raise InfrastructureError(
+                            "fixture module owner disagrees with selected group"
+                        )
                     possible_groups = modules[(suite, filename)]
                 elif scope == "class":
                     # The inventory does not expose every selected item's class
@@ -169,11 +220,15 @@ def require_conservation(inspections, candidates):
                 elif scope == "session":
                     owner = fingerprint({"suite": suite, "scope": "session"})
                     if row["owner_id"] != owner:
-                        raise InfrastructureError("fixture session owner disagrees with selected group")
+                        raise InfrastructureError(
+                            "fixture session owner disagrees with selected group"
+                        )
                     possible_groups = suites[suite]
                 else:
                     # Package ownership is not represented by the current worker.
-                    raise UnsupportedCapability("execution:fixture-metadata", "fixture owner cannot be validated")
+                    raise UnsupportedCapability(
+                        "execution:fixture-metadata", "fixture owner cannot be validated"
+                    )
                 if len(possible_groups) > 1:
                     raise UnsupportedCapability(
                         "execution:fixture-sharing", "fixture lifetime spans execution groups"
@@ -196,20 +251,32 @@ def evaluate_conditions(conditions, candidates):
         actual = candidate["environment"][condition["name"]]
         op = condition["op"]
         matched = (
-            actual is None if op == "absent" else
-            actual is not None if op == "present" else
-            actual is not None and actual == condition["value"]
+            actual is None
+            if op == "absent"
+            else actual is not None
+            if op == "present"
+            else actual is not None and actual == condition["value"]
         )
         if not matched:
-            raise UnsupportedCapability("execution:condition-mismatch", "fixture condition did not match")
-        evidence.append({"case_id": condition["case_id"], "group_id": candidate["key"], "matched": True})
+            raise UnsupportedCapability(
+                "execution:condition-mismatch", "fixture condition did not match"
+            )
+        evidence.append(
+            {"case_id": condition["case_id"], "group_id": candidate["key"], "matched": True}
+        )
     return evidence
 
 
 def validate_capture(result, *, nonce, base_context_id, case_ids, framework_ids):
     """Validate a body-free capture before deriving the final guarded key."""
     fields = {
-        "protocol", "nonce", "base_context_id", "case_ids", "registry_id", "content_id", "items"
+        "protocol",
+        "nonce",
+        "base_context_id",
+        "case_ids",
+        "registry_id",
+        "content_id",
+        "items",
     }
     if (
         type(result) is not dict
@@ -218,28 +285,43 @@ def validate_capture(result, *, nonce, base_context_id, case_ids, framework_ids)
         or result["nonce"] != nonce
         or result["base_context_id"] != base_context_id
         or result["case_ids"] != case_ids
-        or not all(_digest(value) for value in (
-            nonce, base_context_id, result["registry_id"], result["content_id"]
-        ))
+        or not all(
+            _digest(value)
+            for value in (nonce, base_context_id, result["registry_id"], result["content_id"])
+        )
     ):
         raise InfrastructureError("invalid fixture capture identity")
     # Reuse the exact row and membership validator, binding the synthetic
     # inspection to the provisional context, without treating it as an
     # independently completed inspection.
     inspection = {
-        "protocol": "fixture-inspection-v1", "nonce": nonce,
-        "context_id": base_context_id, "group_id": base_context_id,
-        "case_ids": case_ids, "registry_id": result["registry_id"], "items": result["items"],
+        "protocol": "fixture-inspection-v1",
+        "nonce": nonce,
+        "context_id": base_context_id,
+        "group_id": base_context_id,
+        "case_ids": case_ids,
+        "registry_id": result["registry_id"],
+        "items": result["items"],
     }
-    inspection["graph_id"] = fingerprint({key: value for key, value in inspection.items() if key != "nonce"})
-    validate_inspection(
-        inspection, nonce=nonce, group_id=base_context_id, case_ids=case_ids,
-        registry_id=result["registry_id"], framework_ids=framework_ids,
+    inspection["graph_id"] = fingerprint(
+        {key: value for key, value in inspection.items() if key != "nonce"}
     )
-    content = fingerprint({
-        "protocol": "fixture-content-v1", "registry_id": result["registry_id"],
-        "case_ids": case_ids, "items": result["items"],
-    })
+    validate_inspection(
+        inspection,
+        nonce=nonce,
+        group_id=base_context_id,
+        case_ids=case_ids,
+        registry_id=result["registry_id"],
+        framework_ids=framework_ids,
+    )
+    content = fingerprint(
+        {
+            "protocol": "fixture-content-v1",
+            "registry_id": result["registry_id"],
+            "case_ids": case_ids,
+            "items": result["items"],
+        }
+    )
     if content != result["content_id"]:
         raise InfrastructureError("fixture capture content mismatch")
     return result
@@ -249,10 +331,14 @@ def guarded_group_id(base_context_id, registry_id, content_id):
     """Bind a provisional group to context-independent captured fixture content."""
     if not all(_digest(value) for value in (base_context_id, registry_id, content_id)):
         raise InfrastructureError("invalid guarded group identity")
-    return fingerprint({
-        "profile": "batch-available-v1", "base_context_id": base_context_id,
-        "registry_id": registry_id, "content_id": content_id,
-    })
+    return fingerprint(
+        {
+            "profile": "batch-available-v1",
+            "base_context_id": base_context_id,
+            "registry_id": registry_id,
+            "content_id": content_id,
+        }
+    )
 
 
 def require_capture_match(capture, inspection):

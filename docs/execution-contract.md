@@ -187,7 +187,9 @@ and present-valued states. Discovery keys and receives the potential collection 
 execution recollects in the narrower actual scope and checks the complete file inventory,
 origins and order. Put collection dependencies in every consumer's shared declarations.
 An unrelated case can reuse its result after a collection refresh. Controlled
-Python/pytest variables and `TELESCOPE_*` protocol names are reserved. Raw environment
+Python/pytest variables, fixed sandbox settings and `TELESCOPE_*` protocol names are
+reserved across all declaration routes, regardless of their invoking values; see the
+[reserved-name rules](specification.md#project-configuration). Raw environment
 values occur transiently in controller memory and actual Bubblewrap arguments/environment,
 not worker request JSON, cache envelopes, public summaries or ordinary diagnostic logs.
 Plan may display names, not values. Ordinary sessions inherit the process environment.
