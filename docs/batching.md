@@ -191,8 +191,12 @@ suite boundaries and unselected cases remain outside the guarantee.
 
 The guard preserves precise scopes. It never joins different inputs or moves cases to
 make a fixture fit. A user fixture that might have a shared class, module, package or
-session lifetime across selected cases must have all possible users in one actual group;
-otherwise the invocation refuses before dispatching selected bodies. This includes
+session lifetime across selected cases must have all possible users of that actual
+lifetime owner in one group; otherwise the invocation refuses before dispatching selected
+bodies. Definition provenance and lifetime ownership are distinct: an imported
+module-scoped fixture can have the same definition in two modules but a separate
+instance in each module. Independently proven distinct owners do not, by themselves,
+create a shared lifetime across those groups. This includes
 fixtures available through autouse, inheritance, imports, overrides and dynamic
 `request.getfixturevalue`, even when a fixture is absent from the static dependency
 closure. Uncertain owners or bindings and possible cross-file, package or suite sharing
