@@ -195,6 +195,8 @@ failure, not a valid snapshot. Old valid cache records survive unsuccessful new 
 | Declared installed Python distributions | 64 |
 | Command names per tool / selected scope | 256 / 1,024 |
 | Native loader search-directory declarations per tool | 64 |
+| Native invoking-interpreter observed search paths / site paths | 64 / 64 |
+| Selected native invoking-interpreter `pyvenv.cfg` | 64 KiB |
 
 These tool-file bounds are separate from the project snapshot's source-file bound.
 Hash/copy uses bounded chunks; a large admitted executable is not read into one buffer.
@@ -202,6 +204,12 @@ Declared system configuration counts toward these same entry, byte, path and tra
 bounds. Its owned readonly projection contains only selected pinned entries and the
 fixed loader controls; no separate ambient-configuration inventory is captured. Source
 descriptors remain controller-local and are not passed to mount setup or children.
+Native view identity also includes the supported invoking-interpreter path description,
+aliases, closed prefix destinations and startup flags. These
+[startup closures](bubblewrap-api.md#invoking-python-startup-closure) can narrow `/usr`
+and the actual virtual-environment prefix to selected entries; no host siblings remain
+under those projections. Uncovered environment bind destinations refuse before reuse
+or launch, rather than reopening the declared view.
 Each capture attempt has the lesser of the configured session timeout and 120 seconds,
 with cancellation checks during traversal and hashing. There are at most two attempts,
 each with fresh exclusive staging. Bounds refuse explicitly without truncating entries

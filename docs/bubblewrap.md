@@ -225,6 +225,7 @@ source files, installs a runtime or infers arbitrary program dependencies.
 | `/tools/.commands/SCOPE_DIGEST` | Readonly command-name symlinks to exact pinned executables; first in the controlled PATH. |
 | Declared native library-search directories | Closed readonly trees synthesized from the selected runtime entries; all other host siblings are absent. |
 | Native profile's closed `/etc` | Only selected frozen configuration entries, the loader cache when required or declared, and the fixed empty regular `0444` preload file; undeclared host entries are absent. |
+| Native invoking/base interpreter prefixes | Owned sparse projections containing only selected runtime entries, including exact aliases, stdlib, pytest dependencies and supported `pyvenv.cfg`; other startup candidates are absent. |
 
 For declared frozen entries, source modes bind identity; files/directories use the source rwx mode with write
 bits removed. Writes to any of these views fail. A link remains a link with the exact
@@ -256,6 +257,13 @@ files expose exact frozen bytes without granting unselected siblings. No ambient
 inventory or source/configuration descriptor transport is used. The complete mount plan,
 including environment overlays, preserves this closure before interpreter, site and
 project imports. Nonconsumers retain their baseline view.
+
+Native worker startup currently supports the
+[standard Linux x86_64 CPython 3.11–3.13 layout](bubblewrap-api.md#invoking-python-startup-closure).
+Its actual invoking and base prefixes close to selected files. In particular, a base
+prefix of `/usr` closes all of `/usr`; baseline fallback commands and packages there
+are unavailable unless explicitly pinned. Site hooks and startup zip layouts are
+unsupported. This is a narrower native view, not an automatic environment snapshot.
 
 Browser executables, driver/bootstrap scripts, subprocesses and resources follow these
 same records. A browser name or version is not sufficient. Its actual executable must

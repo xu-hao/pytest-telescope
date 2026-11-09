@@ -327,6 +327,60 @@ Callers must declare other required configuration and resource dependencies expl
 Network policy is unchanged: a loopback-only test need not select resolver settings,
 while a program needing DNS or certificate files must declare its required inputs.
 
+### Invoking Python startup closure
+
+A native view also closes the invoking interpreter's filesystem startup search. The
+supported profile is Linux x86_64 CPython 3.11 through 3.13, without ABI flags, with
+`platlibdir="lib"`, equal prefix/exec-prefix pairs and the standard
+`BASE_PREFIX/lib/python3.MINOR` library layout. Other layouts refuse before launch;
+ordinary and data-only views retain their existing interpreter support.
+
+The actual invoking and base prefixes become owned sparse readonly projections of
+explicitly selected preserved entries. If the base prefix is `/usr`, this closes `/usr`
+itself, including its `bin` and library directories: unselected commands, packages and
+resources there are absent. A concrete virtual-environment prefix is handled the same
+way. This permits those exact projection destinations, not whole-prefix source capture,
+implicit dependency selection or runtime construction. `/`, protected roots, project
+overlaps and protocol/device/control paths cannot be startup prefixes.
+
+The invoking and base interpreter paths must be selected executable files or declared
+aliases named `python`, `python3` or `python3.MINOR` in their respective `bin`
+directories. Their resolved targets must be pinned files in the base prefix's `bin`.
+Pin required launcher link text and targets without inventing aliases. Selected regular
+`os.py`, `site.py` and `encodings/__init__.py` under the base stdlib are mandatory
+landmarks. All observed isolated search paths, site paths, purelib and platlib must be
+canonical paths inside the closed prefixes. These observations check consistency;
+they do not infer the files needed by pytest, installed packages or their resources.
+The caller must select those actual bytes too.
+
+Both potential `pyvenv.cfg` locations, the adjacent `bin` directory and its prefix,
+are closed. An adjacent `bin/pyvenv.cfg` is unsupported. A base-only interpreter has no
+selected virtual-environment configuration. A virtual environment requires its selected
+regular `PREFIX/pyvenv.cfg`, at most 64 KiB of UTF-8, with `home=BASE_PREFIX/bin` and
+`include-system-site-packages=true` or `false`. Only standard `home`,
+`include-system-site-packages`, `version`, `executable`, `command` and `prompt` keys are
+accepted, without duplicates. If present, `executable` must name a pinned alias and
+target in the base `bin`. A nested base configuration is unsupported.
+
+Startup zip libraries, `._pth`, `.pth`, `.egg-link`, `sitecustomize` and `usercustomize`
+modules/packages/extensions/bytecode, and build-tree startup files are unsupported as
+selected inputs. Unselected candidates are absent because the whole supported prefix
+is closed, including nonexistent zip and site search locations. This closes startup
+candidates before imports; no hook can add a live external path. Worker startup remains
+the invoking executable with `-I /telescope/worker.py`.
+
+There are at most 64 observed search paths and 64 site paths. The actual path description,
+interpreter aliases, prefix destinations and startup flags bind view identity. Every
+environment bind destination must lie within an owned closed projection; those live
+binds are suppressed. Any uncovered bind refuses before a view is accepted or launched.
+No later environment overlay may reopen a closed startup or configuration path.
+
+Static native selection and a static invoking interpreter are different claims. A
+static tool selects closed configuration, but a dynamic invoking Python still needs
+its own explicit dynamic runtime and pinned cache. A successful whole pytest worker
+with no dynamic cache would require a supported static invoking interpreter. Testing
+only a static tool's runtime classification does not qualify Python worker startup.
+
 ### Scripts and pinned command lookup
 
 A script has `libraries=[]` and a pinned interpreter executable relation. Supported

@@ -212,6 +212,10 @@ required loader controls. A data-only tool without ELF files or a loader profile
 the existing system view, as do nonconsumers. See
 [declared native configuration](bubblewrap-api.md#declared-native-system-configuration)
 for the exact trigger and examples; dependencies remain the caller's responsibility.
+Native worker startup also requires the
+[supported CPython prefix closure](bubblewrap-api.md#invoking-python-startup-closure).
+When `/usr` is its base prefix, unselected files throughout `/usr` are absent; pin the
+actual worker, stdlib, pytest dependencies and any commands the test needs.
 
 ## Use it in CI
 
