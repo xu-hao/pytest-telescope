@@ -20,7 +20,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .model import DeclarationError, InfrastructureError, UnsupportedCapability, fingerprint
+from .model import (
+    DeclarationError,
+    InfrastructureError,
+    UnsupportedCapability,
+    environment_names,
+    fingerprint,
+)
 from .result import validate_batch, validate_collection, validate_result
 
 try:
@@ -650,8 +656,9 @@ def execute(
     scratch = _state(root) / "scratch"
     if directory.parent != scratch or view.parent.parent != scratch or view.name != "project":
         raise InfrastructureError("worker requires an owned frozen view")
-    if any(key.startswith("TELESCOPE_") for key in environment):
-        raise DeclarationError("environment must not override worker protocol")
+    # An effective environment may combine multiple bounded declarations.
+    for name in environment:
+        environment_names([name])
     if type(request) is not dict or request.get("mode") not in ("collection", "execution", "batch"):
         raise InfrastructureError("worker requires an explicit request protocol")
     required = (
@@ -716,6 +723,7 @@ def execute(
         "--",
         box.executable,
         "-I",
+        "-B",
         WORKER_PATH,
     ]
     code, output = capture(
