@@ -24,6 +24,10 @@ PROGRAM_BYTES = 768 * 1024 * 1024
 PROGRAM_FILE_BYTES = 512 * 1024 * 1024
 PROGRAM_ENTRIES = 10000
 FONT_BYTES = 64 * 1024 * 1024
+SYSTEM_ABI_NAMES = (
+    "libz.so.1", "libuv.so.1", "libcrypto.so.3", "libssl.so.3",
+    "libstdc++.so.6", "libgcc_s.so.1",
+)
 
 
 def prerequisite_identity(documents):
@@ -294,16 +298,17 @@ class ProgramConfiguration:
         self.executables[path] = kind
 
     def finish(self):
-        # The owned fixture deliberately shares the worker's actual zlib pin. Its
-        # installed Node also has a different candidate in a closed search folder;
-        # that unselected sibling must not become an implicit winner.
+        # This controlled program declares a common system ABI. The six names were
+        # measured to have distinct bundled and system candidates; they are explicit
+        # selections, not a first-candidate rule for arbitrary runtime dependencies.
+        # Compatibility still requires the real CLI/browser checks to pass.
         zlib = Path("/usr/lib/x86_64-linux-gnu/libz.so.1")
         if zlib not in self.worker.paths:
             raise ValueError("controlled frontend requires the worker's explicit system zlib pin")
         information, dependencies, paths, search = native_relations(
             sorted(set(self.executables) | self.native),
             sorted({path.parent for path in self.native}),
-            {"libz.so.1": zlib},
+            {name: Path("/usr/lib/x86_64-linux-gnu") / name for name in SYSTEM_ABI_NAMES},
         )
         for path in sorted(paths):
             self.pin(path)

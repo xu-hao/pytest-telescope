@@ -105,8 +105,9 @@ metadata, matching the producer's existing metadata bound. Unique address/size a
 in-file mapping, complete reads, string offsets, termination and length checks still
 apply; this does not raise the program file or aggregate byte limits.
 Each dynamic tool declaration contains its invoking worker runtime, even when the case
-also selects a separate worker tool. The controlled frontend explicitly shares that
-worker's system zlib pin; a different installed candidate remains unselected. Its sparse
+also selects a separate worker tool. The controlled frontend explicitly selects system
+zlib, libuv, OpenSSL, libstdc++ and libgcc_s pins; competing bundled candidates remain
+unselected. These choices still need actual program compatibility checks. Its sparse
 Node prefix preserves relative `bin`/`lib` lookup paths without exposing live siblings.
 
 Preparation and the individual controls have separate verdicts. Authoring these tests,
