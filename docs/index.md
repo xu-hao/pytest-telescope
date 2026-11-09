@@ -157,7 +157,10 @@ case executes again; a passing result becomes reusable on the next unchanged run
 Add declarations to more tests as you establish their dependencies. Use a module-level
 literal `pytestmark` when every test in a module should share a scope; use
 `pytest.param(..., marks=pytest.mark.telescope(...))` for parameter-specific inputs.
-Declarations at module, class, function and parameter levels add together. A literal
+Declarations at module, class, function and parameter levels add together for each
+case's actual ancestors and selected parameter alternatives. Copying a sibling's Mark
+does not make its declaration inherited; see
+[additive inheritance](specification.md#additive-inheritance). A literal
 `env=["OPTIONAL_FEATURE"]` marker scopes and forwards that name only to its consumers;
 `env=[]` also scopes a case. Top-level `env` still applies to every scoped case. The
 [marker reference](specification.md) shows the supported forms, defaults and bundles.
