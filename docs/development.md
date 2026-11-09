@@ -38,14 +38,19 @@ corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test 
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 
-Functional tests use controlled inputs. An owned native tool or browser integration
-belongs in that suite only when its relevant runtime and input closure are explicit and
-the result does not depend on nonportable ambient installations. Pinning whatever a
-developer happens to have installed does not make that installation a portable fixture.
+Functional tests use controlled inputs. An owned native tool integration belongs in that
+suite only when its relevant runtime and input closure are explicit and the result does
+not depend on nonportable ambient installations. Actual browser execution is always a
+separately invoked [benchmark](benchmark.md#browser-execution-benchmarks), including an
+owned page with explicit runtime inputs. It is not a functional readiness requirement.
+Pinning whatever a developer happens to have installed does not make that installation
+a portable fixture.
 Host-dependent runtime compatibility checks run separately under
 [`benchmarks/frozen_runtime`](benchmark.md#installed-runtime-compatibility-benchmarks),
-outside the default functional gate. The frozen-tool declaration, data-view, identity
-and injected lifecycle controls remain required functional tests.
+outside the default functional gate. Controlled Node and installed-plugin execution,
+frozen-input declarations, data views, identity, transport, error handling and cleanup
+remain functional controls. Deterministic doubles must be identified as such; they do
+not establish browser navigation, clicking, layout or rendering coverage.
 
 The earlier unlanded ambient-configuration preservation controls are superseded by the
 [declared configuration contract](bubblewrap-api.md#declared-native-system-configuration).
@@ -74,12 +79,16 @@ cannot prove that the static tool alone caused the native profile to activate.
 
 ## Controlled program qualification
 
-The Node, installed-plugin and full Chromium controls use the actual invoking worker
-runtime alongside explicitly selected program files. Preparation records every selected
+The functional Node and installed-plugin controls use the actual invoking worker runtime
+alongside explicitly selected program files. Preparation records every selected
 file's hash, type and mode in a bounded private receipt. A check compares its initial
 declarations against that exact receipt before starting the controller. A missing or
 changed prerequisite fails preparation or the check; it does not skip the control,
 download a replacement, or widen the filesystem view.
+Functional preparation selects only Node and installed-plugin profiles. It does not
+require a browser executable, browser resources or a successful browser benchmark.
+Browser preparation is requested explicitly for a separate benchmark and has its own
+receipt and verdict.
 
 The Node driver keeps its `#!/usr/bin/env node` shebang. Its checks exercise the pinned
 command directory, argument boundaries, exit status and signal propagation through an
@@ -92,9 +101,10 @@ An explicitly named Furo metadata tree supplies the unselected sibling control: 
 baseline child sees its actual version, while the native consumer cannot discover it.
 Only that metadata is used; the control does not execute Furo.
 
-The browser control uses full Chromium, the unchanged Node CLI driver and its real CDP
-pipe. It navigates to an owned data-URL page and dispatches mouse input that changes the
-DOM. It needs no external page, DNS lookup or shared browser service. Browser resources,
+The separately invoked browser benchmark retains full Chromium, the unchanged Node CLI
+driver and its real CDP pipe. Its oracle requires navigation to an owned data-URL page and
+mouse input that changes the DOM. It needs no external page, DNS lookup or shared browser
+service. Browser resources,
 the named font configuration and fonts, Node, native dependencies and the worker runtime
 are explicit inputs. The browser fixture permits at most 768 MiB of selected program
 bytes, 512 MiB per file and 10,000 entries; the worker fixture retains its separate
@@ -118,7 +128,11 @@ and stays absent in the closed prefix; its source permissions are never rewritte
 
 Preparation and the individual controls have separate verdicts. Authoring these tests,
 or passing a smaller worker or static-program control, does not qualify the Node,
-installed-plugin or browser path. The ambient compatibility benchmarks remain separate.
+installed-plugin or browser path. Reclassifying an actual browser case does not turn a
+previous failure or an unrun case into a pass. Preserve its program, flags, assertions,
+bounded cleanup and historical result when moving it out of functional collection.
+See the [browser migration ledger](benchmark.md#browser-case-migration-ledger) for exact
+case paths. Browser startup permission failures do not authorize sandbox-policy changes.
 
 For documentation alone:
 

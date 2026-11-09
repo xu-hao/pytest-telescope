@@ -5,6 +5,8 @@
 
 Contributors qualify host-specific tool installations with the separately invoked
 [installed-runtime benchmarks](benchmark.md#installed-runtime-compatibility-benchmarks).
+All [actual browser execution](benchmark.md#browser-execution-benchmarks) is benchmark
+work, outside functional readiness; controlled Node and plugin checks remain functional.
 
 pytest-telescope caches pytest results so repeated checks spend less time running tests
 whose inputs haven't changed. If coding agents are adding changes to a merge queue,
@@ -184,8 +186,9 @@ for its precise supported states and limits.
 ## Opt into frozen external tools (development contract)
 
 Contributor [program qualification](development.md#controlled-program-qualification)
-uses explicit runtime prerequisites and separate Node, installed-plugin and full-browser
-controls; these development interfaces are not part of the published release.
+uses explicit runtime prerequisites for Node and installed-plugin functional controls.
+Full-browser execution is a separately invoked benchmark. These development interfaces
+are not part of the published release.
 
 For a candidate implementing frozen tools, register an existing installation manifest
 and add the selection to its consuming test:

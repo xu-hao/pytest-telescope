@@ -212,6 +212,10 @@ with the worker. No other namespace is created.
 
 ## Frozen tools and runtime files (development contract)
 
+Contributor qualification keeps actual browser execution in separately invoked
+[benchmarks](benchmark.md#browser-execution-benchmarks), outside functional readiness.
+That classification does not change the filesystem contract or permit broader access.
+
 `tools=["frontend"]` opts a case into an explicitly registered `frozen-tool-v1` closure.
 The [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
 defines the exact records. The controller captures and verifies the declared existing
