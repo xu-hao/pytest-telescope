@@ -72,7 +72,7 @@ the actual invoking interpreter description and explicitly pin its real runtime,
 cache and pytest dependencies. Adding a dynamic worker runtime to a static-tool test
 cannot prove that the static tool alone caused the native profile to activate.
 
-### Controlled program qualification
+## Controlled program qualification
 
 The Node, installed-plugin and full Chromium controls use the actual invoking worker
 runtime alongside explicitly selected program files. Preparation records every selected
