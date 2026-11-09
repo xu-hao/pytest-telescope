@@ -351,8 +351,8 @@ REMOVED_SETTINGS = {
 
 
 def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
-    from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
     from . import tool_context
+    from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
     excluded = set()
