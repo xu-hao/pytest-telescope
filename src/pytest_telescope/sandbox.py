@@ -853,6 +853,18 @@ def execute(
             )
         result = json.loads(reports[0])
         if request["mode"] in ("guard-capture", "guard-inspection"):
+            if type(result) is dict and result.get("protocol") == "fixture-refusal-v1":
+                if code != 4 or result != {
+                    "protocol": "fixture-refusal-v1",
+                    "nonce": nonce,
+                    "context_id": request["context_id"],
+                    "mode": request["mode"],
+                    "reason": "declaration",
+                }:
+                    raise InfrastructureError("invalid fixture declaration refusal")
+                raise DeclarationError(
+                    "case collection or declarations differ from validated inventory"
+                )
             from importlib.metadata import version
 
             from .fixture_guard import (

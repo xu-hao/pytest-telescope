@@ -900,6 +900,7 @@ def main(request=None, *, ordinary=False):
             self.bytes = 1024
             self.guard_items = None
             self.guard_registry = None
+            self.fixture_metadata_error = False
 
         @pytest.hookimpl(tryfirst=True)
         def pytest_configure(self, config):
@@ -1090,6 +1091,7 @@ def main(request=None, *, ordinary=False):
                         session, session.items, selected_ids, request["suite"], identities
                     )
                 except (AttributeError, KeyError, OSError, TypeError, ValueError, UnicodeError):
+                    self.fixture_metadata_error = True
                     invalid("fixture metadata cannot be validated")
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
@@ -1253,6 +1255,21 @@ def main(request=None, *, ordinary=False):
     }
 
     if mode in ("guard-capture", "guard-inspection"):
+        if declaration_error and not observer.fixture_metadata_error and not leaked:
+            print(
+                "TELESCOPE_RESULT "
+                + canonical(
+                    {
+                        "protocol": "fixture-refusal-v1",
+                        "nonce": request["nonce"],
+                        "context_id": request["context_id"],
+                        "mode": mode,
+                        "reason": "declaration",
+                    }
+                ),
+                flush=True,
+            )
+            return 4
         if (
             exit_code != 0
             or leaked
