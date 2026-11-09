@@ -253,7 +253,8 @@ accepted only when the closure has no dynamic ELF. Every candidate for a require
 SONAME must resolve to the exact declared frozen file or be absent in the closed view;
 candidates outside closed directories refuse. Irrelevant cache entries need not have
 files. Multiple available compatible candidates require verified loader ordering or an
-ambiguity refusal, never a plausible name match. The profile overlays
+ambiguity refusal, never a plausible name match. The supported proof is defined in
+[verified native library ordering](#verified-native-library-ordering) below. The profile overlays
 `/etc/ld.so.preload` with an owned zero-byte readonly regular file, mode `0444`.
 Its exact empty contents, type, mode and destination bind identity; physical absence is
 not claimed. The loader cannot read or execute the host preload contents, and explicitly
@@ -263,6 +264,70 @@ must be precisely controlled or explicitly pinned. The
 [closed configuration view](#declared-native-system-configuration) contains only selected
 frozen configuration and these loader controls. All selected loader profiles, cache
 bytes/paths and colliding search entries must agree.
+
+### Verified native library ordering
+
+This development profile proves a bounded sufficient condition for the declared
+processes. It does not emulate arbitrary linker behavior or infer ABI compatibility.
+`DT_NEEDED` order, `DT_SONAME`, `DT_RPATH` and `DT_RUNPATH` remain distinct pinned ELF
+metadata. At most one of each of the latter three tags is supported; duplicate tags,
+simultaneous RPATH and RUNPATH, malformed strings and unsupported path or dynamic-token
+syntax refuse. The existing absolute-path and `$ORIGIN` syntax and native limits apply.
+
+Each dependency first receives a provisional target without inherited search paths.
+An absolute dependency names its exact pinned path. Otherwise the requesting object's
+own active RPATH or RUNPATH directories are examined in their encoded order. A directory
+slot is usable only when every selected descendant with that name that could represent
+a hardware or platform alternative is absent or identifies the same pinned file as the
+direct entry. A different alternative refuses; the runner never guesses host capabilities.
+The first verified occupied slot wins. If all own slots are empty, the pinned cache and
+default-directory candidates must identify one unambiguous file. Cache ordering is not
+guessed. An edge requiring inherited RPATH to find any target is outside this subset.
+All potential slots, including shadowed lower-priority locations, must lie in closed
+declared directories; selected candidates must be readable supported regular ELF files.
+
+Each declared native executable has a separate fresh execution context containing its
+`DT_NEEDED` closure, the pinned interpreter and its closure, and its explicitly declared
+native `resources` and their closures. A resource reference can name a native object or
+a subtree containing native objects. In particular, the invoking Python executable must
+associate retained native stdlib extensions through its existing `resources` references.
+Existing Python runtime/package associations also contribute their native resources.
+Resources add proof inputs; they do not add filesystem grants or silently change the
+exact transitive `libraries` declaration. A script's interpreter and command executables
+retain their separate execution contexts. An unattached ELF still requires valid
+dependencies, but that alone does not certify loading it into an unspecified process.
+Arbitrary dynamic loading and undeclared import contexts remain the caller's responsibility.
+
+For an edge whose own search list finds a verified target, inherited RPATH cannot change
+that selection. A requester's RUNPATH also excludes inherited RPATH. For other edges
+that use the unique fallback target, **every active RPATH block in the same process
+context must either miss or select that same target**. This includes executable and
+resource blocks. Checking all blocks deliberately covers more ancestry combinations
+than a particular load sequence might use. A differing inherited candidate refuses;
+the runner does not choose a convenient ancestry. Cycles use finite set closure.
+
+Within each context, needed names, reached SONAMEs and usable original/logical load-path
+aliases must each identify one exact file. This prevents already-loaded name reuse from
+substituting a different object. Conflicting names refuse even if local RPATH lists
+would independently choose different files. Distinct executable contexts may use
+different files with the same SONAME, for example Python's system OpenSSL and a Node
+child's bundled OpenSSL. This does not prove symbol-version or application compatibility.
+
+The complete proof runs for original and logical aliases: dependency targets and context
+name mappings must agree, including each inherited block's owner-relative expansion.
+It runs again on a selected collection union. A changed or ambiguous winner refuses;
+a provably shadowed lower-priority candidate is permitted. Declarations of the same
+executable token combine their native resources for this proof, even across tools;
+they cannot masquerade as independent processes. Different executables mapped at the
+same original path continue to conflict under the ordinary view rules.
+
+The proof retains at most 65,536 context/object/dependency/name/alias state tuples.
+Each expansion, candidate, ancestry comparison and name comparison also consumes the
+existing 200,000-visit budget and observes cancellation/deadline checks. Bounds apply
+before allocation or traversal; exhaustion refuses without truncating the proof.
+Existing 4,096 ELF/relation, 32-link-hop, 64-loader-directory and metadata bounds remain.
+Memoized outcomes must bind the full view, content, context and alias identity. Public
+reports and cache metadata retain opaque identities, not raw library paths or names.
 
 Runtime `dlopen`, data, imports and subprocess dependencies remain the caller's explicit
 responsibility. Byte validation and mandatory ELF/shebang relations do not infer arbitrary

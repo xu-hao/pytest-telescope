@@ -195,10 +195,16 @@ failure, not a valid snapshot. Old valid cache records survive unsuccessful new 
 | Declared installed Python distributions | 64 |
 | Command names per tool / selected scope | 256 / 1,024 |
 | Native loader search-directory declarations per tool | 64 |
+| Retained native ordering proof state | 65,536 context/object/dependency/name/alias tuples |
 | Native invoking-interpreter observed search paths / site paths | 64 / 64 |
 | Selected native invoking-interpreter `pyvenv.cfg` | 64 KiB |
 
 These tool-file bounds are separate from the project snapshot's source-file bound.
+Native lookup also follows the [bounded process-context proof](bubblewrap-api.md#verified-native-library-ordering).
+Its expansions and comparisons share the existing traversal, deadline and cancellation
+budgets. Resource associations, search-tag order, effective targets and context name
+mappings bind identity. Collection unions reprove these identities, including combined
+resources of the same executable; shadowed files cannot change the winning dependency.
 Hash/copy uses bounded chunks; a large admitted executable is not read into one buffer.
 Declared system configuration counts toward these same entry, byte, path and traversal
 bounds. Its owned readonly projection contains only selected pinned entries and the

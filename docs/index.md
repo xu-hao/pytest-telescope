@@ -220,6 +220,10 @@ Native worker startup also requires the
 [supported CPython prefix closure](bubblewrap-api.md#invoking-python-startup-closure).
 When `/usr` is its base prefix, unselected files throughout `/usr` are absent; pin the
 actual worker, stdlib, pytest dependencies and any commands the test needs.
+For native libraries, the [verified ordering subset](bubblewrap-api.md#verified-native-library-ordering)
+keeps executable process contexts and their declared native resources explicit. It
+supports proven search ordering and refuses ambiguous ancestry or loaded-name conflicts;
+it does not discover arbitrary program dependencies or promise ABI compatibility.
 
 ## Use it in CI
 

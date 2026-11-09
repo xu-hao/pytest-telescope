@@ -246,7 +246,11 @@ env and Node through kernel shebang handling and the explicit command map. No sc
 argument, assertion, exit code, signal or child transport is rewritten. Its dynamic
 loader uses actual pinned cache and loader bytes; declared search directories exclude
 unbound host libraries, including competing hardware-capability candidates. Unsupported
-or ambiguous lookup refuses. The selected closure must also include the invoking Python
+or ambiguous lookup refuses. [Verified library ordering](bubblewrap-api.md#verified-native-library-ordering)
+uses explicit process/resource contexts, ordered own search paths and a conservative
+proof that inherited RPATH blocks cannot change fallback targets. Separate executable
+processes can retain different library variants; one process cannot have conflicting
+needed names or SONAMEs. The selected closure must also include the invoking Python
 worker's native/runtime needs; a preflight failure occurs before project imports.
 The [native configuration contract](bubblewrap-api.md#declared-native-system-configuration)
 replaces `/etc` with an owned readonly hierarchy of declared frozen entries and exact

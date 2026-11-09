@@ -105,9 +105,13 @@ metadata, matching the producer's existing metadata bound. Unique address/size a
 in-file mapping, complete reads, string offsets, termination and length checks still
 apply; this does not raise the program file or aggregate byte limits.
 Each dynamic tool declaration contains its invoking worker runtime, even when the case
-also selects a separate worker tool. The controlled frontend explicitly selects system
-zlib, libuv, OpenSSL, libstdc++ and libgcc_s pins; competing bundled candidates remain
-unselected. These choices still need actual program compatibility checks. Its sparse
+also selects a separate worker tool. The frontend fixture must retain Node's actual
+bundled dependencies alongside the worker's system libraries, selecting dependencies
+per requesting object under the [bounded ordering proof](bubblewrap-api.md#verified-native-library-ordering).
+A common system-library override can be ABI-incompatible and is not a valid substitute.
+The invoking Python executable explicitly associates every retained native stdlib
+extension through its resources. These declarations still need actual program checks;
+metadata preparation and graph admission do not establish ABI compatibility. Its sparse
 Node prefix preserves relative `bin`/`lib` lookup paths without exposing live siblings.
 The empty local-font search directory is not selected. It contributes no page resource
 and stays absent in the closed prefix; its source permissions are never rewritten.
