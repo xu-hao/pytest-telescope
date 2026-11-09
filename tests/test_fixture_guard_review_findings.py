@@ -3,14 +3,14 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from pytest_telescope import controller, sandbox
-from pytest_telescope.model import DeclarationError, InfrastructureError, UnsupportedCapability
+from pytest_telescope.model import DeclarationError, UnsupportedCapability
 
 
 def put(root, name, text):
