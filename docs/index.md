@@ -187,6 +187,8 @@ for its precise supported states and limits.
 
 Contributor [program qualification](development.md#controlled-program-qualification)
 uses explicit runtime prerequisites for Node and installed-plugin functional controls.
+The [installed gate](development.md#installed-candidate-and-functional-prerequisites)
+verifies the exact candidate wheel before preparing those inputs with its interpreter.
 Full-browser execution is a separately invoked benchmark. These development interfaces
 are not part of the published release.
 

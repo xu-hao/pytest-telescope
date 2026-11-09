@@ -6,16 +6,82 @@ Use a dedicated Python 3.11+ virtual environment. From the repository root:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install '.[dev]'
-python scripts/check.py --artifacts /tmp/telescope-check
+python scripts/check.py --node /absolute/path/to/node --artifacts /tmp/telescope-check
 ```
 
 The check command runs Ruff lint and formatting checks, builds the sdist and a wheel
 from it, validates package metadata, builds documentation with warnings as errors,
-installs the built wheel without dependencies, and runs the behavioral tests. It requires
-a virtual environment and uses its interpreter. The artifact directory must not already
-exist; use a new directory for another run. Build dependencies may need network access.
-No package is uploaded by this command. Each stage has a five-minute deadline, except the
-behavioral suite, which has fifteen minutes. A timeout fails the gate.
+installs the built wheel without dependencies, verifies that installed candidate, prepares
+its functional prerequisites, and runs the behavioral tests and benchmark-harness unit
+checks. It requires a virtual environment and uses its interpreter throughout. The
+artifact directory must not already exist; use a new directory for another run. Build
+dependencies may need network access. No package is uploaded by this command. Each stage
+has a five-minute deadline, except prerequisite preparation and the behavioral suite,
+which each have fifteen minutes. A timeout fails the gate.
+
+## Installed candidate and functional prerequisites
+
+This is the gate contract for the unreleased frozen-tool candidate. Select an existing
+Node executable with an absolute `--node` path or `TELESCOPE_FIXTURE_NODE`; an explicit
+`--node` takes precedence. Missing, relative or unusable selections refuse. The gate
+does not discover Node through `PATH`, download it, or select a replacement. For example,
+the equivalent environment-based invocation is:
+
+```sh
+TELESCOPE_FIXTURE_NODE=/absolute/path/to/node \
+  python scripts/check.py --artifacts /tmp/telescope-check-next
+```
+
+The outer job must provide an existing absolute `TMPDIR` and explicit resource limits.
+All preparation copies, subprocess scratch and temporary runtime declarations stay below
+that actual caller-provided directory. The new artifact directory holds the complete
+logs, final result and prerequisite evidence; it is not a substitute scratch location.
+
+After building and installing the exact candidate wheel with the gate interpreter,
+a standard-library-only guard verifies the candidate before importing it. The guard
+compares the complete package file membership and bytes against both bounded wheel
+members and the current checkout's `src/pytest_telescope`. The installed package must
+resolve under that interpreter's actual site-packages, with the distribution version
+matching the wheel and source project. Missing, extra, changed or unverifiable package
+members refuse. An editable install, checkout import or unrelated installed copy cannot
+stand in for the candidate wheel.
+
+Install with `--no-compile`, disable bytecode writes during qualification, and reject
+residual `.pyc` files in the installed producer package. Otherwise cached bytecode could
+bypass verification of its Python source bytes. This guard is specific to the candidate
+`pytest_telescope` package. The installed-plugin fixture still supports its normal
+explicitly pinned bytecode, including its thirteen selected `.pyc` files, and verifies
+those actual bytes under the [installed-Python contract](bubblewrap-api.md#installed-python-distribution-records).
+
+Only after that guard succeeds does the same interpreter perform fresh metadata-only
+preparation for exactly the `node` and `installed` profiles. Preparation records the
+selected inputs without starting declared programs or running plugin hooks or tests. The prerequisite
+receipt retains schema 1 and its existing profiles structure. A separate gate binding
+records the source HEAD and tree, exact wheel hash, interpreter identity, prerequisite
+receipt path and SHA-256. It does not extend or reinterpret the tool manifest or receipt
+schema. Neither a source-snapshot receipt nor an old three-profile receipt qualifies a
+new installed candidate.
+
+Validate the complete receipt and binding before functional pytest starts. Check source
+identity, installed import origin and bytes, interpreter identity, and receipt integrity
+before and after preparation and functional execution. A changed source, substituted
+import or changed prerequisite invalidates the gate, even when the test process exits
+successfully. A preparation pass alone is not a functional verdict; the
+[controlled program cases](#controlled-program-qualification) still have to pass.
+
+Preparation and functional pytest each have a 900-second deadline. Capture each stage's
+complete output once, with an 8 MiB bound; overflow fails rather than silently truncating
+successful evidence. On timeout or failure, stop dependent stages, terminate owned
+processes with a ten-second TERM grace followed by a ten-second KILL/reap bound, and
+clean up only owned scratch. Record one exclusive complete log and result per attempt;
+cleanup failure also prevents a successful verdict. Retrying requires a new artifact
+directory and fresh preparation. There is no silent fallback, prerequisite skip or
+installer called from a test.
+
+Actual [browser execution](benchmark.md#browser-execution-benchmarks) remains outside
+this functional gate and its preparation. The separate benchmark-harness unit checks
+remain required; they do not dispatch the real-browser benchmark. A functional gate
+does not establish browser navigation, clicking, layout or rendering coverage.
 
 The behavioral suite needs Linux and a `bwrap` executable that can create user, mount and
 PID namespaces. Tests that launch Bubblewrap are required controls: they are never
