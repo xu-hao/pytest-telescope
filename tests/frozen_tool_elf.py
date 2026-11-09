@@ -52,7 +52,7 @@ def elf(path):
                     dynamic.append((tag, value))
         address = [value for tag, value in dynamic if tag == 5]
         lengths = [value for tag, value in dynamic if tag == 10]
-        names = [value for tag, value in dynamic if tag in (1, 15, 29)]
+        names = [value for tag, value in dynamic if tag in (1, 14, 15, 29)]
         strings = b""
         if names:
             # Existing Node dependencies can have several MiB of dynamic strings.
@@ -81,10 +81,14 @@ def elf(path):
                 raise ValueError("fixture ELF string is invalid or oversized")
             return strings[offset:end].decode("utf-8", errors="strict")
 
+        tags = {tag: [string(value) for actual, value in dynamic if actual == tag] for tag in (14, 15, 29)}
+        if any(len(value) > 1 for value in tags.values()) or (tags[15] and tags[29]):
+            raise ValueError("fixture requires distinct single SONAME/RPATH/RUNPATH tags")
         return {
             "interpreter": interpreter,
             "needed": [string(value) for tag, value in dynamic if tag == 1],
             "search": [string(value) for tag, value in dynamic if tag in (15, 29)],
+            "soname": tags[14], "rpath": tags[15], "runpath": tags[29],
         }
 
 
@@ -94,7 +98,7 @@ SYSTEM_SEARCH = (
 )
 
 
-def native_relations(entrypoints, extra_search=(), library_pins=None):
+def native_relations(entrypoints, extra_search=(), library_pins=None, *, ordered_own=False):
     """Resolve only the fixture's declared native graph in explicit known directories.
 
     The product separately verifies the actual pinned loader/cache semantics. Multiple
@@ -129,6 +133,7 @@ def native_relations(entrypoints, extra_search=(), library_pins=None):
                 directory = Path(item).resolve(strict=False)
                 directories.append(directory)
                 search_roots.add(directory)
+        own_directories = tuple(directories)
         directories.extend(Path(path) for path in extra_search)
         directories.extend(SYSTEM_SEARCH)
         chosen = []
@@ -139,7 +144,14 @@ def native_relations(entrypoints, extra_search=(), library_pins=None):
                 candidates = [directory / name for directory in directories]
             existing = [candidate for candidate in candidates if candidate.is_file()]
             resolved = {candidate.resolve(strict=True) for candidate in existing}
-            if name in library_pins:
+            # Controlled program declarations preserve the requesting object's own
+            # encoded slots. The producer independently proves ancestry, hwcaps,
+            # aliases and process-local name reuse; this is preparation, not proof.
+            own = [] if "/" in name else [directory / name for directory in own_directories]
+            occupied = [candidate for candidate in own if candidate.is_file()]
+            if ordered_own and occupied:
+                resolved = {occupied[0].resolve(strict=True)}
+            elif name in library_pins:
                 explicit = Path(library_pins[name]).resolve(strict=True)
                 if explicit not in resolved:
                     raise ValueError("fixture's explicit library is outside declared search")

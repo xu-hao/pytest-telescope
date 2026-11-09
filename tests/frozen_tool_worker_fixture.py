@@ -87,7 +87,7 @@ class WorkerConfiguration:
             "file": self.reference(actual), "format": "elf",
             "interpreter": None if interpreter is None else self.reference(Path(interpreter).resolve()),
             "libraries": [self.reference(path) for path in sorted(seen)],
-            "resources": [], "commands": [],
+            "resources": [self.reference(path) for path in sorted(self.native)], "commands": [],
         }]
         directories = {str(path.resolve(strict=False)) for path in SYSTEM_SEARCH} | {str(path) for path in search}
         self.document["loader"] = {

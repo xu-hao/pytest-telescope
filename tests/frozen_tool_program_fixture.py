@@ -24,10 +24,6 @@ PROGRAM_BYTES = 768 * 1024 * 1024
 PROGRAM_FILE_BYTES = 512 * 1024 * 1024
 PROGRAM_ENTRIES = 10000
 FONT_BYTES = 64 * 1024 * 1024
-SYSTEM_ABI_NAMES = (
-    "libz.so.1", "libuv.so.1", "libcrypto.so.3", "libssl.so.3",
-    "libstdc++.so.6", "libgcc_s.so.1",
-)
 
 
 def prerequisite_identity(documents):
@@ -301,17 +297,13 @@ class ProgramConfiguration:
         self.executables[path] = kind
 
     def finish(self):
-        # This controlled program declares a common system ABI. The six names were
-        # measured to have distinct bundled and system candidates; they are explicit
-        # selections, not a first-candidate rule for arbitrary runtime dependencies.
-        # Compatibility still requires the real CLI/browser checks to pass.
-        zlib = Path("/usr/lib/x86_64-linux-gnu/libz.so.1")
-        if zlib not in self.worker.paths:
-            raise ValueError("controlled frontend requires the worker's explicit system zlib pin")
+        # Preserve both actual runtimes: Node's own encoded library slots and the
+        # invoking worker's separate system closure. Producer admission independently
+        # proves ancestry and name reuse; no global ABI override certifies these bytes.
         information, dependencies, paths, search = native_relations(
             sorted(set(self.executables) | self.native),
             sorted({path.parent for path in self.native}),
-            {name: Path("/usr/lib/x86_64-linux-gnu") / name for name in SYSTEM_ABI_NAMES},
+            ordered_own=True,
         )
         for path in sorted(paths):
             self.pin(path)
@@ -343,7 +335,8 @@ class ProgramConfiguration:
             records.append({"file": self.reference(path), "format": kind,
                             "interpreter": None if interpreter is None else self.reference(interpreter),
                             "libraries": [self.reference(value) for value in sorted(seen)],
-                            "resources": [], "commands": []})
+                            "resources": [self.reference(value) for value in sorted(self.worker.native)]
+                            if path == Path(sys.executable).resolve() else [], "commands": []})
         for name in ("command.js", "browser.js", "build.js"):
             records.append({"file": self.reference(self.scripts / name), "format": "script",
                             "interpreter": self.reference(self.env), "libraries": [],
