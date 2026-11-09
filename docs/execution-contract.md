@@ -279,3 +279,14 @@ process still present afterward, including any live descendant or unconsumed zom
 after the bound, makes the result ineligible; the remaining processes end with the
 sandbox. The engine never waits for ongoing child work to turn an incomplete run into a
 reusable success.
+
+## Required fixture conservation (unreleased)
+
+The optional [fixture guard](batching.md#required-fixture-guard-unreleased) is a required
+future contract, not a shipped or qualified capability. It validates all available user
+fixture definitions in each exact group view before selected bodies and conservatively
+refuses shared lifetimes split across groups without broadening declared inputs. Mutable
+framework fixtures retain their documented per-group lifetime. The discovery union is
+not an execution view, and collection hooks can have side effects. Execution-side drift
+preserves actual prior attempts and prevents new cache publication. Unguarded behavior
+and schema 4/cache 6 remain unchanged.

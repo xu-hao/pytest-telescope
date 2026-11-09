@@ -113,3 +113,48 @@ all fields and accounting rules.
   with profile `ordinary-v2`, never cache eligible.
 - `collection.suites` has one row per suite and route, each with `route` and `files`.
 - Timings report wall-clock durations. CPU and resource accounting belong to the caller.
+
+## Required fixture guard API (unreleased)
+
+This section specifies a required development interface; it is not a claim that the
+current published package implements or qualifies it. The Python signature extends
+`run` with keyword-only `fixture_guard=None, condition_checks=()`. `fixture_guard` is
+exactly `None` or `"available-v1"`; the guard requires batch mode and refuses ordinary
+or mixed structural routes. The CLI opts in with `run --fixture-guard available-v1`;
+it accepts no condition expectation values. Existing calls and CLI behavior with the
+guard omitted retain schema 4 and cache envelope 6.
+
+With the guard, `condition_checks` is an actual tuple or list of at most 4,096 exact
+dictionaries, in output order. Each has exactly `case_id`, `name`, and `op`; `equals`
+adds exactly `value`. `case_id` is a lowercase 64-character hexadecimal case ID, `name`
+is a valid non-reserved declared environment name, and `op` is `absent`, `present`, or
+`equals`. The `equals` value is an exact UTF-8-encodable string of at most 4,096 bytes;
+the total value bytes are at most 1 MiB. Duplicate `(case_id, name, op)` rows, extra
+keys, coercion and subclasses refuse as declaration errors. Conditions must be empty
+without the guard. Each case must be actually selected exactly once and each name must
+belong to that case's effective inherited environment declaration.
+
+Evaluate conditions from the environment captured once for the invocation, before any
+selected body or cache acceptance. A mismatch raises
+`UnsupportedCapability("execution:condition-mismatch", ...)`. Values are transient
+controller memory: do not place raw values or their hashes in requests, cache, results,
+logs, exceptions or representations. A match proves only the bound condition for that
+captured case and group; it does not establish a skip, pass or teardown. Inspect the
+actual reports, group lifecycle and final run status too.
+
+`run` retains its typed exceptions. Callers may use
+`error_result(error, fixture_guard="available-v1")` to request the schema 5 refusal
+shape; omitting the option retains the schema 4 converter exactly. An invalid converter
+option raises `DeclarationError`. The converter reports guard state `unavailable`: it
+has no trusted admission or attempt evidence and does not assert no body ran. Expected
+late failures are returned by the invocation as truthful run results with observed
+attempts, rather than converted into a pre-body refusal. The CLI supplies guard context
+to its existing error handlers only after successful parsing; parser failures keep schema 4.
+
+Guard capability refusals use `execution:fixture-profile`, `execution:fixture-version`,
+`execution:fixture-metadata`, `execution:fixture-sharing`, `execution:fixture-limit`,
+and `execution:condition-mismatch`. Unsupported fixtures and uncertain sharing refuse
+rather than changing the view. Dependency errors and malformed worker records follow
+bounded infrastructure retry and incident handling. See the
+[fixture guard contract](batching.md#required-fixture-guard-unreleased) for scope,
+version and lifecycle limits.

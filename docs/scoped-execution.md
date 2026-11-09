@@ -268,3 +268,10 @@ conftest behavior, structurally excluded modules and isolated child interpreters
 importing declared source through an editable install inside real Bubblewrap sandboxes,
 plus routing, selectors, workers, retries and cleanup. See [development](development.md) for
 the full gate and its current status.
+
+## Required fixture guard boundary (unreleased)
+
+The planned [fixture guard](batching.md#required-fixture-guard-unreleased) applies only
+to selected scoped cases within the invocation's effective suites and structural files.
+It refuses ordinary or mixed boundaries, preserves exact group inputs and does not claim
+conservation for excluded or unselected cases. Existing default routes remain unchanged.

@@ -289,3 +289,14 @@ def test_child_imports_declared_source():
 
 Either way the child sees the same view as its test: undeclared neighbouring modules stay
 absent, and the live checkout is never visible.
+
+## Required fixture guard and conditions (unreleased)
+
+A future opt-in [fixture guard](batching.md#required-fixture-guard-unreleased) preserves
+possible shared user fixture lifetimes across selected exact-scope groups or refuses
+before their bodies; it does not broaden inputs. The optional Python-only condition
+checks refer to actually selected case IDs and effective declared environment names.
+They compare the one invocation capture without exposing expected values. See the
+[API contract](bubblewrap-api.md#required-fixture-guard-api-unreleased) for exact shapes
+and the [schema](result-schema.md#required-guard-result-schema-5-unreleased) for the
+limits of the evidence. These interfaces are not available in the published release.

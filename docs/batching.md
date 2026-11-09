@@ -179,3 +179,96 @@ separation, partial execution for `-x`/`--maxfail` and shared teardown failure,
 selection/membership/order changes, partial or corrupt records, noncacheable groups,
 bounded retries and cleanup. Measure startup overhead and fixture setup time in your own
 suite when deciding whether to use batching.
+
+## Required fixture guard (unreleased)
+
+The following is a required development contract, not a released or qualified feature.
+The opt-in `available-v1` guard applies to batch mode and all selected scoped cases in
+one invocation. It refuses a structurally ordinary or mixed-route boundary before an
+ordinary body, even when a later selector might have excluded that file. Without the
+guard, existing case, batch and ordinary behavior remains unchanged. Structural file and
+suite boundaries and unselected cases remain outside the guarantee.
+
+The guard preserves precise scopes. It never joins different inputs or moves cases to
+make a fixture fit. A user fixture that might have a shared class, module, package or
+session lifetime across selected cases must have all possible users in one actual group;
+otherwise the invocation refuses before dispatching selected bodies. This includes
+fixtures available through autouse, inheritance, imports, overrides and dynamic
+`request.getfixturevalue`, even when a fixture is absent from the static dependency
+closure. Uncertain owners or bindings and possible cross-file, package or suite sharing
+refuse conservatively. Extra refusals are permitted. Function-scoped fixtures do not
+create a shared instance across cases.
+
+The discovery union is only an inventory view. Before bodies, collect each candidate
+again in its own exact frozen execution view, with its effective environment and
+configuration, and validate selected order, declarations, fixture registry and hooks.
+Compare all candidate views and fixture owners before admitting the plan; never treat a
+union view as proof of an individual group's execution view. Collection runs Python and
+hooks and can have side effects even though selected test setup and bodies have not run.
+After admission, execution recollection checks the admitted inventory, membership,
+registry and graph immediately before setup. A later mismatch stops new dispatch, drains
+owned work, retains actual prior attempts and prevents publication of new cached results;
+it does not imply earlier groups did not run.
+
+For each item, inspect the fixed admitted fixture and plugin registry, including all
+available definitions and applicable override chains, effective scope and owner, and
+validated parameter indices and scope overrides. The guard must account for explicit
+pytest parameter pseudo fixtures as well as registry definitions. Identities bind frozen
+source and provenance, suite, owner, selection, context and safe parameter indices;
+raw parameter values, node IDs and arbitrary representations are not protocol evidence.
+Unknown identities, unsupported plugin or collector shapes, unverified layouts and
+unprovable relationships refuse. Supported collection checkpoints detect only changes
+within the contract: arbitrary Python, monkeypatching of private internals or mutation
+after the last checkpoint is not universally detectable or reversible.
+
+A framework definition is treated as framework scaffolding only when its actual
+registered object, source, distribution and fixed built-in plugin provenance and its
+per-group semantics are verified. Its name, module prefix or a distribution RECORD by
+itself is not enough; a same-name user override is a user definition. Framework-provided
+mutable data, including `pytestconfig`, `doctest_namespace` and session scratch, belongs
+to its own group. It is not shared across groups, and the guard does not promise global
+ordinary-session equivalence. User fixtures remain subject to the conservative rule
+above. Unknown or replaced framework objects refuse rather than receiving an exemption.
+
+The required private adapters target exact pytest 9.1.1 and 9.2.0 layouts, subject to
+qualification; a different version or unverified layout refuses the guard. Pytest
+9.1.1 requires its fixture-definition registry; 9.2.0 requires the union of its node and
+legacy-nodeid registries, and actual per-item pytest lookup order. No name-only lookup or
+fallback to one registry is sufficient. Controlled metadata observations for these
+versions do not qualify the guard, real Bubblewrap execution or arbitrary plugin state.
+The existing unguarded dependency range and default routes do not change.
+
+Inspection uses `fixture-inspection-v1`; execution uses `batch-guard-v1` and profile
+`batch-available-v1`. Strict bounded requests and responses bind protocol, nonce,
+context and group, ordered case IDs, registry and graph commitments and per-item
+fixture identity, owner, scope and parameter binding. The worker channel must bind each
+response to its own request; a checksum or nonce alone is not an authentication claim.
+The inspection request contains exactly `protocol`, `nonce`, `context_id`, `group_id`,
+`case_ids` and `registry_id`. Its response repeats those fields and adds `graph_id` and
+ordered `items`; each item has exactly `case_id` and `fixtures`. Each fixture row has
+exactly `definition_id`, `owner_id`, `scope`, `parameter_index`, `effective_scope` and
+`framework`. IDs are lowercase 64-character hexadecimal values, context equals group,
+case IDs are nonempty, distinct and ordered, and parameter indices are nonnegative
+integers or null. Validate exact field types, bounds, unique fixture tuples, deterministic
+row order and group membership, and recompute the graph commitment from the canonical
+protocol, context, registry, cases and rows. The framework assertion must match the
+separately verified provenance table. The guarded batch request and response add
+`guard_protocol`, `registry_id` and `graph_id` to the existing batch protocol and must
+match the admitted context. An empty fixture list is allowed only when enumeration is
+affirmatively complete.
+
+Malformed, stale, duplicate, truncated, missing, mismatched or oversized records fail
+closed. Cache envelope 7 and the guarded profile are distinct from unguarded cache 6;
+only a fresh guard preflight and matching current context can admit a guarded cache hit.
+Existing atomic group success, two-attempt infrastructure bound and cleanup rules still
+apply, including no publication after incomplete member teardown, session failure or
+outer cleanup failure.
+
+The guard bounds selected group membership to 4,096, fixture definitions per group to
+4,096, fixture-definition/item associations per invocation to 100,000, definition depth
+to 128 and canonical paths or identifiers to 4,096 bytes. Existing collection and
+64 MiB group response bounds also apply. Limit violations refuse; missing or invalid
+worker records are bounded infrastructure failures rather than successful defaults.
+The [API](bubblewrap-api.md#required-fixture-guard-api-unreleased) and
+[result reference](result-schema.md#required-guard-result-schema-5-unreleased) specify
+the opt-in and evidence.

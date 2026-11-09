@@ -1,6 +1,20 @@
 {
-  "description": "Synthetic unreleased schema 4 examples. Digests and timings are illustrative, not execution receipts.",
+  "description": "Synthetic unreleased schema 4 and guarded schema 5 examples. Digests and timings are illustrative, not execution receipts.",
   "examples": {
+    "guarded_unavailable_refusal": {
+      "schema": 5,
+      "kind": "refusal",
+      "inventory_complete": false,
+      "inventory_digest": null,
+      "status": "unsupported",
+      "error": "fixture sharing cannot be conserved",
+      "capability": "execution:fixture-sharing",
+      "fixture_guard": {
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": []
+      }
+    },
     "mixed_cold_run": {
       "case_outcomes": {
         "cached_passed": 0,

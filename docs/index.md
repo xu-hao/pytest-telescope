@@ -198,6 +198,10 @@ share normal pytest fixture lifetimes within their suite's ordinary session. A m
 containing both routes is imported during ordinary collection; use a module-level scope
 when the whole module, including its import, should be collected only in a sandbox.
 
+The required but unreleased [fixture guard](batching.md#required-fixture-guard-unreleased)
+will conservatively refuse possible shared user fixture lifetimes split across exact-scope
+groups. Its adapter and real Bubblewrap behavior still require qualification.
+
 Optional [batch mode](batching.md) shares fixture lifetimes among selected scoped cases
 in the same module and suite with exactly the same readable files, declared absence,
 metadata and cache policy. Use `run --execution-mode batch` when those tests can share

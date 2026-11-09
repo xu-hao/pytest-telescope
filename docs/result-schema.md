@@ -277,3 +277,41 @@ CLI exit statuses are 0 for success, 1 for test failure, 3 for infrastructure fa
 Cancellation and bounded storage/parsing failures use the infrastructure refusal shape
 when a complete run result cannot be returned. Exception text is diagnostic, not a stable
 machine interface.
+
+## Required guard result schema 5 (unreleased)
+
+Schema 5 is the required opt-in development contract, not a shipped or qualified
+feature. Unguarded runs and refusals continue to use schema 4. A guarded run preserves
+schema 4 fields and adds exactly:
+
+```json
+{"profile": "available-v1", "state": "admitted", "conditions": []}
+```
+
+This object is the `fixture_guard` field. `admitted` records admission of the original
+complete pre-dispatch plan, not eventual completion. Condition rows, in caller order,
+contain exactly `case_id`, `group_id` and `matched`; they bind an actually selected case
+to its actual group and never disclose environment names, operations, values or hashes.
+All checks must match before dispatch or reuse. A cache hit evaluates conditions again
+from the current invocation's capture, before accepting the hit. Match evidence alone
+is not a pass, skip, teardown or final-session verdict.
+
+`error_result(error, fixture_guard="available-v1")` produces a schema 5 refusal with
+existing schema 4 refusal fields and this exact additional field:
+
+```json
+{"profile": "available-v1", "state": "unavailable", "conditions": []}
+```
+
+`unavailable` means the converter has no validated phase, admission or attempt evidence.
+It does not establish that admission failed, no collection occurred, no body ran, or
+that replay is safe. It adds no fabricated units, groups or zero-attempt assertion.
+`inventory_complete: false` likewise means inventory is unknown. There is no
+`not-admitted` state inferred from an exception. `error_result(error)` remains schema 4;
+a parser failure before a valid guarded CLI invocation also retains schema 4.
+
+Expected execution-side drift or another controlled late infrastructure failure is
+reported as a schema 5 run with `admitted` for the original plan and the actual prior
+attempts, group outcomes and infrastructure status retained. No new staged successes
+are published. An unexpected exception escaping after possible execution can still be
+converted, but the resulting `unavailable` refusal makes no claim about phase or bodies.
