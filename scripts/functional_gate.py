@@ -78,6 +78,7 @@ def main():
     os.environ.pop("TELESCOPE_FIXTURE_CHROMIUM", None)
     sys.path.insert(0, str(Path(binding["root"]) / "tests"))
     status = 0
+    readiness = None
     if args.mode == "prepare":
         from frozen_tool_prepare_programs import prepare
 
@@ -87,11 +88,10 @@ def main():
         receipt_hash = file_identity(args.receipt, 4 * 1024 * 1024)["sha256"]
         admission(args.receipt, receipt_hash, args.scratch)
         verify_candidate(binding)
-        # Publish readiness only after preparation and all its postconditions pass.
-        write_json(args.admission, {"schema": 1, "binding_sha256": args.binding_sha256,
-                                   "receipt": str(args.receipt), "receipt_sha256": receipt_hash,
-                                   "source": binding["source"], "interpreter": binding["interpreter"],
-                                   "wheel_sha256": binding["wheel"]["sha256"]})
+        readiness = {"schema": 1, "binding_sha256": args.binding_sha256,
+                     "receipt": str(args.receipt), "receipt_sha256": receipt_hash,
+                     "source": binding["source"], "interpreter": binding["interpreter"],
+                     "wheel_sha256": binding["wheel"]["sha256"]}
     else:
         if not args.receipt_sha256 or not args.admission_sha256:
             raise ValueError("functional execution requires exact new readiness hashes")
@@ -120,6 +120,9 @@ def main():
             raise ValueError("functional admission changed during execution")
     if read_json(args.binding, args.binding_sha256) != binding:
         raise ValueError("candidate binding changed during qualification")
+    # Publication is last: failed preparation postconditions leave no readiness.
+    if readiness is not None:
+        write_json(args.admission, readiness)
     return status
 
 
