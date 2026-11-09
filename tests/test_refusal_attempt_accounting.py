@@ -10,9 +10,9 @@ from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError
 
 
-def scoped(project, name, *, refuse=False):
+def scoped(project, name, *, refuse=False, inputs=()):
     project.module(name, f'''import pytest
-pytestmark = pytest.mark.telescope(inputs=['conftest.py'])
+pytestmark = pytest.mark.telescope(inputs={['conftest.py', *inputs]!r})
 def test_body(request):
     request.config.owned_body_count = getattr(request.config, 'owned_body_count', 0) + 1
     assert request.config.owned_body_count == 1
@@ -30,10 +30,14 @@ def test_real_exit_four_retains_attempts_drains_siblings_and_discards_pending(
         assert session.config.owned_body_count == 1
         session.exitstatus = 4
 """)
-    scoped(project, "test_00_prior.py")
+    put(project.root, "prior-input.txt", "first pinned input\n")
+    scoped(project, "test_00_prior.py", inputs=("prior-input.txt",))
     assert_counts(project.run(), executed=1)
     previous = cache_bytes(project.root)
     assert previous
+    # A different declared input requires a fresh prior attempt while its old
+    # valid cache bytes remain available for the no-publication oracle below.
+    put(project.root, "prior-input.txt", "second pinned input\n")
     scoped(project, "test_10_success.py")
     scoped(project, "test_20_refusal.py", refuse=True)
     if workers == 1:
