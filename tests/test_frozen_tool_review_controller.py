@@ -30,13 +30,17 @@ def two_tools(tmp_path):
 def test_stale_structural_tool_refuses_selected_unrelated_case_without_erasing_cache(tmp_path, selector):
     project, _, second = two_tools(tmp_path)
     assert_counts(project.run(), executed=2)
+    full_boundary = cache_bytes(project.root)
+    boundary = {"default": ["tests/test_first.py"]}
+    assert_counts(project.run(structural_files=boundary), executed=1)
     previous = cache_bytes(project.root)
+    assert all(previous.get(name) == content for name, content in full_boundary.items())
     put(second, "value.txt", "changed without matching pin")
     arguments = ["-k", "first"] if selector == "keyword" else ["tests/test_first.py::test_first"]
     report = project.run(arguments=arguments)
     assert report["status"] == "unsupported" and report["capability"] == "tool:identity", report
     assert cache_bytes(project.root) == previous
-    assert_counts(project.run(structural_files={"default": ["tests/test_first.py"]}), reused=1)
+    assert_counts(project.run(structural_files=boundary), reused=1)
 
 
 def test_valid_unrelated_repin_reuses_independent_case(tmp_path):
