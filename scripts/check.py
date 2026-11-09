@@ -1,37 +1,73 @@
-"""Build and verify the installed distribution in an active virtual environment."""
+"""Build and verify the exact installed distribution in an active virtual environment."""
 
 import argparse
-import subprocess
+import os
 import sys
+import tempfile
 from pathlib import Path
 
-
-def run(*args: str, timeout: int = 300) -> None:
-    subprocess.run([sys.executable, *args], check=True, timeout=timeout)
+from gate import Stages, candidate_binding, file_identity, node_identity, source_identity, write_json
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", required=True, type=Path)
+    parser.add_argument("--node", default=os.environ.get("TELESCOPE_FIXTURE_NODE"))
     args = parser.parse_args()
     if sys.prefix == sys.base_prefix:
         parser.error("activate a dedicated virtual environment before running checks")
+    node_identity(args.node)
+    claimed = os.environ.get("TMPDIR")
+    if not claimed or not Path(claimed).is_absolute() or not Path(claimed).is_dir():
+        parser.error("provide an existing absolute caller-owned TMPDIR")
+    root = Path(__file__).resolve().parent.parent
+    source = source_identity(root)
     output = args.artifacts.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    run("-m", "ruff", "check", ".")
-    run("-m", "ruff", "format", "--check", ".")
-    run("-m", "build", "--outdir", str(output / "dist"))
-    distributions = sorted((output / "dist").iterdir())
-    run("-m", "twine", "check", "--strict", *(str(path) for path in distributions))
-    run("-m", "sphinx", "-n", "-W", "--keep-going", "-b", "dirhtml", "docs", str(output / "site"))
-    wheels = list((output / "dist").glob("*.whl"))
-    if len(wheels) != 1:
-        raise RuntimeError("expected exactly one built wheel")
-    run("-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheels[0]))
-    # Tests that launch Bubblewrap are required; they fail rather than skip on hosts that
-    # deny its namespaces.
-    run("-m", "pytest", "-q", "--basetemp", str(output / "tests"), timeout=900)
-    run("-m", "unittest", "discover", "-s", "benchmarks", "-p", "test_*.py")
+    stages = Stages(output, root)
+    error = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="telescope-functional-gate-", dir=claimed) as scratch:
+            scratch = Path(scratch)
+            env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", TMPDIR=str(scratch))
+            for name in ("TELESCOPE_FIXTURE_ADMISSION", "TELESCOPE_FIXTURE_ADMISSION_SHA256",
+                         "TELESCOPE_FIXTURE_CHROMIUM"):
+                env.pop(name, None)
+            stages.run("lint", "-m", "ruff", "check", ".", env=env)
+            stages.run("format", "-m", "ruff", "format", "--check", ".", env=env)
+            stages.run("build", "-m", "build", "--outdir", str(output / "dist"), env=env)
+            distributions = sorted((output / "dist").iterdir())
+            stages.run("metadata", "-m", "twine", "check", "--strict", *(str(path) for path in distributions), env=env)
+            stages.run("docs", "-m", "sphinx", "-n", "-W", "--keep-going", "-b", "dirhtml",
+                       "docs", str(output / "site"), env=env)
+            wheels = list((output / "dist").glob("*.whl"))
+            if len(wheels) != 1:
+                raise RuntimeError("expected exactly one built wheel")
+            binding = candidate_binding(root, wheels[0], args.node)
+            if binding["source"] != source:
+                raise RuntimeError("candidate changed during build")
+            stages.run("install", "-m", "pip", "install", "--force-reinstall", "--no-deps",
+                       "--no-compile", str(wheels[0]), env=env)
+            binding_file = output / "candidate-binding.json"
+            binding_hash = write_json(binding_file, binding)
+            receipt = output / "functional-prerequisites.json"
+            ready = output / "functional-admission.json"
+            helper = str(root / "scripts/functional_gate.py")
+            arguments = ["--binding", str(binding_file), "--binding-sha256", binding_hash,
+                         "--scratch", str(scratch), "--receipt", str(receipt), "--admission", str(ready)]
+            stages.run("prepare", "-I", "-B", helper, "prepare", *arguments, timeout=900, env=env)
+            arguments += ["--receipt-sha256", file_identity(receipt, 4 * 1024 * 1024)["sha256"],
+                          "--admission-sha256", file_identity(ready, 4 * 1024 * 1024)["sha256"]]
+            stages.run("functional", "-I", "-B", helper, "tests", *arguments, timeout=900, env=env)
+            stages.run("harness", "-I", "-B", helper, "harness", *arguments, env=env)
+        if source_identity(root) != source:
+            raise RuntimeError("candidate changed during qualification")
+    except BaseException as exc:
+        error = type(exc).__name__ + ": " + str(exc)[:1024]
+        raise
+    finally:
+        write_json(output / "gate-result.json", {"source": source, "error": error,
+                                                 "status": "passed" if error is None else "failed"})
 
 
 if __name__ == "__main__":
