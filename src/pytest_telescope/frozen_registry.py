@@ -10,7 +10,7 @@ from .model import DeclarationError, InfrastructureError, regular_bytes
 
 
 class FrozenRegistry:
-    """Parse each explicitly frozen Python source once, selecting each view separately."""
+    """Parse each frozen Python import origin once, selecting each view separately."""
 
     def __init__(self, root, records):
         self.root = root
@@ -72,10 +72,11 @@ class FrozenRegistry:
         selected = set(unit.inputs)
         if any(name not in self.records for name in selected):
             raise InfrastructureError("declaration view has no frozen source record")
-        sources = set()
-        for name in sorted(selected):
-            if not name.endswith(".py"):
+        sources = {}
+        for origin in sorted(selected):
+            if not origin.endswith(".py"):
                 continue
+            name = origin
             seen = set()
             while self.records[name]["kind"] == "symlink":
                 if name in seen or len(seen) >= 64:
@@ -97,9 +98,9 @@ class FrozenRegistry:
                     raise InfrastructureError("frozen declaration source link escaped its view")
                 name = target
             if name is not None and self.records[name]["kind"] == "file":
-                sources.add(name)
+                sources[origin] = name
         registry = []
-        for name in sorted(sources):
+        for origin, name in sources.items():
             try:
                 content, measured = regular_bytes(self.root, name, markers.MAX_SOURCE)
             except OSError as exc:
@@ -110,18 +111,20 @@ class FrozenRegistry:
                 or measured.st_mode & 0o777 != record["mode"]
             ):
                 raise InfrastructureError("frozen declaration source disagrees with its record")
-            if name not in self.parsed:
+            if origin not in self.parsed:
+                # Each readable import origin has its own call identities. Count aliases
+                # against parsing budgets too: they must not multiply records unboundedly.
                 self.source_bytes += len(content)
                 if self.source_bytes > markers.MAX_TOTAL_SOURCE:
                     raise DeclarationError("frozen Python source exceeds the discovery budget")
                 try:
-                    found, nodes = markers.discover(content, name)
+                    found, nodes = markers.discover(content, origin)
                 except markers.MarkerError as exc:
                     raise DeclarationError(str(exc)) from exc
                 self.nodes += nodes
                 self.markers += len(found)
                 if self.nodes > markers.MAX_TOTAL_NODES or self.markers > markers.MAX_MARKERS:
                     raise DeclarationError("frozen declaration syntax exceeds total node/marker limits")
-                self.parsed[name] = found
-            registry.extend(self.parsed[name])
+                self.parsed[origin] = found
+            registry.extend(self.parsed[origin])
         return registry
