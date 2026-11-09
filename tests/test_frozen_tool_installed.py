@@ -2,8 +2,11 @@
 
 import json
 import stat
+from dataclasses import replace
 
 import pytest
+
+from pytest_telescope import sandbox
 
 from frozen_tool_fixtures import assert_counts, cache_bytes, file_digest, put
 from frozen_tool_installed_fixture import InstalledConfiguration
@@ -70,12 +73,31 @@ def test_installed():
 """)
 
 
-def test_normally_installed_plugin_metadata_resources_and_bytecode_in_child(installed):
+def test_normally_installed_plugin_metadata_resources_and_bytecode_in_child(installed, monkeypatch):
     installed_case(installed)
-    # An owned, valid-looking sibling is deliberately outside both selected trees.
-    put(installed.package.parent, "owned_unselected_plugin-1.0.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: owned-unselected-plugin\nVersion: 1.0.0\n")
-    assert_counts(installed.project.run(timeout=90), executed=1)
-    assert_counts(installed.project.run(timeout=90), reused=1)
+    # Establish an actual baseline grant so native absence is a meaningful contrast.
+    # The real prefix-closing/filtering path must suppress this covered late bind.
+    sibling_name = "owned_unselected_plugin-1.0.0.dist-info"
+    source = installed.package.parent / sibling_name
+    destination = installed.original_package.parent / sibling_name
+    put(source, "METADATA", "Metadata-Version: 2.1\nName: owned-unselected-plugin\nVersion: 1.0.0\n")
+    prepare = sandbox.prepare
+
+    def with_owned_sibling(*args, **kwargs):
+        box = prepare(*args, **kwargs)
+        return replace(box, binds=(*box.binds, (str(source), str(destination))))
+
+    monkeypatch.setattr(sandbox, "prepare", with_owned_sibling)
+    installed.project.module("test_baseline_sibling.py", """import subprocess
+import sys
+import pytest
+pytestmark = pytest.mark.telescope(tools=[])
+def test_baseline_sibling():
+    child = subprocess.run([sys.executable, '-I', '-c', "from importlib import metadata; assert metadata.version('owned-unselected-plugin') == '1.0.0'"], capture_output=True, timeout=20)
+    assert child.returncode == 0, child.stderr
+""")
+    assert_counts(installed.project.run(timeout=90), executed=2)
+    assert_counts(installed.project.run(timeout=90), reused=2)
 
 
 @pytest.mark.parametrize("member", ["module", "record", "bytecode"])
