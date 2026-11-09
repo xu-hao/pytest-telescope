@@ -86,10 +86,14 @@ class FrozenRegistry:
                 try:
                     actual = (self.root / name).readlink().as_posix()
                 except OSError as exc:
-                    raise InfrastructureError("cannot verify frozen declaration source link") from exc
+                    raise InfrastructureError(
+                        "cannot verify frozen declaration source link"
+                    ) from exc
                 if actual != record["target"]:
                     raise InfrastructureError("frozen declaration source link changed")
-                target = posixpath.normpath(posixpath.join(posixpath.dirname(name), record["target"]))
+                target = posixpath.normpath(
+                    posixpath.join(posixpath.dirname(name), record["target"])
+                )
                 if not self.canonical_path(target) or target not in selected:
                     # A supported dangling leaf remains absent, never an authentication source.
                     if target in unit.absent and self.canonical_path(target):
@@ -124,7 +128,9 @@ class FrozenRegistry:
                 self.nodes += nodes
                 self.markers += len(found)
                 if self.nodes > markers.MAX_TOTAL_NODES or self.markers > markers.MAX_MARKERS:
-                    raise DeclarationError("frozen declaration syntax exceeds total node/marker limits")
+                    raise DeclarationError(
+                        "frozen declaration syntax exceeds total node/marker limits"
+                    )
                 self.parsed[origin] = found
             registry.extend(self.parsed[origin])
         return registry

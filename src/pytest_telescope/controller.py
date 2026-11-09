@@ -821,7 +821,9 @@ def run(
                                         metadata,
                                     )
                                     if frozen_registry.for_view(collection_unit) != registry:
-                                        raise InfrastructureError("frozen collection registry changed")
+                                        raise InfrastructureError(
+                                            "frozen collection registry changed"
+                                        )
                                     collected = sandbox.execute(
                                         box,
                                         frozen,
