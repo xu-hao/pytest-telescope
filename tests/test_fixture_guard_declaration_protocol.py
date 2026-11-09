@@ -58,13 +58,21 @@ def unit(report, name):
     return next(u for u in report["units"] if u["case_id"] == case_id(name))
 
 
-def observe(monkeypatch, *, synchronize=False):
+def observe(monkeypatch, *, synchronize=False, started=None):
     actual_execute = sandbox.execute
     done_a = Event()
     records = []
     ids = {case_id(name): name for name in ("a", "b")}
 
     def execute(*args, request, **kwargs):
+        if request["mode"] == "guard-batch" and started is not None:
+            callback = kwargs["on_session_start"]
+
+            def on_start():
+                started.append(request["case_ids"][0])
+                callback()
+
+            kwargs["on_session_start"] = on_start
         value = actual_execute(*args, request=request, **kwargs)
         if request["mode"] == "guard-batch":
             assert len(request["case_ids"]) == 1 and request["case_ids"][0] in ids
@@ -130,6 +138,14 @@ def test_guard_false_exit_three_keeps_pass_and_independent_sibling(tmp_path, mon
 
 def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkeypatch):
     project(tmp_path, 0)
+    monkeypatch.setenv("GUARD_ACCOUNTING_PRESENT", "synthetic-value")
+    put(
+        tmp_path,
+        "tests/test_a.py",
+        "import os\nimport pytest\n"
+        'pytestmark = pytest.mark.telescope(inputs=["tests/conftest.py"], env=["GUARD_ACCOUNTING_PRESENT"])\n'
+        'def test_item(): os.write(1, b"GUARD_DECL_A\\n")\n',
+    )
     put(
         tmp_path,
         "tests/conftest.py",
@@ -140,7 +156,8 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
         "            if item.nodeid.startswith('tests/test_b.py::'):\n"
         "                item.add_marker(pytest.mark.telescope(inputs=[]))\n",
     )
-    records = observe(monkeypatch)
+    starts = []
+    records = observe(monkeypatch, started=starts)
     staged = []
     real_stage = controller.PendingRecords.stage
 
@@ -149,17 +166,48 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
         staged.append((kind, guarded, key, final))
 
     monkeypatch.setattr(controller.PendingRecords, "stage", stage)
-    with pytest.raises(DeclarationError) as refusal:
-        controller.run(tmp_path, fixture_guard="available-v1", workers=1, arguments=["-s"])
-    assert type(refusal.value) is DeclarationError
+    refusal = None
+    returned = None
+    try:
+        returned = controller.run(
+            tmp_path,
+            fixture_guard="available-v1",
+            workers=1,
+            arguments=["-s"],
+            condition_checks=[{"case_id": case_id("a"), "name": "GUARD_ACCOUNTING_PRESENT", "op": "present"}],
+        )
+    except DeclarationError as error:
+        refusal = error
     assert [name for name, _, _ in records] == ["a", "b"]
     a_request, a = records[0][1:]
     b_request, b = records[1][1:]
+    assert starts == [case_id("a"), case_id("b")]
     assert a["exit_code"] == 0 and a["case_results"][0]["outcome"] == "passed"
+    assert [row["phase"] for row in a["case_results"][0]["reports"]] == ["setup", "call", "teardown"]
     assert b["declaration_error"] is True and b["exit_code"] == 4 and not b["complete"]
     assert a_request["group_id"] != b_request["group_id"]
     assert any(kind == "execution" and guarded and key == a_request["group_id"] for kind, guarded, key, _ in staged)
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
+    assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.pending"))
+    assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
+    print("GUARD_TRUE_PRECONDITIONS", [(name, req["group_id"], value["declaration_error"]) for name, req, value in records], "starts", starts, "returned_status", returned["status"] if returned else None)
+    assert type(refusal) is DeclarationError, "known declaration refusal was not raised"
+    retained = refusal.accounting.render()
+    assert retained["version"] == 2 and retained["state"] == "available"
+    observations = retained["observations"]
+    assert observations["execution"]["profile"] == "batch-available-v1"
+    assert observations["fixture_guard"] == {"profile": "available-v1", "state": "admitted", "conditions": [{"case_id": case_id("a"), "group_id": a_request["group_id"], "matched": True}]}
+    assert group(observations, "a")["attempts"] == 1 and unit(observations, "a")["result_status"] == "passed"
+    assert unit(observations, "a")["reports"] == a["case_results"][0]["reports"]
+    assert group(observations, "b")["attempts"] == 1
+    assert unit(observations, "b")["reports"] == b["case_results"][0]["reports"]
+    envelope = controller.error_result(refusal, fixture_guard="available-v1")
+    assert envelope["schema"] == 5 and envelope["status"] == "declaration_error"
+    assert envelope["accounting"] == retained
+    assert envelope["fixture_guard"] == observations["fixture_guard"]
+    assert envelope["inventory_complete"] == observations["inventory_complete"]
+    assert envelope["inventory_digest"] == observations["inventory_digest"]
+    assert "synthetic-value" not in json.dumps(envelope)
 
 
 def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path, monkeypatch):
