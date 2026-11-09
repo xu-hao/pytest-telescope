@@ -148,9 +148,9 @@ def test_item(): pass
         if error is None or id(error) in seen:
             continue
         seen.add(id(error))
-        assert getattr(error, "object", None) != secret
-        assert secret not in error.args
-        assert repr(secret) not in repr(error)
+        if (getattr(error, "object", None) == secret or secret in error.args
+                or repr(secret) in repr(error)):
+            pytest.fail("synthetic condition value retained by exception chain", pytrace=False)
         pending.extend([error.__context__, error.__cause__])
 
 
