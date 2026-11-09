@@ -312,11 +312,17 @@ def qualified_framework_identity(session, definition, identities):
             if plugin is not module:
                 continue
             namespace = vars(plugin)
+        elif isinstance(plugin, type):
+            if plugin.__module__ != function.__module__:
+                continue
+            namespace = vars(plugin)
         else:
             if type(plugin).__module__ != function.__module__:
                 continue
             namespace = vars(type(plugin))
         for value in namespace.values():
+            if type(value) is staticmethod:
+                value = value.__func__
             if type(value) is not FixtureFunctionDefinition:
                 continue
             try:
@@ -514,9 +520,12 @@ def fixture_registry_commitment(session, items, identities, observer):
         if isinstance(plugin, types.ModuleType):
             module = plugin
             kind = "module"
+        elif isinstance(plugin, type):
+            module = sys.modules.get(plugin.__module__)
+            kind = "class:" + plugin.__qualname__
         else:
             module = sys.modules.get(type(plugin).__module__)
-            kind = type(plugin).__qualname__
+            kind = "instance:" + type(plugin).__qualname__
         if type(module) is not types.ModuleType or type(module.__file__) is not str:
             raise ValueError("unsupported plugin source")
         path = Path(module.__file__).resolve(strict=True)
