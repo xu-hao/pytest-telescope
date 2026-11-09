@@ -156,3 +156,68 @@ def test_item():
     warm = controller.run(tmp_path, workers=1)
     passed(warm)
     assert warm["counts"]["reused"] == 1
+
+
+@pytest.mark.parametrize("name", RESERVED)
+@pytest.mark.parametrize("value", [None, "", "synthetic-reserved-value"])
+def test_internal_worker_producer_rejects_reserved_keys(tmp_path, name, value):
+    from pytest_telescope import sandbox
+
+    box = sandbox.prepare(tmp_path)
+    with sandbox.invocation(tmp_path) as directory:
+        view = directory / "project"
+        view.mkdir()
+        with pytest.raises(DeclarationError) as error:
+            sandbox.execute(
+                box, view, [], {name: value}, 10,
+                root=tmp_path,
+                invocation_directory=directory,
+                request={"mode": "collection", "registry": [], "selectors": [], "context_id": "a" * 64},
+            )
+        assert type(error.value) is DeclarationError
+        assert not (directory / "control").exists()
+
+
+def test_real_composed_environment_can_exceed_one_declarations_limit(tmp_path, monkeypatch):
+    names = [f"SYNTHETIC_OPTION_{index}" for index in range(4096)]
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SYNTHETIC_ADDITIONAL", "forwarded")
+    put(tmp_path, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\nenv = ' + json.dumps(names) + '\n')
+    put(tmp_path, "tests/test_union.py", '''import os
+import pytest
+pytestmark = pytest.mark.telescope(env=["SYNTHETIC_ADDITIONAL"])
+def test_union():
+    assert os.environ["SYNTHETIC_ADDITIONAL"] == "forwarded"
+    assert all(f"SYNTHETIC_OPTION_{index}" not in os.environ for index in range(4096))
+''')
+    passed(controller.run(tmp_path, workers=1))
+
+
+@pytest.mark.parametrize("mode", ["case", "batch"])
+def test_real_collection_and_execution_do_not_write_scratch_bytecode(tmp_path, mode):
+    put(tmp_path, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\n')
+    put(tmp_path, "tests/test_modes.py", '''import importlib.util
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import pytest
+pytestmark = pytest.mark.telescope(env=[])
+def verify():
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        source = root / "plain.py"
+        source.write_text("answer = 42\\n")
+        spec = importlib.util.spec_from_file_location("plain", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert module.answer == 42
+        assert not (root / "__pycache__").exists()
+verify()
+def test_first(): verify()
+def test_second(): verify()
+''')
+    report = controller.run(tmp_path, workers=1, execution_mode=mode)
+    passed(report)
+    assert report["collection"]["outcome"] == "executed"
+    assert report["counts"]["executed"] == 2
+    assert len(report["groups"]) == (2 if mode == "case" else 1)
