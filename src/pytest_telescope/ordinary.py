@@ -7,7 +7,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from .model import InfrastructureError
+from .model import InfrastructureError, fingerprint
 from .result import validate_ordinary
 from .sandbox import MAX_COLLECTION, WORKER, capture
 
@@ -52,6 +52,15 @@ def session(manifest, suite, files, options, selectors, selection_disabled):
             *[str(root / name) for name in files],
         ],
     )
+    request["context_id"] = fingerprint(
+        dict(
+            profile="ordinary-v2",
+            suite=suite.identity(),
+            files=files,
+            args=request["args"],
+            nonce=nonce,
+        )
+    )
     encoded = json.dumps(request, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     if len(encoded) > MAX_COLLECTION:
         raise InfrastructureError("ordinary session request exceeds 64 MiB")
@@ -74,7 +83,10 @@ def session(manifest, suite, files, options, selectors, selection_disabled):
         if len(frames) != 1:
             raise ValueError("ordinary result frame count")
         result = json.loads(frames[0])
-        if not validate_ordinary(result, nonce) or result["exit_code"] != code:
+        if (
+            not validate_ordinary(result, nonce, context_id=request["context_id"])
+            or result["exit_code"] != code
+        ):
             raise ValueError("ordinary result protocol")
     except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
         raise InfrastructureError("ordinary pytest session returned no valid result") from exc

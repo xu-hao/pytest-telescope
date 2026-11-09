@@ -138,7 +138,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
             "required": True,
             "identity": None,
         },
-        "execution": {"mode": "case", "profile": "case-v1", "workers": 1},
+        "execution": {"mode": "case", "profile": "case-v2", "workers": 1},
         "case_inventory": "requires pytest collection",
         "inventory": ["test_another.py", "test_subject.py"],
         "distributions": [],
@@ -175,6 +175,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
                 "route": "scoped",
                 "inputs": ["conftest.py", "data.json", "helper.py"],
                 "absent": [],
+                "env": [],
                 "cache": True,
             }
             for name in ["test_another.py", "test_subject.py"]

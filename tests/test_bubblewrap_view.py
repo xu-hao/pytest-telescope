@@ -39,7 +39,7 @@ def project(tmp_path):
 def passed(root, **kwargs):
     report = controller.run(root, explain=True, **kwargs)
     assert report["status"] == "passed", report
-    assert report["schema"] == 3 and report["kind"] == "run"
+    assert report["schema"] == 4 and report["kind"] == "run"
     assert report["sandbox"]["required"] is True
     assert len(report["sandbox"]["identity"]) == 64
     assert report["inventory_complete"] is True and report["grouping_complete"] is True
@@ -245,11 +245,11 @@ def test_case_mode_is_default_and_batch_is_opt_in(project):
     )
     case = controller.run(project, no_cache=True)
     assert case["execution"]["mode"] == "case"
-    assert [group["profile"] for group in case["groups"]] == ["case-v1"] * 3
+    assert [group["profile"] for group in case["groups"]] == ["case-v2"] * 3
     assert case["status"] == "failed"
     assert case["counts"]["executed"] == 2 and case["counts"]["failed"] == 1
     batch = passed(project, no_cache=True, execution_mode="batch")
-    assert [group["profile"] for group in batch["groups"]] == ["batch-v1"]
+    assert [group["profile"] for group in batch["groups"]] == ["batch-v2"]
     assert len(batch["groups"][0]["case_ids"]) == 3
     assert batch["counts"]["executed"] == 3
 

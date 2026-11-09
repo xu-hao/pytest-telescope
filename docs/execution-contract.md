@@ -1,5 +1,8 @@
 # Declarations, inventory and reuse
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 This page explains how pytest-telescope reads declarations, discovers cases and decides
 whether to reuse their results. The [execution contract](bubblewrap.md) describes which
 tests run in a sandbox and which files they can see.
@@ -34,7 +37,7 @@ def test_variant(value): ...
 ```
 
 Module/class/function/parameter declarations are additive. A literal `inputs`,
-`bundles` or `distributions` field makes a case scoped, including an empty list. Its
+`bundles`, `distributions` or `env` field makes a case scoped, including an empty list. Its
 effective scope is the union of those inherited declarations, project defaults,
 containing test source and configuration source. A policy-only `cache=False` marker or
 absence assertion does not make a case scoped. Any inherited `cache=False` disables
@@ -89,7 +92,8 @@ refuses missing, invalid or outside-project module origins instead of falling ba
 that embedded filename.
 
 Files scoped by module-level `pytestmark` are collected in a sandbox. Its view combines
-those files' declarations with the suite's project defaults and configuration. Collection
+those files' potential declarations with the suite's project defaults and configuration,
+including the union of their declared environment names. Collection
 checks that every case inherited its module's scope. If a case did not, collection fails
 without retrying with more files. No case body runs in this combined collection view.
 
@@ -106,9 +110,17 @@ Inventory and execution have distinct strict result schemas. A successful sandbo
 
 The scoped inventory key covers the exact frozen collection view, current test-file membership, static declaration registry, pytest configuration, relevant environment, full effective arguments/selectors, the sandbox identity (policy, interpreter, installed distributions and the environment's references into the project) and runner implementation/version. Every invocation re-freezes current declared inputs before accepting an inventory hit. File addition/deletion, declared-resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present scoped cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
 
-Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
+Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes or environment values merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
 
 Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts by route, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static preview and explicitly does not claim real collected-case enumeration.
+
+Implicit structural files are collection boundaries, not explicit requests for a case.
+A validated collection establishes file coverage independently of collected-case aliases.
+An explicit file target can therefore yield zero cases, including when collection skips
+the file; retain actual collection skip evidence without inventing a selected case. An
+explicit `file::node` selector must match a genuinely collected alias: coverage of its file
+alone does not satisfy it. This applies to ordinary and scoped collection and to reused
+scoped inventory.
 
 ## Bounds and performance
 
@@ -167,9 +179,18 @@ The default suite keeps pytest configuration in this pyproject's `[tool.pytest.i
 [Independent suite declarations](scoped-execution.md) also support explicit
 pytest.ini, .pytest.ini, tox.ini and setup.cfg files. Discovery honors configured `python_files`
 and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
-truncates matching files. Only named `env` variables are forwarded into scoped sandboxes
-and keyed, including presence. Controlled Python/pytest variables and `TELESCOPE_*`
-protocol names are reserved. Diagnostics never print environment values.
+truncates matching files. Only effective `env` names are forwarded into each scoped execution and keyed. Global
+names apply to all scoped cases; literal module, class, function and parameter names add
+to defaults and bundles for their consumers. `env=[]` scopes a case; defaults alone do
+not. Capture declared names once before sessions, distinguishing absent, present-empty
+and present-valued states. Discovery keys and receives the potential collection union;
+execution recollects in the narrower actual scope and checks the complete file inventory,
+origins and order. Put collection dependencies in every consumer's shared declarations.
+An unrelated case can reuse its result after a collection refresh. Controlled
+Python/pytest variables and `TELESCOPE_*` protocol names are reserved. Raw environment
+values occur transiently in controller memory and actual Bubblewrap arguments/environment,
+not worker request JSON, cache envelopes, public summaries or ordinary diagnostic logs.
+Plan may display names, not values. Ordinary sessions inherit the process environment.
 
 ## Outcome accounting
 
