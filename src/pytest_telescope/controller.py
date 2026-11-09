@@ -571,7 +571,11 @@ def run(
         # Parked cases share the infrastructure_error count but are not an outage: the
         # run stopped for the collection outcome that parked them.
         outages = counts["infrastructure_error"] - progress["parked"]
-        if outages or collection["outcome"] == "infrastructure_error":
+        if (
+            outages
+            or collection["outcome"] == "infrastructure_error"
+            or any(group["outcome"] == "infrastructure_error" for group in groups)
+        ):
             status = "infrastructure_error"
         elif counts["failed"] or collection["outcome"] == "failed":
             status = "failed"
@@ -584,7 +588,11 @@ def run(
                 or group["stop_reason"] in {"pytest-stop", "collection"}
                 for group in groups
             )
-            and not any(group["stop_reason"] in {"infrastructure", "cancelled"} for group in groups)
+            and not any(
+                group["outcome"] == "infrastructure_error"
+                or group["stop_reason"] in {"infrastructure", "cancelled"}
+                for group in groups
+            )
         ):
             status = "failed"
         if progress["published"]:

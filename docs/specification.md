@@ -140,7 +140,13 @@ The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
 Only named user variables are forwarded; runtime-controlled variables remain reserved.
 Each `env` is a literal list of at most 4,096 nonempty identifiers of at most 4,096
 characters each. `PYTHONPATH`, `PYTHONHOME`, `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`,
-`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, and names beginning `TELESCOPE_` are reserved.
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD`, `PATH`, `HOME`, `TMPDIR`,
+`PYTHONDONTWRITEBYTECODE`, and names beginning `TELESCOPE_` are reserved.
+Every declaration route rejects these names before any session starts, whether the
+invoking variable is absent, empty or populated: top-level `env`, defaults, every
+bundle (including unused and nested bundles), and module, class, function and parameter
+markers. The Python API raises `DeclarationError`; the CLI reports
+`declaration_error` with exit status 4. A declaration cannot replace a fixed setting.
 The invoking environment is captured once. Absence, an empty value and a nonempty value
 are distinct; a change invalidates only consumers of that name, except that top-level
 `env` names apply to every scoped case. Defaults add names to scoped cases but do not

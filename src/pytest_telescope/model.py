@@ -109,6 +109,10 @@ def sequence(value, label):
 def environment_names(value):
     names = sequence(value, "env")
     forbidden = {
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "PYTHONDONTWRITEBYTECODE",
         "PYTHONPATH",
         "PYTHONHOME",
         "PYTEST_ADDOPTS",
