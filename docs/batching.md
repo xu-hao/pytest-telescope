@@ -276,7 +276,13 @@ fixture identity, owner, scope and parameter binding. The worker channel must bi
 response to its own request; a checksum or nonce alone is not an authentication claim.
 The inspection request contains exactly `protocol`, `nonce`, `context_id`, `group_id`,
 `case_ids` and `registry_id`. Its response repeats those fields and adds `graph_id` and
-ordered `items`; each item has exactly `case_id` and `fixtures`. Each fixture row has
+ordered `items`; each item has exactly `case_id`, `fixtures` and `packages`. Each
+package row contains exactly `owner_id` and `lifecycle`: the owner is an opaque digest,
+and lifecycle is an ordered two-element list of nullable setup and teardown callable
+identities. There are at most 64 package rows per item, ordered by unique owner ID.
+Capture and inspection include these rows in their content and graph commitments;
+execution recollection must reproduce them before setup. A missing, duplicated,
+malformed, mismatched or changed package row fails closed. Each fixture row has
 exactly `definition_id`, `owner_id`, `scope`, `parameter_index`, `effective_scope` and
 `framework`. IDs are lowercase 64-character hexadecimal values, context equals group,
 case IDs are nonempty, distinct and ordered, and parameter indices are nonnegative
