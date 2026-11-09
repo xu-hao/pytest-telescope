@@ -10,6 +10,7 @@ from test_helper_registry_contract import passed
 
 from pytest_telescope import controller, frozen_registry, markers, sandbox
 from pytest_telescope.model import DeclarationError, InfrastructureError, fingerprint
+from pytest_telescope.result import validate_result
 
 
 @pytest.mark.parametrize(
@@ -328,7 +329,24 @@ def test_helper_cache_records_must_revalidate_exact_inventory_and_membership(tmp
             item = record["result"]["items"][0]
             item["origins"] = sorted([*item["origins"], found[0]["id"]])
         elif corruption == "case_wrong_identity":
+            expected = record["result"]["case_ids"][0]
+            context = record["result"]["context_id"]
+            assert validate_result(
+                record["result"],
+                successful_only=True,
+                case_id=expected,
+                context_id=context,
+            )
+            assert expected != "0" * 64
             record["result"]["case_ids"] = ["0" * 64]
+            record["result"]["case_results"][0]["case_id"] = "0" * 64
+            assert validate_result(record["result"], successful_only=True, context_id=context)
+            assert not validate_result(
+                record["result"],
+                successful_only=True,
+                case_id=expected,
+                context_id=context,
+            )
         elif corruption == "batch_missing_member":
             record["result"]["case_results"].pop()
         record["checksum"] = fingerprint(record["result"])
