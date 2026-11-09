@@ -32,15 +32,22 @@ def test_conflict(): pass
 
 
 def test_omitted_tools_preserve_existing_environment_forwarding(project, monkeypatch):
-    monkeypatch.setenv("HOME", "/tmp/owned-environment-home")
+    monkeypatch.setenv("OWNED_TEST_SETTING", "exact owned value")
     project.module("test_environment.py", """import os
 import pytest
-pytestmark = pytest.mark.telescope(env=['HOME'])
+pytestmark = pytest.mark.telescope(env=['OWNED_TEST_SETTING'])
 def test_environment():
-    assert os.environ['HOME'] == '/tmp/owned-environment-home'
+    assert os.environ['OWNED_TEST_SETTING'] == 'exact owned value'
 """)
     assert_counts(project.run(), executed=1)
     assert_counts(project.run(), reused=1)
+
+
+def test_omitted_tools_still_refuse_reserved_home(project, monkeypatch):
+    monkeypatch.setenv("HOME", str(project.external))
+    project.module("test_home.py", "import pytest\npytestmark=pytest.mark.telescope(env=['HOME'])\ndef test_home(): pass\n")
+    report = project.run()
+    assert report["kind"] == "refusal" and report["status"] == "declaration_error", report
 
 
 def test_tool_and_user_environment_values_remain_exact_and_consumer_local(project, monkeypatch):
