@@ -845,6 +845,10 @@ def run(
         return True
 
     if not manifest.scope_possible:
+        if fixture_guard and condition_checks:
+            from .fixture_guard import evaluate_conditions
+
+            evaluate_conditions(condition_checks, [])
         # All-ordinary: no sandbox, frozen copy, cache directory or lock.
         if ordinary_sessions(scoped):
             if requested_selectors - seen_aliases - seen_files:
@@ -1322,7 +1326,9 @@ def run(
                                 group["timing_complete"] = False
                                 return projected, group, None, True
                             except (InfrastructureError, OSError) as exc:
-                                terminal = isinstance(exc, (sandbox.CleanupError, _FixtureDrift))
+                                terminal = isinstance(exc, (sandbox.CleanupError, _FixtureDrift)) or (
+                                    bool(fixture_guard) and attempt == 1
+                                )
                                 if terminal:
                                     cancellation.set()
                                 if attempt == 1 or terminal:
@@ -1367,7 +1373,9 @@ def run(
                                 accept(job, projected, group)
                                 if terminal:
                                     blocked = (
-                                        "run stopped after owned cleanup failure or cancellation"
+                                        "run stopped after infrastructure failure or cancellation"
+                                        if fixture_guard
+                                        else "run stopped after owned cleanup failure or cancellation"
                                     )
                                 if (
                                     result is not None
@@ -1395,7 +1403,9 @@ def run(
                                 accept(job, projected, group)
                                 if terminal:
                                     blocked = (
-                                        "run stopped after owned cleanup failure or cancellation"
+                                        "run stopped after infrastructure failure or cancellation"
+                                        if fixture_guard
+                                        else "run stopped after owned cleanup failure or cancellation"
                                     )
                         if cancellation.is_set():
                             blocked = blocked or "run cancelled"
