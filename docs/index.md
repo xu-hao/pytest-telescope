@@ -183,6 +183,10 @@ for its precise supported states and limits.
 
 ## Opt into frozen external tools (development contract)
 
+Contributor [program qualification](development.md#controlled-program-qualification)
+uses explicit runtime prerequisites and separate Node, installed-plugin and full-browser
+controls; these development interfaces are not part of the published release.
+
 For a candidate implementing frozen tools, register an existing installation manifest
 and add the selection to its consuming test:
 

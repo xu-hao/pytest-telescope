@@ -72,6 +72,36 @@ the actual invoking interpreter description and explicitly pin its real runtime,
 cache and pytest dependencies. Adding a dynamic worker runtime to a static-tool test
 cannot prove that the static tool alone caused the native profile to activate.
 
+### Controlled program qualification
+
+The Node, installed-plugin and full Chromium controls use the actual invoking worker
+runtime alongside explicitly selected program files. Preparation records every selected
+file's hash, type and mode in a bounded private receipt. A check compares its initial
+declarations against that exact receipt before starting the controller. A missing or
+changed prerequisite fails preparation or the check; it does not skip the control,
+download a replacement, or widen the filesystem view.
+
+The Node driver keeps its `#!/usr/bin/env node` shebang. Its checks exercise the pinned
+command directory, argument boundaries, exit status and signal propagation through an
+isolated Python CLI child. The installed-plugin controls copy the normally installed
+`pluggy` package and dist-info trees into owned fixture storage, including actual RECORD
+and usable pyc files. Their source-routing fixture retains the real import locations;
+only the owned copies are mutated. The child runs a real plugin hook and reads actual
+metadata and resources without a `.pth` file or `PYTHONPATH` override.
+
+The browser control uses full Chromium, the unchanged Node CLI driver and its real CDP
+pipe. It navigates to an owned data-URL page and dispatches mouse input that changes the
+DOM. It needs no external page, DNS lookup or shared browser service. Browser resources,
+the named font configuration and fonts, Node, native dependencies and the worker runtime
+are explicit inputs. The browser fixture permits at most 768 MiB of selected program
+bytes, 512 MiB per file and 10,000 entries; the worker fixture retains its separate
+256 MiB bound. Owned projections hard-link already frozen copies and grant no live
+source siblings. The caller still provides aggregate memory, scratch and time limits.
+
+Preparation and the individual controls have separate verdicts. Authoring these tests,
+or passing a smaller worker or static-program control, does not qualify the Node,
+installed-plugin or browser path. The ambient compatibility benchmarks remain separate.
+
 For documentation alone:
 
 ```sh
