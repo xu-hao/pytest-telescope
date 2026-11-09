@@ -5,6 +5,7 @@ wire records; it does not inspect pytest internals in the invoking process.
 """
 
 import re
+from pathlib import PurePosixPath
 
 from .model import DeclarationError, InfrastructureError, UnsupportedCapability, fingerprint
 
@@ -123,11 +124,27 @@ def validate_inspection(result, *, nonce, group_id, case_ids, registry_id, frame
     for item, case in zip(result["items"], case_ids):
         if (
             type(item) is not dict
-            or set(item) != {"case_id", "fixtures"}
+            or set(item) != {"case_id", "fixtures", "packages"}
             or item["case_id"] != case
             or type(item["fixtures"]) is not list
+            or type(item["packages"]) is not list
+            or len(item["packages"]) > 64
         ):
             raise InfrastructureError("invalid fixture inspection membership")
+        owners = []
+        for package in item["packages"]:
+            if (
+                type(package) is not dict
+                or set(package) != {"owner_id", "lifecycle"}
+                or not _digest(package["owner_id"])
+                or type(package["lifecycle"]) is not list
+                or len(package["lifecycle"]) != 2
+                or any(value is not None and not _digest(value) for value in package["lifecycle"])
+            ):
+                raise InfrastructureError("invalid package collector evidence")
+            owners.append(package["owner_id"])
+        if owners != sorted(set(owners)):
+            raise InfrastructureError("invalid package collector ordering")
         rows = item["fixtures"]
         associations += len(rows)
         if associations > 100_000:
@@ -182,7 +199,7 @@ def require_conservation(inspections, candidates):
     """
     if len(inspections) != len(candidates):
         raise InfrastructureError("fixture group membership is ambiguous")
-    modules, suites, seen = {}, {}, set()
+    modules, suites, packages, seen = {}, {}, {}, set()
     for inspection, candidate in zip(inspections, candidates):
         group = inspection["group_id"]
         if group != candidate["key"] or group in seen:
@@ -192,11 +209,26 @@ def require_conservation(inspections, candidates):
         filename = candidate["item"]["file"]
         modules.setdefault((suite, filename), set()).add(group)
         suites.setdefault(suite, set()).add(group)
+        for parent in PurePosixPath(filename).parents:
+            owner = fingerprint({"suite": suite, "scope": "package", "path": str(parent)})
+            packages.setdefault(owner, set()).add(group)
     associations = 0
     for inspection, candidate in zip(inspections, candidates):
+        group = inspection["group_id"]
         suite = candidate["suite"].name
         filename = candidate["item"]["file"]
         for item in inspection["items"]:
+            for package in item["packages"]:
+                owner = package["owner_id"]
+                if group not in packages.get(owner, set()):
+                    raise InfrastructureError("package owner disagrees with selected group")
+                if (
+                    any(value is not None for value in package["lifecycle"])
+                    and len(packages[owner]) > 1
+                ):
+                    raise UnsupportedCapability(
+                        "execution:fixture-sharing", "package lifecycle spans execution groups"
+                    )
             for row in item["fixtures"]:
                 associations += 1
                 if associations > 100_000:
