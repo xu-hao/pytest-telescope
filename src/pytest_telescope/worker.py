@@ -333,7 +333,7 @@ def qualified_framework_identity(session, definition, identities):
         if registered_object:
             break
     if not registered_object or definition.scope != "session":
-        return None
+        raise ValueError("builtin fixture provenance changed")
     return identity(canonical({
         "pytest": pytest.__version__, "module": function.__module__,
         "source": digest, "line": code.co_firstlineno,
@@ -358,6 +358,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
         raise ValueError("invalid fixture inspection membership")
     result = []
     source_hashes = {}
+    source_bytes = 0
     available, _ = available_fixture_definitions(session, items)
     for (item, definitions), case in zip(available, case_ids):
         fixtures = []
@@ -382,6 +383,9 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
                 with path.open("rb") as stream:
                     data = stream.read(MAX_INVENTORY + 1)
                 if len(data) > MAX_INVENTORY:
+                    raise ValueError("fixture source limit exceeded")
+                source_bytes += len(data)
+                if source_bytes > MAX_INVENTORY:
                     raise ValueError("fixture source limit exceeded")
                 source_hashes[path] = hashlib.sha256(data).hexdigest()
             code = function.__code__
@@ -448,6 +452,7 @@ def fixture_registry_commitment(session, items, identities, observer):
 
     _, definitions = available_fixture_definitions(session, items)
     entries, source_hashes = [], {}
+    source_bytes = 0
     for definition in definitions:
         function = definition.func
         if isinstance(function, types.MethodType):
@@ -464,6 +469,9 @@ def fixture_registry_commitment(session, items, identities, observer):
             with path.open("rb") as stream:
                 data = stream.read(MAX_INVENTORY + 1)
             if len(data) > MAX_INVENTORY:
+                raise ValueError("fixture source limit exceeded")
+            source_bytes += len(data)
+            if source_bytes > MAX_INVENTORY:
                 raise ValueError("fixture source limit exceeded")
             source_hashes[path] = hashlib.sha256(data).hexdigest()
         owner = definition.node.nodeid if definition.node is not None else definition.baseid
@@ -518,6 +526,9 @@ def fixture_registry_commitment(session, items, identities, observer):
             with path.open("rb") as stream:
                 data = stream.read(MAX_INVENTORY + 1)
             if len(data) > MAX_INVENTORY:
+                raise ValueError("plugin source limit exceeded")
+            source_bytes += len(data)
+            if source_bytes > MAX_INVENTORY:
                 raise ValueError("plugin source limit exceeded")
             source_hashes[path] = hashlib.sha256(data).hexdigest()
         if type(kind) is not str or len(kind.encode("utf-8")) > 4096:
