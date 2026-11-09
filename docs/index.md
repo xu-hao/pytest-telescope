@@ -213,6 +213,9 @@ package version or a read-only live mount is insufficient. Start with the
 the [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
 for native, browser or installed Python closures. Unsupported layouts refuse; this
 feature does not install tools. Published 0.1.0a6 does not implement this opt-in.
+The [capture and reuse contract](execution-contract.md#frozen-tool-capture-and-reuse)
+distinguishes an independently reusable case record from admission of the structurally
+required collection union, including when pytest selectors choose only one consumer.
 
 Selecting a native closure also closes system configuration: `/etc/resolv.conf` is
 absent unless the selected manifest pins it and preserves its path. Required certificate

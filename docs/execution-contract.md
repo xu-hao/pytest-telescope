@@ -175,6 +175,16 @@ pin refuses. An unrelated narrow case remains reusable when only another tool's 
 contents or manifest changes; editing project configuration retains its existing broader
 invalidation. A source mutation during an invocation is never accepted as a new context.
 
+For example, structurally included files contain separate consumers of tools A and B.
+Updating B's installation and matching manifest leaves A's case record reusable, while
+refreshing collection and B's context. Changing B's bytes without updating its pins
+instead refuses the required collection union, even with `-k` or a node selector that
+selects only A. Those selectors do not remove B's file from structural discovery.
+Previously valid A records survive that refusal; no new result is published. An API
+`structural_files` boundary excluding B's separate file removes B from the required
+union and permits A alone. Record reusability and admission of an invocation are
+distinct: a mid-invocation source change also prevents pending publication.
+
 Capture runs under the invocation's stable cache lock and owned staging. It performs
 bounded no-follow entry reads, before/after source checks, a complete final source-record
 pass and independent staged-content verification. It never hard-links mutable source

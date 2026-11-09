@@ -432,7 +432,7 @@ modules/packages/extensions/bytecode, and build-tree startup files are unsupport
 selected inputs. Unselected candidates are absent because the whole supported prefix
 is closed, including nonexistent zip and site search locations. This closes startup
 candidates before imports; no hook can add a live external path. Worker startup remains
-the invoking executable with `-I /telescope/worker.py`.
+the invoking executable with `-I -B /telescope/worker.py`.
 
 There are at most 64 observed search paths and 64 site paths. The actual path description,
 interpreter aliases, prefix destinations and startup flags bind view identity. Every
@@ -478,6 +478,9 @@ Two selected tools may share a command name only when the resolved bytes, type, 
 mode, link topology, logical/original mapping, executable/runtime graph, loader profile,
 cache and search mapping are identical. A matching name or executable hash alone is
 insufficient. Conflicts refuse even in a collection union.
+Repeated selection of the same tool is deduplicated. Distinct tool names have distinct
+`/tools/TOOL/...` mappings, so identical executable bytes in differently named tools do
+not make their same-named commands interchangeable.
 
 A selected tool refuses effective declared environment names that conflict with its
 controlled `PATH`, `HOME`, `TMPDIR`, loader `LD_*` or relevant Python runtime controls.
@@ -503,6 +506,13 @@ evaluation. `runtime` references the actual invoking interpreter, stdlib and req
 native/dependency files; claimed runtime files are byte-bound. A narrow stdlib tree is
 allowed, but a tree containing unrelated site-packages/dist-packages cannot be a shortcut
 for freezing a whole environment; use explicit files-mode entries there.
+
+This installed-distribution profile requires regular package directories with
+`__init__.py`, plus their complete dist-info trees. Single-file module distributions,
+console-script launcher files outside those trees and distributions with RECORD data
+outside their package/dist-info trees are unsupported. Pinning an executable separately
+does not make an otherwise unsupported installed-distribution record valid. These are
+profile limits, not a promise to discover arbitrary program imports or dependencies.
 
 RECORD rows are bounded and checked against exact pinned files. Its normal hashless
 self-row is allowed because the manifest independently hashes RECORD. Generated pyc is
