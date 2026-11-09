@@ -86,7 +86,7 @@ def test_marked_package_initializer_and_nested_helpers_are_explicit_inputs(tmp_p
     put(
         root,
         "helpers/support.py",
-        'from . import INITIAL\nfrom .nested import VALUE\nimport pytest\n'
+        "from . import INITIAL\nfrom .nested import VALUE\nimport pytest\n"
         'pytestmark = pytest.mark.telescope(inputs=["helper-private.txt"])\n'
         'assert INITIAL == "ready"\ndef answer(): return VALUE\n',
     )
@@ -111,7 +111,7 @@ def test_missing_required_helper_import_dependency_stays_absent(tmp_path, missin
     put(
         root,
         "helpers/support.py",
-        'from . import INITIAL\nfrom .nested import VALUE\nimport pytest\n'
+        "from . import INITIAL\nfrom .nested import VALUE\nimport pytest\n"
         'pytestmark = pytest.mark.telescope(inputs=["helper-private.txt"])\n'
         'assert INITIAL == "ready"\ndef answer(): return VALUE\n',
     )
@@ -124,7 +124,9 @@ def test_missing_required_helper_import_dependency_stays_absent(tmp_path, missin
     assert report["status"] == "failed", report
     assert report["sandbox"]["identity"] is not None
     assert report["collection"]["failures"]
-    assert all(row["exception_type"] == "CollectionError" for row in report["collection"]["failures"])
+    assert all(
+        row["exception_type"] == "CollectionError" for row in report["collection"]["failures"]
+    )
     no_new_records(root)
 
 
@@ -174,9 +176,9 @@ def test_structurally_omitted_helper_is_readable_without_collecting_its_tests(tm
     put(
         root,
         "tests/test_consumer.py",
-        'import pytest\nfrom pathlib import Path\n'
+        "import pytest\nfrom pathlib import Path\n"
         'pytestmark = pytest.mark.telescope(inputs=["tests/__init__.py", "tests/test_support.py"])\n'
-        'from tests.test_support import answer\ndef test_answer():\n'
+        "from tests.test_support import answer\ndef test_answer():\n"
         '    assert answer() == "42"\n    assert not Path("helper-private.txt").exists()\n',
     )
     options = (
@@ -206,7 +208,7 @@ def test_changed_helper_invalidates_only_its_consumers_and_not_helper_cache_poli
         put(
             root,
             f"tests/test_{name}.py",
-            'import pytest\nfrom pathlib import Path\n'
+            "import pytest\nfrom pathlib import Path\n"
             f'pytestmark = pytest.mark.telescope(inputs=["helpers/__init__.py", "helpers/{name}.py"])\n'
             f"from helpers.{name} import answer\ndef test_answer():\n"
             f'    assert answer() == "{value}"\n    assert not Path("helper-private.txt").exists()\n',
@@ -330,10 +332,10 @@ def test_helper_current_module_origin_must_authenticate_its_own_source(tmp_path,
 def test_authenticated_helper_marker_cannot_be_inherited_by_a_foreign_case(tmp_path, level):
     root = project_at(tmp_path)
     prefix = (
-        'import pytest\nfrom helpers.support import pytestmark as foreign\n'
+        "import pytest\nfrom helpers.support import pytestmark as foreign\n"
         'pytestmark = [pytest.mark.telescope(inputs=["helpers/__init__.py", "helpers/support.py"]), foreign]\n'
         if level == "module"
-        else 'import pytest\nfrom helpers.support import pytestmark as foreign\n'
+        else "import pytest\nfrom helpers.support import pytestmark as foreign\n"
         'pytestmark = pytest.mark.telescope(inputs=["helpers/__init__.py", "helpers/support.py"])\n'
         '@pytest.mark.parametrize("value", [pytest.param(42, marks=foreign)])\n'
     )

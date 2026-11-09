@@ -28,7 +28,9 @@ from pytest_telescope.model import DeclarationError, InfrastructureError, finger
         "invalid_mode",
     ],
 )
-def test_frozen_helper_source_and_record_faults_refuse_without_success(tmp_path, monkeypatch, fault):
+def test_frozen_helper_source_and_record_faults_refuse_without_success(
+    tmp_path, monkeypatch, fault
+):
     root = project_at(tmp_path)
     snapshot = controller.snapshot
 
@@ -95,7 +97,9 @@ def test_unreadable_frozen_helper_has_a_bounded_infrastructure_outcome(tmp_path,
 
 
 @pytest.mark.parametrize("phase", ["collection", "case"])
-def test_changed_helper_after_parsing_is_reverified_before_each_fresh_worker(tmp_path, monkeypatch, phase):
+def test_changed_helper_after_parsing_is_reverified_before_each_fresh_worker(
+    tmp_path, monkeypatch, phase
+):
     root = project_at(tmp_path)
     materialize = controller.materialize
     calls = []
@@ -125,11 +129,18 @@ def test_changed_helper_after_parsing_is_reverified_before_each_fresh_worker(tmp
     assert not list((root / ".pytest-telescope/scratch").iterdir())
 
 
-@pytest.mark.parametrize("fault", ["target_text", "regular_replacement", "cycle", "escape", "target_bytes"])
-def test_frozen_helper_link_mutation_cannot_change_its_authenticated_origin(tmp_path, monkeypatch, fault):
+@pytest.mark.parametrize(
+    "fault", ["target_text", "regular_replacement", "cycle", "escape", "target_bytes"]
+)
+def test_frozen_helper_link_mutation_cannot_change_its_authenticated_origin(
+    tmp_path, monkeypatch, fault
+):
     root = project_at(tmp_path)
     (root / "helpers/alias.py").symlink_to("support.py")
-    consumer(root, inputs=["helpers/__init__.py", "helpers/alias.py", "helpers/support.py", "data/answer.txt"])
+    consumer(
+        root,
+        inputs=["helpers/__init__.py", "helpers/alias.py", "helpers/support.py", "data/answer.txt"],
+    )
     source = root / "tests/test_consumer.py"
     source.write_text(source.read_text().replace("from helpers.support", "from helpers.alias"))
     snapshot = controller.snapshot
@@ -148,7 +159,11 @@ def test_frozen_helper_link_mutation_cannot_change_its_authenticated_origin(tmp_
             if fault == "regular_replacement":
                 alias.write_text("# not a link anymore\n")
             else:
-                target = {"target_text": "other.py", "cycle": "alias.py", "escape": "../../outside.py"}[fault]
+                target = {
+                    "target_text": "other.py",
+                    "cycle": "alias.py",
+                    "escape": "../../outside.py",
+                }[fault]
                 alias.symlink_to(target)
                 if fault != "target_text":
                     record["target"] = target
@@ -181,10 +196,10 @@ def test_declared_dangling_python_leaf_link_and_absence_remain_exact(tmp_path):
     put(
         root,
         "tests/test_consumer.py",
-        'import pytest\nfrom pathlib import Path\n'
+        "import pytest\nfrom pathlib import Path\n"
         'pytestmark = pytest.mark.telescope(inputs=["helpers/alias.py"], absent=["helpers/missing.source"])\n'
         'def test_absence():\n    alias = Path("helpers/alias.py")\n'
-        '    assert alias.is_symlink()\n    assert not alias.exists()\n'
+        "    assert alias.is_symlink()\n    assert not alias.exists()\n"
         '    assert alias.readlink().as_posix() == "missing.source"\n',
     )
 
@@ -202,12 +217,26 @@ def depth(tree):
 
 @pytest.mark.parametrize(
     "budget",
-    ["source_file", "source_total", "nodes_file", "nodes_total", "depth", "markers_file", "markers_total", "aliases"],
+    [
+        "source_file",
+        "source_total",
+        "nodes_file",
+        "nodes_total",
+        "depth",
+        "markers_file",
+        "markers_total",
+        "aliases",
+    ],
 )
 def test_helper_source_parser_and_alias_budgets_are_bounded(tmp_path, monkeypatch, budget):
     root = project_at(tmp_path)
     helper = root / "helpers/support.py"
-    helper.write_text(helper.read_text() + "\n" + "\n".join(f"VALUE_{number} = {number}" for number in range(40)) + "\n")
+    helper.write_text(
+        helper.read_text()
+        + "\n"
+        + "\n".join(f"VALUE_{number} = {number}" for number in range(40))
+        + "\n"
+    )
     test_source = (root / "tests/test_consumer.py").read_bytes()
     helper_source = helper.read_bytes()
     test_nodes = len(list(ast.walk(ast.parse(test_source))))
@@ -224,7 +253,10 @@ def test_helper_source_parser_and_alias_budgets_are_bounded(tmp_path, monkeypatc
         helper.write_text(helper.read_text() + "DEEP = " + "[" * 24 + "0" + "]" * 24 + "\n")
         monkeypatch.setattr(markers, "MAX_DEPTH", depth(ast.parse(test_source)) + 1)
     elif budget == "markers_file":
-        helper.write_text(helper.read_text() + '\nclass Extra:\n    pytestmark = pytest.mark.telescope(inputs=[])\n')
+        helper.write_text(
+            helper.read_text()
+            + "\nclass Extra:\n    pytestmark = pytest.mark.telescope(inputs=[])\n"
+        )
         monkeypatch.setattr(markers, "MAX_MARKERS", 1)
     elif budget == "markers_total":
         monkeypatch.setattr(markers, "MAX_MARKERS", 1)
@@ -247,13 +279,30 @@ def test_helper_source_parser_and_alias_budgets_are_bounded(tmp_path, monkeypatc
 def test_repeated_views_share_one_bounded_parse_per_frozen_origin(tmp_path, monkeypatch):
     root = project_at(tmp_path)
     put(root, "tests/test_second.py", (root / "tests/test_consumer.py").read_text())
-    total = sum((root / name).stat().st_size for name in ("tests/test_consumer.py", "tests/test_second.py", "helpers/support.py", "helpers/__init__.py"))
+    total = sum(
+        (root / name).stat().st_size
+        for name in (
+            "tests/test_consumer.py",
+            "tests/test_second.py",
+            "helpers/support.py",
+            "helpers/__init__.py",
+        )
+    )
     monkeypatch.setattr(markers, "MAX_TOTAL_SOURCE", total)
 
     passed(root, executed=2, selected=2)
 
 
-@pytest.mark.parametrize("corruption", ["inventory_malformed", "inventory_foreign_origin", "case_malformed", "case_wrong_identity", "batch_missing_member"])
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "inventory_malformed",
+        "inventory_foreign_origin",
+        "case_malformed",
+        "case_wrong_identity",
+        "batch_missing_member",
+    ],
+)
 def test_helper_cache_records_must_revalidate_exact_inventory_and_membership(tmp_path, corruption):
     root = project_at(tmp_path)
     mode = "batch" if corruption == "batch_missing_member" else "case"
@@ -263,13 +312,19 @@ def test_helper_cache_records_must_revalidate_exact_inventory_and_membership(tmp
     passed(root, executed=count, execution_mode=mode)
     passed(root, reused=count, executed=0, execution_mode=mode)
     cache = root / ".pytest-telescope/cache"
-    path = next((cache / "inventory").glob("*.json")) if corruption.startswith("inventory") else next(cache.glob("*.json"))
+    path = (
+        next((cache / "inventory").glob("*.json"))
+        if corruption.startswith("inventory")
+        else next(cache.glob("*.json"))
+    )
     if corruption.endswith("malformed"):
         path.write_text('{"incomplete":')
     else:
         record = json.loads(path.read_text())
         if corruption == "inventory_foreign_origin":
-            found, _ = markers.discover((root / "helpers/support.py").read_bytes(), "helpers/support.py")
+            found, _ = markers.discover(
+                (root / "helpers/support.py").read_bytes(), "helpers/support.py"
+            )
             item = record["result"]["items"][0]
             item["origins"] = sorted([*item["origins"], found[0]["id"]])
         elif corruption == "case_wrong_identity":
@@ -291,7 +346,9 @@ def test_helper_cache_records_must_revalidate_exact_inventory_and_membership(tmp
 
 @pytest.mark.parametrize("phase", ["collection", "execution", "batch"])
 @pytest.mark.parametrize("exhaust", [False, True])
-def test_helper_infrastructure_retry_is_bounded_with_fresh_scratch(tmp_path, monkeypatch, phase, exhaust):
+def test_helper_infrastructure_retry_is_bounded_with_fresh_scratch(
+    tmp_path, monkeypatch, phase, exhaust
+):
     root = project_at(tmp_path)
     execute = sandbox.execute
     attempts = []
@@ -329,7 +386,9 @@ def test_helper_infrastructure_retry_is_bounded_with_fresh_scratch(tmp_path, mon
         assert len(attempts) == 2
 
 
-def test_helper_cleanup_failure_preserves_prior_hits_and_publishes_no_new_records(tmp_path, monkeypatch):
+def test_helper_cleanup_failure_preserves_prior_hits_and_publishes_no_new_records(
+    tmp_path, monkeypatch
+):
     root = project_at(tmp_path)
     passed(root, executed=1)
     cache = root / ".pytest-telescope/cache"
@@ -360,9 +419,15 @@ def test_helper_cleanup_failure_preserves_prior_hits_and_publishes_no_new_record
     assert not list((root / ".pytest-telescope/scratch").iterdir())
 
 
-def test_ordinary_only_execution_stays_fresh_without_snapshot_or_helper_discovery(tmp_path, monkeypatch):
+def test_ordinary_only_execution_stays_fresh_without_snapshot_or_helper_discovery(
+    tmp_path, monkeypatch
+):
     root = project_at(tmp_path)
-    put(root, "tests/test_consumer.py", 'from pathlib import Path\ndef test_ordinary(): assert Path("helper-private.txt").is_file()\n')
+    put(
+        root,
+        "tests/test_consumer.py",
+        'from pathlib import Path\ndef test_ordinary(): assert Path("helper-private.txt").is_file()\n',
+    )
 
     def forbidden(*args, **kwargs):
         raise AssertionError("ordinary-only work must not enter frozen scoped discovery")
