@@ -232,8 +232,8 @@ partial evidence or a failed lifecycle cannot establish a skip or authorize a re
 
 ## Internal protocol and cache versions
 
-Persistent cache envelopes use schema 6. Collection, singleton execution, batch execution
-and ordinary-session worker protocols use versions 7, 5, 6 and 2 respectively. Old cache
+Persistent cache envelopes use schema 7. Collection, singleton execution, batch execution
+and ordinary-session worker protocols use versions 10, 8, 9 and 2 respectively. Old cache
 records and protocols are ineligible; strict producers and validators advance together.
 Every request and worker common result carries an exact lowercase 64-hex `context_id`.
 For a batch it equals `group_id`; for a singleton or collection it equals the candidate
@@ -242,13 +242,33 @@ public group ID. The controller validates the requested context before projectio
 requires a persisted result's context to equal its cache key. Requests contain no raw
 environment map.
 
+Every worker result has an exact boolean `declaration_error`. It is true only when the
+worker's declaration validation failed, and requires `exit_code: 4` and `complete: false`.
+For ordinary protocol 2 it also requires `inventory_complete: false`; that protocol's
+field set and version are unchanged. Missing, nonboolean, unknown or inconsistent fields
+are invalid. Public result schema 4 and the `case-v2`, `batch-v2` and `ordinary-v2` profiles
+are unchanged.
+
+When `declaration_error` is false, valid pytest exit codes 0 through 5 retain their
+existing per-kind completion and count rules. The flag does not imply success. In
+particular, a session hook can set exit 4 after a passing body: its validated phase
+reports remain observations, while the group and run fail and that group cannot be
+reused. Collection with false/exit 4 is failed collection, not a declaration refusal.
+Exit code alone never supplies the declaration flag.
+
+The sandbox validates and returns explicit declaration-error evidence so the controller
+can retain known observations before a typed refusal. A typed boundary exception with no
+returned worker result instead retains actual started-attempt counts and unresolved
+members. Neither path permits ordinary replay or publication of pending successes after
+a refusal. The separate unsupported-capability marker keeps its existing meaning.
+
 Worker results also contain `collection_skips`, each exactly `file` and `reason`.
 Execution member rows contain exactly `case_id`, `outcome`, `complete`, and `reports`;
-singleton protocol 5 includes `case_results` just as batch and ordinary sessions do.
+singleton protocol 8 includes `case_results` just as batch and ordinary sessions do.
 Counts and member order reconcile with these rows and the request. A singleton collection
 failure can have zero collected cases and empty `case_ids` and `case_results`; its known
 requested public member remains not-run, incomplete and failed under the case-profile
-collection verdict. Collection protocol 7 carries inventory items and collection skips,
+collection verdict. Collection protocol 10 carries inventory items and collection skips,
 never executed reports or passes. The existing nonce and exact request identity bind the
 worker response to its invocation.
 
