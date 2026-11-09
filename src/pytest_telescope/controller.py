@@ -1301,7 +1301,7 @@ def run(
                                         request=request,
                                         on_session_start=session_started,
                                     )
-                                if result["exit_code"] == 4:
+                                if result["declaration_error"]:
                                     if fixture_guard:
                                         raise _FixtureDrift(
                                             "guarded execution or fixture validation failed"
