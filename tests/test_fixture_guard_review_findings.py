@@ -79,7 +79,7 @@ def test_item(package_fixture): assert package_fixture is not None
     assert controller.run(tmp_path)["status"] == "passed"
 
 
-@pytest.mark.parametrize("action", ["exit", "dynamic_marker"])
+@pytest.mark.parametrize("action", ["exit"])
 def test_post_body_exit_code_four_does_not_claim_pre_dispatch(tmp_path, monkeypatch, action):
     configure(tmp_path)
     body = ('pytest.exit("synthetic exit", returncode=4)' if action == "exit"
@@ -109,6 +109,29 @@ def test_item():
     assert report["groups"][0]["attempts"] == 1
     assert not report["groups"][0]["cache_eligible"]
     assert all("before dispatch" not in row["reason"].lower() for row in report["units"])
+
+
+def test_literal_body_marker_is_rejected_before_any_worker(tmp_path, monkeypatch):
+    configure(tmp_path)
+    put(tmp_path, "tests/test_early.py", '''import os
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_item():
+    os.write(1, b"F3_BODY_MUST_NOT_RUN\\n")
+    pytest.mark.telescope(inputs=[])
+''')
+    calls = []
+    original = sandbox.execute
+
+    def observe(*args, request, **kwargs):
+        calls.append(request["mode"])
+        return original(*args, request=request, **kwargs)
+
+    monkeypatch.setattr(sandbox, "execute", observe)
+    with pytest.raises(DeclarationError) as error:
+        controller.run(tmp_path, fixture_guard="available-v1")
+    assert type(error.value) is DeclarationError
+    assert calls == []
 
 
 def test_class_fixture_visible_to_function_is_plain_pytest_compatible_but_guard_refuses(tmp_path):
