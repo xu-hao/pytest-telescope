@@ -238,8 +238,14 @@ fallback to one registry is sufficient. Controlled metadata observations for the
 versions do not qualify the guard, real Bubblewrap execution or arbitrary plugin state.
 The existing unguarded dependency range and default routes do not change.
 
-Inspection uses `fixture-inspection-v1`; execution uses `batch-guard-v1` and profile
-`batch-available-v1`. Strict bounded requests and responses bind protocol, nonce,
+Before inspection, body-free `fixture-capture-v1` binds a provisional base context and
+ordered members and records registry and context-independent fixture-content commitments.
+The final group and cache identity derives from that base and both commitments. Then
+`fixture-inspection-v1` binds the final group context and must reproduce the captured
+registry and content before reuse or dispatch. Execution uses `batch-guard-v1` and
+profile `batch-available-v1` and revalidates the graph again. These new guarded protocols
+use 64-character hexadecimal nonces; legacy unguarded protocols retain their 32-character
+nonces. Strict bounded requests and responses bind the applicable protocol, nonce,
 context and group, ordered case IDs, registry and graph commitments and per-item
 fixture identity, owner, scope and parameter binding. The worker channel must bind each
 response to its own request; a checksum or nonce alone is not an authentication claim.

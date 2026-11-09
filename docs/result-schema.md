@@ -288,8 +288,11 @@ schema 4 fields and adds exactly:
 {"profile": "available-v1", "state": "admitted", "conditions": []}
 ```
 
-This object is the `fixture_guard` field. `admitted` records admission of the original
-complete pre-dispatch plan, not eventual completion. Condition rows, in caller order,
+This object is the `fixture_guard` field. A guarded run may instead have state
+`unavailable` and empty `conditions` when the producer returns real partial collection or
+infrastructure observations before admission. That state makes no inference that bodies
+were unrun; the run retains its actual available inventory and observations. `admitted`
+records admission of the original complete pre-dispatch plan, not eventual completion. Condition rows, in caller order,
 contain exactly `case_id`, `group_id` and `matched`; they bind an actually selected case
 to its actual group and never disclose environment names, operations, values or hashes.
 All checks must match before dispatch or reuse. A cache hit evaluates conditions again
