@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from pytest_telescope import controller
+from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError
 
 
@@ -24,7 +24,7 @@ def case_id(node):
     return hashlib.sha256(json.dumps(["default", node], separators=(",", ":")).encode()).hexdigest()
 
 
-def test_direct_and_indirect_parameters_preserve_actual_fixture_lifetimes(tmp_path):
+def test_direct_and_indirect_parameters_preserve_actual_fixture_lifetimes(tmp_path, monkeypatch, capsys):
     configure(tmp_path)
     put(tmp_path, "tests/test_params.py", '''import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
@@ -33,19 +33,33 @@ def indirect(request):
     state = []
     yield request.param, state
     assert state == ["used"]
-@pytest.mark.parametrize("indirect", ["first", "second"], indirect=True, scope="module")
+@pytest.mark.parametrize("indirect", ["synthetic-param-Q723-alpha", "synthetic-param-Q723-beta"], indirect=True, scope="module")
 @pytest.mark.parametrize("direct", [1])
 def test_item(indirect, direct):
     value, state = indirect
-    assert value in ("first", "second") and direct == 1
+    assert value in ("synthetic-param-Q723-alpha", "synthetic-param-Q723-beta") and direct == 1
     state.append("used")
 ''')
+    requests = []
+    original = sandbox.execute
+
+    def observe(*args, request, **kwargs):
+        requests.append(json.dumps(request))
+        return original(*args, request=request, **kwargs)
+
+    monkeypatch.setattr(sandbox, "execute", observe)
     report = controller.run(tmp_path, fixture_guard="available-v1")
     assert report["status"] == "passed" and report["fixture_guard"]["state"] == "admitted"
     assert report["counts"]["executed"] == 2 and len(report["groups"]) == 1
     assert all(row["complete"] and row["result_status"] == "passed" for row in report["units"])
     warm = controller.run(tmp_path, fixture_guard="available-v1")
     assert warm["counts"]["reused"] == 2
+    output = capsys.readouterr()
+    evidence = json.dumps([report, warm, requests]).encode() + output.out.encode() + output.err.encode()
+    for path in (tmp_path / ".pytest-telescope").rglob("*.json"):
+        evidence += path.read_bytes()
+    assert b"synthetic-param-Q723-alpha" not in evidence
+    assert b"synthetic-param-Q723-beta" not in evidence
 
 
 def test_skipped_setup_and_call_keep_real_phase_reports_and_group_reuse(tmp_path):

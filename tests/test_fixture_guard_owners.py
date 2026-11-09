@@ -103,3 +103,25 @@ def test_owner(owned):
 ''')
     report = controller.run(tmp_path, fixture_guard="available-v1")
     verify_two_groups(report)
+
+
+def test_distinct_classes_in_one_module_may_refuse_conservatively(tmp_path):
+    configure(tmp_path)
+    put(tmp_path, "a.txt", "a")
+    put(tmp_path, "b.txt", "b")
+    put(tmp_path, "tests/test_classes.py", '''import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+class TestA:
+    @pytest.fixture(scope="class")
+    def owned(self): return object()
+    @pytest.mark.telescope(inputs=["a.txt"])
+    def test_item(self, owned): assert owned is not None
+class TestB:
+    @pytest.fixture(scope="class")
+    def owned(self): return object()
+    @pytest.mark.telescope(inputs=["b.txt"])
+    def test_item(self, owned): assert owned is not None
+''')
+    with pytest.raises(UnsupportedCapability) as refusal:
+        controller.run(tmp_path, fixture_guard="available-v1")
+    assert refusal.value.capability == "execution:fixture-sharing"
