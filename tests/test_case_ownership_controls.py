@@ -1,5 +1,7 @@
 """Ordinary owner boundaries exercised through the public API and real Bubblewrap."""
 
+import json
+
 import pytest
 
 from pytest_telescope import controller
@@ -302,11 +304,12 @@ def test_environment_changes_rerun_only_the_owner_with_exact_present_empty_absen
         "tests/test_left.py",
         """
 from pathlib import Path
+import json
 import os
 import pytest
-pytestmark = pytest.mark.telescope(inputs=["expected.txt"], env=["OWNERSHIP_CASE_OPTION"])
+pytestmark = pytest.mark.telescope(inputs=["expected.json"], env=["OWNERSHIP_CASE_OPTION"])
 def test_left():
-    assert os.environ.get("OWNERSHIP_CASE_OPTION", "<absent>") == Path("expected.txt").read_text()
+    assert os.environ.get("OWNERSHIP_CASE_OPTION", "<absent>") == json.loads(Path("expected.json").read_text())["value"]
 """,
     )
     write(
@@ -320,19 +323,25 @@ def test_right():
     assert "OWNERSHIP_CASE_OPTION" not in os.environ
 """,
     )
-    write(root, "expected.txt", "<absent>")
+    write(root, "expected.json", json.dumps({"value": "<absent>", "generation": 0}))
     run(root, executed=2)
     run(root, reused=2)
 
     # Keep the oracle file unchanged for the first run of each environment transition.
     # The real failure proves invalidation and that the old value was not reused.
-    for value in ("synthetic owner setting", "", None):
+    for generation, value in enumerate(("synthetic owner setting", "", None), start=1):
         if value is None:
             monkeypatch.delenv("OWNERSHIP_CASE_OPTION")
         else:
             monkeypatch.setenv("OWNERSHIP_CASE_OPTION", value)
         run(root, reused=1, failed=1)
-        write(root, "expected.txt", "<absent>" if value is None else value)
+        # Distinct declared bytes prevent a return to the original environment from
+        # legitimately reusing its earlier successful oracle context.
+        write(
+            root,
+            "expected.json",
+            json.dumps({"value": "<absent>" if value is None else value, "generation": generation}),
+        )
         report = run(root, executed=1, reused=1)
         assert {row["file"]: row["outcome"] for row in report["units"]} == {
             "tests/test_left.py": "executed",
