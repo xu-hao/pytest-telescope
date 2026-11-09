@@ -84,8 +84,43 @@ and literal arguments in the frozen source. Collected marks must come from those
 and have unchanged values. The comparison uses an independent, immutable encoding of
 the declaration, so mutating a list passed to pytest cannot change the expected value.
 If dynamically constructed markers evade static checks, they fail the session.
-They cannot widen a scope or change a route. This validation does not rely
-on private pytest internals remaining stable.
+They cannot widen a scope or change a route. Source-call authentication and case
+ownership are separate checks; authenticating an unchanged call alone does not prove
+that its declaration belongs to a particular collected case.
+
+The development contract requires the complete observed declaration set to agree with
+the case's legitimate owners before constructing its route or effective grants.
+Module and class scopes and function decorators follow the actual module, applicable
+class method resolution order and defining callable in the containing test source.
+A base class's normally inherited method can have a different lexical owner from the
+collected subclass. Same-file membership or a collected-name prefix alone is not
+ownership evidence. Reusing an unchanged sibling function/class Mark remains an invalid
+extra declaration. Losing any applicable declaration, including an empty scope or
+policy-only marker, is also invalid.
+
+For each inline literal `pytest.param` declaration, ownership additionally binds its
+enclosing applicable parametrization dimension and selected literal alternative.
+Class and function dimensions, independent stacked dimensions and multi-name dimensions
+must preserve their actual choices. Every argument in a multi-name dimension must agree
+on the same alternative. Parameter values, display IDs, selector aliases and the
+function/class owner cannot substitute for that evidence. Only the selected
+alternative contributes its Telescope marks; unmarked alternatives remain independent.
+
+Ownership binding uses bounded, verified collection provenance. Implementation-specific
+metadata must be checked against its concrete construction and lifecycle in the
+supported Python 3.11/3.13 and Pytest 8/9 qualification profiles; it is not assumed
+stable across versions. In particular, a collected item's parameter indices need not
+retain dimension-alternative indices after Pytest constructs the Cartesian product.
+Unknown, malformed, stale or inconsistent ownership evidence must refuse explicitly,
+without guessing a shape or choosing an alternative from equal values or node labels.
+Ordinary `pytest.Function` collection is the supported boundary; custom item kinds or
+collection changes that cannot establish this ownership agreement are unsupported.
+
+An ownership disagreement is a declaration error: the Python API raises
+`DeclarationError`, and the CLI reports `declaration_error` with exit status 4.
+The runner must neither discard invalid extra origins nor widen a scope, change a route
+or retry in ordinary mode to accommodate them. A refusal still does not prove that no
+earlier ordinary case executed.
 
 For a scoped view, this source guard also authenticates literal calls in explicitly
 readable frozen Python helpers, including package initializers and nested imports.
@@ -130,6 +165,12 @@ Inventory and execution have distinct strict result schemas. A successful sandbo
 The scoped inventory key covers the exact frozen collection view, current test-file membership, static declaration registry and readable helper guard registry, pytest configuration, relevant environment, full effective arguments/selectors, the sandbox identity (policy, interpreter, installed distributions and the environment's references into the project) and runner implementation/version. Every invocation re-freezes current declared inputs before accepting an inventory hit. File addition/deletion, declared-resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present scoped cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
 
 Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes or environment values merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
+
+The validated declaration inventory must include bounded structural ownership and selected
+alternative evidence. That agreement must bind inventory, case and group contexts, so stale
+ownership cannot reuse an earlier inventory or success. Raw parameter values, display
+IDs and environment values remain outside persistent ownership records and normal
+diagnostics.
 
 The guard registry is bound to the same exact readable view. Changing a declared
 helper's bytes invalidates its consumers; a helper available only to another case does
