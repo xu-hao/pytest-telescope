@@ -31,14 +31,14 @@ def admission(path, expected, directory):
             raise ValueError("functional profile has no declarations")
         # Reuse the guarded candidate's strict manifest parser. This only reads
         # the owned JSON copies; it does not capture source inputs or run a tool.
-        from pytest_telescope.tool_context import parse
+        from pytest_telescope.tool_context import FORMAT, parse
 
         with tempfile.TemporaryDirectory(prefix="receipt-validation-", dir=directory) as owned:
             project = Path(owned)
             for index, document in enumerate(documents.values()):
                 filename = f"declaration-{index}.json"
                 write_json(project / filename, document)
-                parsed = parse(project, "gate", {"format": "frozen-v1", "manifest": filename})
+                parsed = parse(project, "gate", {"format": FORMAT, "manifest": filename})
                 if not parsed.document["roots"]:
                     raise ValueError("functional profile has an empty declaration")
         for document in documents.values():
