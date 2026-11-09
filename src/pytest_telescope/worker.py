@@ -16,7 +16,7 @@ import pytest
 
 MAX_INVENTORY = 67_108_864
 REQUEST_PATH = "/telescope/request.json"
-SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions"})
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env"})
 PROJECT_ROOT = Path("/project")
 
 
@@ -42,6 +42,26 @@ def canonical(value):
 
 def identity(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def skip_reason(report):
+    """Digest the actual final report without rendering arbitrary objects."""
+    if hasattr(report, "wasxfail"):
+        reason, kind = report.wasxfail, "xfail"
+    else:
+        reason, kind = report.longrepr, "skip"
+        if type(reason) is tuple:
+            if len(reason) != 3 or type(reason[0]) is not str or type(reason[1]) is not int:
+                raise ValueError("unsupported skip evidence")
+            reason = reason[2]
+    if type(reason) is not str or len(reason) > 4096:
+        raise ValueError("unsupported skip evidence")
+    encoded = reason.encode("utf-8")
+    if len(encoded) > 4096:
+        raise ValueError("unsupported skip evidence")
+    return dict(
+        profile="pytest-reason-sha256-v1", kind=kind, sha256=hashlib.sha256(encoded).hexdigest()
+    )
 
 
 def project_file(filename):
@@ -115,6 +135,10 @@ def main(request=None, *, ordinary=False):
         return project_file(path) + (separator + suffix if separator else "")
 
     mode = request["mode"]
+    if type(request.get("context_id")) is not str or not re.fullmatch(
+        r"[0-9a-f]{64}", request["context_id"]
+    ):
+        raise ValueError("invalid request context")
     if (
         mode not in ("collection", "execution", "batch", "ordinary")
         or (mode == "ordinary") != ordinary
@@ -124,6 +148,9 @@ def main(request=None, *, ordinary=False):
     origins, positions_cache, source_calls, required_origins = {}, {}, {}, {}
     declaration_error = False
     collection_failed = False
+    phase_reports, collection_skips = {}, []
+    failure_reports = {}
+    invalid_evidence = False
 
     def invalid(message):
         nonlocal declaration_error
@@ -221,6 +248,7 @@ def main(request=None, *, ordinary=False):
             self.session = None
             self.checkpoint = False
             self.dispatch_started = False
+            self.selected_case_ids = set()
             self.bytes = 1024
 
         @pytest.hookimpl(tryfirst=True)
@@ -395,6 +423,7 @@ def main(request=None, *, ordinary=False):
             self.checkpoint = not collection_failed and self.selection is not None
             if mode != "collection" and self.checkpoint:
                 selected_ids[:] = [case_identity(item.nodeid) for item in session.items]
+                self.selected_case_ids = set(selected_ids)
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_runtestloop(self, session):
@@ -415,20 +444,70 @@ def main(request=None, *, ordinary=False):
                     traceback = call.excinfo.traceback
                     if traceback:
                         filename, line = str(traceback[-1].path), traceback[-1].lineno + 1
-                evidence(report.nodeid, report.when, filename, line, kind)
+                failure_reports[case_identity(report.nodeid), report.when] = (filename, line, kind)
 
+        @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_collectreport(self, report):
-            nonlocal collection_failed
+            nonlocal collection_failed, invalid_evidence
+            yield
             if report.failed:
                 collection_failed = True
                 evidence(
                     report.nodeid, "collect", report.nodeid.split("::")[0], 0, "CollectionError"
                 )
+            if report.skipped:
+                try:
+                    if len(collection_skips) >= 100_000:
+                        raise ValueError("collection evidence bound")
+                    collection_skips.append(
+                        dict(
+                            file=canonical_nodeid(report.nodeid).split("::")[0],
+                            reason=skip_reason(report),
+                        )
+                    )
+                except (ValueError, TypeError, UnicodeError, OSError):
+                    invalid_evidence = True
 
+        @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_runtest_logreport(self, report):
-            case = case_identity(report.nodeid)
+            nonlocal invalid_evidence
+            yield
+            try:
+                case = case_identity(report.nodeid)
+                if case not in self.selected_case_ids or report.when not in (
+                    "setup",
+                    "call",
+                    "teardown",
+                ):
+                    raise ValueError("unrequested phase report")
+                reports = phase_reports.setdefault(case, [])
+                phases = [row["phase"] for row in reports]
+                if (
+                    report.when in phases
+                    or len(phases) >= 3
+                    or (not phases and report.when != "setup")
+                    or (phases and report.when == "setup")
+                    or ("teardown" in phases)
+                    or (report.when == "call" and reports[0]["outcome"] != "passed")
+                    or report.outcome not in ("passed", "failed", "skipped")
+                ):
+                    raise ValueError("inconsistent phase report")
+                reports.append(
+                    dict(
+                        phase=report.when,
+                        outcome=report.outcome,
+                        skip_reason=skip_reason(report) if report.skipped else None,
+                    )
+                )
+            except (ValueError, TypeError, UnicodeError, AttributeError, OSError):
+                invalid_evidence = True
+                return
             previous = cases.get(case)
             if report.failed:
+                failure = failure_reports.get((case, report.when))
+                if failure is None:
+                    failure = (report.location[0], report.location[1] + 1, "UnexpectedPass")
+                evidence(report.nodeid, report.when, *failure)
                 cases[case] = "failed"
             elif previous != "failed":
                 if report.skipped:
@@ -464,13 +543,28 @@ def main(request=None, *, ordinary=False):
         leaked = [
             name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()
         ]
+    if invalid_evidence:
+        # No raw report, reason or traceback may cross the worker boundary.
+        print("TELESCOPE_EVIDENCE_ERROR invalid observed outcome evidence", flush=True)
+        return 3
     common = {
         "nonce": request["nonce"],
         "exit_code": exit_code,
         "leaked_descendants": bool(leaked),
         "worker_seconds": time.monotonic() - started,
         "failures": failures,
+        "context_id": request["context_id"],
+        "collection_skips": collection_skips,
     }
+
+    def member(case):
+        return dict(
+            case_id=case,
+            outcome=cases.get(case, "not-run"),
+            complete=case in finished,
+            reports=phase_reports.get(case, []),
+        )
+
     if mode == "collection":
         selected = {item.nodeid: order for order, item in enumerate(observer.selection or ())}
         items = [
@@ -479,7 +573,7 @@ def main(request=None, *, ordinary=False):
         ]
         result = {
             **common,
-            "protocol": 4,
+            "protocol": 7,
             "kind": "collection",
             "items": items,
             "complete": observer.checkpoint
@@ -491,9 +585,10 @@ def main(request=None, *, ordinary=False):
     else:
         result = {
             **common,
-            "protocol": 1,
+            "protocol": 5,
             "collected": len(selected_ids),
             "case_ids": selected_ids,
+            "case_results": [member(case) for case in selected_ids],
             "passed": sum(value == "passed" for value in cases.values()),
             "failed": sum(value == "failed" for value in cases.values()),
             "skipped": sum(value == "skipped" for value in cases.values()),
@@ -506,14 +601,11 @@ def main(request=None, *, ordinary=False):
     if mode == "batch":
         requested = request["case_ids"]
         result.update(
-            protocol=2,
+            protocol=6,
             group_id=request["group_id"],
             case_ids=requested,
             collected=len(requested),
-            case_results=[
-                dict(case_id=case, outcome=cases.get(case, "not-run"), complete=case in finished)
-                for case in requested
-            ],
+            case_results=[member(case) for case in requested],
         )
         result["complete"] = result["complete"] and selected_ids == requested
     if ordinary:
@@ -521,7 +613,7 @@ def main(request=None, *, ordinary=False):
             item.nodeid: order for order, item in enumerate(observer.actual_selection or ())
         }
         result.update(
-            protocol=1,
+            protocol=2,
             kind="ordinary",
             dispatch_started=observer.dispatch_started,
             declaration_error=declaration_error,
@@ -534,10 +626,7 @@ def main(request=None, *, ordinary=False):
             ]
             if observer.actual_selection is not None
             else [],
-            case_results=[
-                dict(case_id=case, outcome=cases.get(case, "not-run"), complete=case in finished)
-                for case in selected_ids
-            ],
+            case_results=[member(case) for case in selected_ids],
         )
     print("TELESCOPE_RESULT " + canonical(result), flush=True)
     return exit_code
