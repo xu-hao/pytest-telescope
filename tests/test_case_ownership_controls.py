@@ -176,6 +176,72 @@ def test_scoped():
     assert warm["route_counts"]["scoped"]["reused"] == 1
 
 
+def test_overridden_method_does_not_inherit_the_replaced_base_function_declaration(tmp_path):
+    root = project_at(
+        tmp_path,
+        """
+from pathlib import Path
+import pytest
+pytestmark = pytest.mark.telescope(env=[])
+
+class ScopeBase:
+    pytestmark = [
+        pytest.mark.telescope(inputs=["base.txt"]),
+        pytest.mark.telescope(env=[], cache=False),
+    ]
+    @pytest.mark.telescope(inputs=["replaced.txt"])
+    def test_case(self):
+        raise AssertionError("the replaced implementation must not execute")
+
+@pytest.mark.telescope(inputs=["derived.txt"])
+class TestDerived(ScopeBase):
+    @pytest.mark.telescope(inputs=["replacement.txt"], cache=True)
+    def test_case(self):
+        for name in ("base", "derived", "replacement"):
+            assert Path(name + ".txt").is_file()
+        assert not Path("replaced.txt").exists()
+""",
+    )
+    for name in ("base", "derived", "replaced", "replacement"):
+        write(root, name + ".txt", "present")
+
+    run(root, executed=1)
+    run(root, executed=1)
+
+
+def test_diamond_class_ancestry_keeps_each_actual_ancestor_scope(tmp_path):
+    root = project_at(
+        tmp_path,
+        """
+from pathlib import Path
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+
+@pytest.mark.telescope(inputs=["base.txt"])
+class ScopeBase:
+    @pytest.mark.telescope(inputs=["method.txt"])
+    def test_case(self):
+        for name in ("base", "left", "right", "method"):
+            assert Path(name + ".txt").is_file()
+        assert not Path("unrelated.txt").exists()
+
+@pytest.mark.telescope(inputs=["left.txt"])
+class ScopeLeft(ScopeBase): pass
+
+@pytest.mark.telescope(inputs=["right.txt"])
+class ScopeRight(ScopeBase): pass
+
+@pytest.mark.telescope(inputs=[])
+class TestDiamond(ScopeLeft, ScopeRight): pass
+""",
+    )
+    for name in ("base", "left", "right", "method", "unrelated"):
+        write(root, name + ".txt", "present")
+
+    run(root, executed=1)
+    run(root, reused=1)
+
+
 def test_authenticated_helper_inputs_metadata_environment_absence_and_policy_do_not_transfer(
     tmp_path, monkeypatch
 ):
