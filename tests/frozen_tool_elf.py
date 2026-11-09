@@ -8,6 +8,8 @@ import os
 import struct
 from pathlib import Path
 
+MAX_STRING_TABLE_BYTES = 16 * 1024 * 1024
+
 
 def elf(path):
     path = Path(path)
@@ -53,7 +55,10 @@ def elf(path):
         names = [value for tag, value in dynamic if tag in (1, 15, 29)]
         strings = b""
         if names:
-            if len(address) != 1 or len(lengths) != 1 or lengths[0] > 1024 * 1024:
+            # Existing Node dependencies can have several MiB of dynamic strings.
+            # Match the producer's finite metadata ceiling, retaining exact mapping,
+            # complete-read, offset, termination and per-string checks below.
+            if len(address) != 1 or len(lengths) != 1 or lengths[0] > MAX_STRING_TABLE_BYTES:
                 raise ValueError("fixture ELF string table is unsupported")
             mappings = [
                 segment[2] + address[0] - segment[3]

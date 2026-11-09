@@ -100,6 +100,10 @@ are explicit inputs. The browser fixture permits at most 768 MiB of selected pro
 bytes, 512 MiB per file and 10,000 entries; the worker fixture retains its separate
 256 MiB bound. Owned projections hard-link already frozen copies and grant no live
 source siblings. The caller still provides aggregate memory, scratch and time limits.
+The independent fixture ELF reader permits at most 16 MiB of dynamic string-table
+metadata, matching the producer's existing metadata bound. Unique address/size and
+in-file mapping, complete reads, string offsets, termination and length checks still
+apply; this does not raise the program file or aggregate byte limits.
 
 Preparation and the individual controls have separate verdicts. Authoring these tests,
 or passing a smaller worker or static-program control, does not qualify the Node,
