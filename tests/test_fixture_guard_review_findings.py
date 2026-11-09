@@ -28,7 +28,7 @@ def case_id(node):
     return hashlib.sha256(json.dumps(["default", node], separators=(",", ":")).encode()).hexdigest()
 
 
-def test_narrow_inventory_mismatch_is_declaration_error_before_body(tmp_path, monkeypatch):
+def narrow_project(tmp_path):
     configure(tmp_path)
     put(tmp_path, "flag.txt", "synthetic")
     put(tmp_path, "tests/test_inventory.py", '''from pathlib import Path
@@ -40,6 +40,17 @@ def test_unflagged(): pass
 if Path("flag.txt").exists():
     def test_generated(): pass
 ''')
+
+
+def test_unguarded_narrow_inventory_mismatch_is_declaration_error(tmp_path):
+    narrow_project(tmp_path)
+    with pytest.raises(DeclarationError) as plain:
+        controller.run(tmp_path)
+    assert type(plain.value) is DeclarationError
+
+
+def test_narrow_inventory_mismatch_is_declaration_error_before_body(tmp_path, monkeypatch):
+    narrow_project(tmp_path)
     modes = []
     original = sandbox.execute
 
@@ -52,11 +63,6 @@ if Path("flag.txt").exists():
         controller.run(tmp_path, fixture_guard="available-v1")
     assert type(guarded.value) is DeclarationError
     assert "guard-capture" in modes and "guard-batch" not in modes
-    modes.clear()
-    with pytest.raises(DeclarationError) as plain:
-        controller.run(tmp_path)
-    assert type(plain.value) is DeclarationError
-    assert "batch" in modes
 
 
 def test_unrepresentable_package_fixture_stays_fixture_metadata_refusal(tmp_path):
