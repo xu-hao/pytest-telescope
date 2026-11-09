@@ -126,11 +126,29 @@ def validate_inspection(result, *, nonce, group_id, case_ids, registry_id, frame
     return result
 
 
-def require_conservation(inspections):
-    """Refuse a possible shared user fixture instance in more than one group."""
-    groups = {inspection["group_id"] for inspection in inspections}
+def require_conservation(inspections, candidates):
+    """Refuse possible shared lifetimes split across their actual owners.
+
+    A fixture absent from another narrow view is not proof that the other view
+    could not use it. Compare each possible owner with all selected groups in
+    that owner's structural boundary, not just groups reporting the fixture.
+    """
+    if len(inspections) != len(candidates):
+        raise InfrastructureError("fixture group membership is ambiguous")
+    modules, suites, seen = {}, {}, set()
+    for inspection, candidate in zip(inspections, candidates):
+        group = inspection["group_id"]
+        if group != candidate["key"] or group in seen:
+            raise InfrastructureError("fixture group membership is ambiguous")
+        seen.add(group)
+        suite = candidate["suite"].name
+        filename = candidate["item"]["file"]
+        modules.setdefault((suite, filename), set()).add(group)
+        suites.setdefault(suite, set()).add(group)
     associations = 0
-    for inspection in inspections:
+    for inspection, candidate in zip(inspections, candidates):
+        suite = candidate["suite"].name
+        filename = candidate["item"]["file"]
         for item in inspection["items"]:
             for row in item["fixtures"]:
                 associations += 1
@@ -138,10 +156,25 @@ def require_conservation(inspections):
                     raise UnsupportedCapability("execution:fixture-limit", "fixture association limit exceeded")
                 if row["framework"] or row["effective_scope"] == "function":
                     continue
-                # Without cross-view provenance proof, a definition missing from
-                # another narrow view is not evidence that its owner is unrelated.
-                # Refuse conservatively across all groups until that proof exists.
-                if len(groups) > 1:
+                scope = row["effective_scope"]
+                if scope == "module":
+                    owner = fingerprint({"suite": suite, "scope": "module", "file": filename})
+                    if row["owner_id"] != owner:
+                        raise InfrastructureError("fixture module owner disagrees with selected group")
+                    possible_groups = modules[(suite, filename)]
+                elif scope == "class":
+                    # The inventory does not expose every selected item's class
+                    # owner. Another group in the module could share this class.
+                    possible_groups = modules[(suite, filename)]
+                elif scope == "session":
+                    owner = fingerprint({"suite": suite, "scope": "session"})
+                    if row["owner_id"] != owner:
+                        raise InfrastructureError("fixture session owner disagrees with selected group")
+                    possible_groups = suites[suite]
+                else:
+                    # Package ownership is not represented by the current worker.
+                    raise UnsupportedCapability("execution:fixture-metadata", "fixture owner cannot be validated")
+                if len(possible_groups) > 1:
                     raise UnsupportedCapability(
                         "execution:fixture-sharing", "fixture lifetime spans execution groups"
                     )
