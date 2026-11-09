@@ -19,16 +19,26 @@ def frontend(tmp_path, monkeypatch):
 
 
 def command_case(frontend):
-    frontend.project.module("test_frontend.py", f"""import json
+    frontend.project.module("test_frontend.py", f"""import base64
+import hashlib
+import json
+import os
 import signal
 import subprocess
 import sys
 import pytest
 pytestmark = pytest.mark.telescope(tools=['worker', 'frontend'])
-def test_frontend(tmp_path):
+def test_frontend(tmp_path, capfd):
     for script in ({str(frontend.scripts / 'command.js')!r}, {frontend.logical(frontend.scripts / 'command.js')!r}):
         command = [sys.executable, '-I', {frontend.logical(frontend.scripts / 'child.py')!r}, script]
         result = subprocess.run(command + ['space value', '', '--literal'], capture_output=True, text=True, timeout=75)
+        if result.returncode != 0:
+            observation = {{'existing_child_returncode': result.returncode}}
+            for name in ('stdout', 'stderr'):
+                content = getattr(result, name).encode()
+                observation[name] = {{'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest(), 'truncated': len(content) > 65536, 'base64': base64.b64encode(content[:65536]).decode('ascii')}}
+            with capfd.disabled():
+                os.write(2, ('OWNED_CHILD_OBSERVATION ' + json.dumps(observation) + '\\n').encode('ascii'))
         assert result.returncode == 0, result.stderr
         answer = json.loads(result.stdout)
         assert answer['args'] == ['space value', '', '--literal']
