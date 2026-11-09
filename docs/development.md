@@ -88,6 +88,9 @@ isolated Python CLI child. The installed-plugin controls copy the normally insta
 and usable pyc files. Their source-routing fixture retains the real import locations;
 only the owned copies are mutated. The child runs a real plugin hook and reads actual
 metadata and resources without a `.pth` file or `PYTHONPATH` override.
+An explicitly named Furo metadata tree supplies the unselected sibling control: a
+baseline child sees its actual version, while the native consumer cannot discover it.
+Only that metadata is used; the control does not execute Furo.
 
 The browser control uses full Chromium, the unchanged Node CLI driver and its real CDP
 pipe. It navigates to an owned data-URL page and dispatches mouse input that changes the

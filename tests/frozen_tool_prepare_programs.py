@@ -24,7 +24,7 @@ def prepare(directory, destination):
         with pytest.MonkeyPatch.context() as monkeypatch:
             if name == "installed":
                 fixture = InstalledConfiguration(owned, monkeypatch, require_receipt=False)
-                documents = {"worker": fixture.document}
+                documents = fixture.admission_documents
             else:
                 worker = WorkerConfiguration(owned, monkeypatch)
                 fixture = ProgramConfiguration(worker, browser=name == "browser", require_receipt=False)

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pytest_telescope import tool_capture
 
-from frozen_tool_fixtures import file_digest, put
+from frozen_tool_fixtures import file_digest, manifest, put
 from frozen_tool_program_fixture import bounded_rows, copy_declared_tree, prerequisite_identity, require_prerequisites
 from frozen_tool_worker_fixture import WorkerConfiguration
 
@@ -68,7 +68,27 @@ class InstalledConfiguration:
             "runtime": [{"root": name, "path": "."} for name in self.worker.anchors],
         }]
         self.save()
-        self.identity = prerequisite_identity({"worker": self.document})
+        # A named existing metadata directory is a real baseline mount target.
+        # This avoids trying to create an absent child inside a readonly site tree.
+        unselected = metadata.distribution("furo")
+        unselected_records = unselected.files
+        if unselected_records is None:
+            raise ValueError("the named baseline metadata prerequisite is missing")
+        candidates = [row for row in unselected_records if row.name == "METADATA" and row.parent.name.endswith(".dist-info")]
+        if len(candidates) != 1:
+            raise ValueError("the named baseline metadata must be uniquely installed")
+        self.unselected_original = Path(unselected.locate_file(candidates[0].parent))
+        self.unselected_copy = self.project.external / "unselected-metadata" / self.unselected_original.name
+        self.unselected_version = unselected.version
+        unselected_rows = copy_declared_tree(self.unselected_original, self.unselected_copy, INSTALLED_BYTES)
+        self.admission_documents = {
+            "worker": self.document,
+            "unselected-baseline": manifest([{
+                "id": "metadata", "source": str(self.unselected_original), "coverage": "tree",
+                "preserve_source": True, "entries": unselected_rows,
+            }]),
+        }
+        self.identity = prerequisite_identity(self.admission_documents)
         if require_receipt:
             require_prerequisites("installed", self.identity)
         put(self.project.external, "installed-provenance.json", json.dumps({
@@ -76,6 +96,8 @@ class InstalledConfiguration:
             "normal_installation_record_sha256": file_digest(self.metadata / "RECORD"),
             "bytes": sum(row.get("size", 0) for rows in self.initial_rows.values() for row in rows),
             "bytecode": len(self.bytecode),
+            "unselected_baseline": {"name": "furo", "version": self.unselected_version,
+                                    "metadata_sha256": file_digest(self.unselected_copy / "METADATA")},
             "package_tree_sha256": hashlib.sha256(json.dumps(package_rows, sort_keys=True).encode()).hexdigest(),
             "metadata_tree_sha256": hashlib.sha256(json.dumps(metadata_rows, sort_keys=True).encode()).hexdigest(),
         }, sort_keys=True))
