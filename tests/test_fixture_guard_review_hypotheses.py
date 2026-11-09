@@ -253,7 +253,10 @@ def test_review_h2_selected_and_invalid_conditions(tmp_path, monkeypatch):
     condition_project(tmp_path)
     monkeypatch.setenv("REVIEW_CONDITION", "synthetic-present")
     report = controller.run(
-        tmp_path, execution_mode="batch", fixture_guard="available-v1", condition_checks=[condition()]
+        tmp_path,
+        execution_mode="batch",
+        fixture_guard="available-v1",
+        condition_checks=[condition()],
     )
     assert report["status"] == "passed" and report["counts"]["selected"] == 1
     assert report["fixture_guard"]["conditions"][0]["matched"] is True
