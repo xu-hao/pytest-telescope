@@ -39,7 +39,7 @@ def observe_worker_capture(monkeypatch, directory):
     original = sandbox.capture
     destination = directory / "worker-capture.jsonl"
     destination.open("xb").close()
-    state = {"calls": 0, "bytes": 0, "overflow": False}
+    state = {"calls": 0, "bytes": 0, "overflow": False, "write_failed": False}
     maximum = 2 * 1024 * 1024
 
     def record(argv, result=None, error=None):
@@ -81,6 +81,7 @@ def observe_worker_capture(monkeypatch, directory):
                     record(argv, error=error)
                 except Exception:
                     # Evidence failure must never replace the original exception.
+                    state["write_failed"] = True
                     try:
                         print("PRIVATE_WORKER_DIAGNOSTIC_WRITE_FAILED", flush=True)
                     except Exception:
@@ -91,13 +92,24 @@ def observe_worker_capture(monkeypatch, directory):
                 record(argv, result=result)
             except Exception:
                 # The wrapper treats missing/incomplete evidence as a diagnostic fault.
+                state["write_failed"] = True
                 try:
                     print("PRIVATE_WORKER_DIAGNOSTIC_WRITE_FAILED", flush=True)
                 except Exception:
                     pass
         return result
 
+    def finish():
+        try:
+            encoded = json.dumps({"capture_summary": state}, separators=(",", ":")).encode() + b"\n"
+            with destination.open("ab") as stream:
+                stream.write(encoded)
+        except Exception:
+            # A missing final summary is an explicit wrapper diagnostic failure.
+            pass
+
     monkeypatch.setattr(sandbox, "capture", capture)
+    return finish
 
 
 def test_actual_dynamic_worker_reads_only_declared_configuration_and_reuses(worker, monkeypatch):
@@ -125,12 +137,15 @@ def test_configuration():
         with pytest.raises(OSError): path.write_bytes(b'forbidden')
     assert os.getpid() == 1 and os.readlink('/proc/self') == '1'
 """)
-    observe_worker_capture(monkeypatch, worker.project.external)
+    finish_diagnostics = observe_worker_capture(monkeypatch, worker.project.external)
     observed = observe_native(monkeypatch)
-    assert_counts(worker.project.run(timeout=60), executed=1)
-    assert observed and all(native and dynamic and projected and "/etc" in closed for native, dynamic, projected, closed in observed)
-    assert_counts(worker.project.run(timeout=60), reused=1)
-    assert (worker.config / "selected.txt").read_bytes() == b"worker configuration\n"
+    try:
+        assert_counts(worker.project.run(timeout=60), executed=1)
+        assert observed and all(native and dynamic and projected and "/etc" in closed for native, dynamic, projected, closed in observed)
+        assert_counts(worker.project.run(timeout=60), reused=1)
+        assert (worker.config / "selected.txt").read_bytes() == b"worker configuration\n"
+    finally:
+        finish_diagnostics()
 
 
 def test_actual_isolated_python_child_keeps_configuration_and_has_no_source_descriptors(worker, monkeypatch):
