@@ -65,8 +65,9 @@ in separate groups. Project files are read-only in both modes.
 
 ## Static discovery and real pytest agreement
 
-The controller reads test source without importing or evaluating project Python, within
-the [parsing limits below](#bounds-and-performance). Use `pytest.mark.telescope(...)`
+The controller discovers case declarations from structurally selected test source
+without importing or evaluating project Python, within the
+[parsing limits below](#bounds-and-performance). Use `pytest.mark.telescope(...)`
 directly in function or class decorators, module or class `pytestmark`, or
 `pytest.param(..., marks=...)` inside literal parametrization declarations. Values must
 be literal string lists and booleans. Use bundles to share declarations.
@@ -83,10 +84,24 @@ If dynamically constructed markers evade static checks, they fail the session.
 They cannot widen a scope or change a route. This validation does not rely
 on private pytest internals remaining stable.
 
+For a scoped view, this source guard also authenticates literal calls in explicitly
+readable frozen Python helpers, including package initializers and nested imports.
+Declare every required helper, initializer and import-time resource in the consumer's
+scope; the controller does not resolve imports or search undeclared source. A helper
+outside structural test membership can be imported without collecting its tests.
+
+Authentication and inheritance serve different purposes. A helper's literal marker
+can be valid at its own exact source position without becoming a declaration inherited
+by the consumer. Importing that helper does not grant its own inputs, bundles, local
+metadata, absence assertions or cache policy to the importing case. Attaching a foreign
+helper marker to a selected case is unsupported; effective case declarations belong to
+that case's containing test source.
+
 The guard identifies a declaration by the calling module's current `__file__` within the
 project. Cached assertion-rewrite bytecode can keep an old checkout filename; the guard
 refuses missing, invalid or outside-project module origins instead of falling back to
-that embedded filename.
+that embedded filename. Helper origins use the same exact project-relative identity;
+matching a basename or a marker's arguments is insufficient.
 
 Files scoped by module-level `pytestmark` are collected in a sandbox. Its view combines
 those files' declarations with the suite's project defaults and configuration. Collection
@@ -104,15 +119,23 @@ Each scoped execution begins a new sandbox with only that case's effective scope
 
 Inventory and execution have distinct strict result schemas. A successful sandboxed collection reports collected nodes and declaration assignments, never executed passes. It becomes reusable only after the sandbox exits cleanly with validated bounded records. Ordinary session inventories are never reused.
 
-The scoped inventory key covers the exact frozen collection view, current test-file membership, static declaration registry, pytest configuration, relevant environment, full effective arguments/selectors, the sandbox identity (policy, interpreter, installed distributions and the environment's references into the project) and runner implementation/version. Every invocation re-freezes current declared inputs before accepting an inventory hit. File addition/deletion, declared-resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present scoped cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
+The scoped inventory key covers the exact frozen collection view, current test-file membership, static declaration registry and readable helper guard registry, pytest configuration, relevant environment, full effective arguments/selectors, the sandbox identity (policy, interpreter, installed distributions and the environment's references into the project) and runner implementation/version. Every invocation re-freezes current declared inputs before accepting an inventory hit. File addition/deletion, declared-resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present scoped cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
 
 Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
+
+The guard registry is bound to the same exact readable view. Changing a declared
+helper's bytes invalidates its consumers; a helper available only to another case does
+not join this case's registry or result identity. Stale or malformed registry evidence
+cannot make an inventory, case or batch record reusable.
 
 Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts by route, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static preview and explicitly does not claim real collected-case enumeration.
 
 ## Bounds and performance
 
 Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited entries while expanding declared directories and globs; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
+
+Python-source and marker parsing budgets also cover declared helper source used by the
+guard. Validating a helper never expands its own declarations into additional inputs.
 
 Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
 
@@ -225,6 +248,13 @@ in a scoped case, inspect the reported project file and its imports, then add th
 missing dependency as a narrow file, directory, or bundle. For a `FileNotFoundError`,
 inspect the reported file/line and its resource dependencies. Verify shared conftest and
 package `__init__.py` files as well as the obvious application module.
+
+Helper source must agree with its frozen file record before its literal calls can be
+authenticated. Missing, unreadable, changed or corrupt frozen source and unsupported
+record shapes refuse; the controller does not substitute live checkout bytes. Source
+and parsing failures use the same bounded refusal, retry and cleanup rules as other
+scoped work. Declaration errors never trigger an ordinary replay, and cleanup failure
+cannot publish new successful records.
 
 New test files and cases are included in the refreshed real inventory. A collection
 mismatch or unsupported declaration cannot be resolved by accepting an old record.

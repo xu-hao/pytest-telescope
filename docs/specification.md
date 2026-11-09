@@ -61,6 +61,54 @@ Collection of wholly scoped modules runs with the union of their potential scope
 individual execution never borrows another case's inputs. Each execution must collect
 the same containing-file case inventory as discovery before running its selected case.
 
+## Imported helpers with declarations
+
+An imported Python helper may contain its own supported literal Telescope markers.
+Declare the helper and its import-time dependencies explicitly, just as for an unmarked
+helper. For example, a helper can declare an input for its own tests:
+
+```python
+# helpers/support.py
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.telescope(inputs=["data/helper-only.txt"])
+
+
+def answer():
+    return Path("data/answer.txt").read_text().strip()
+```
+
+Its consumer declares the files that the consumer actually reads:
+
+```python
+# tests/test_consumer.py
+import pytest
+
+pytestmark = pytest.mark.telescope(
+    inputs=["helpers/__init__.py", "helpers/support.py", "data/answer.txt"]
+)
+
+from helpers.support import answer
+
+
+def test_answer():
+    assert answer() == "42"
+```
+
+The helper's marker call is authenticated against its exact frozen Python source.
+Importing it neither collects the helper's tests nor grants `data/helper-only.txt` to
+the consumer. Only declarations inherited by the actual consumer case add to its scope
+and policy. A foreign helper marker cannot be attached to that case as another grant.
+
+Package initializers, nested helpers and resources read during import remain explicit
+dependencies. The controller does not follow imports to add them automatically. The
+same [literal syntax and source budgets](execution-contract.md#static-discovery-and-real-pytest-agreement)
+apply to readable helpers; computed, dynamically created and modified inherited markers
+remain unsupported. Relative leaf links retain the existing requirement to declare
+their exact destination.
+
 ## Project configuration
 
 Use `pyproject.toml` and run from its directory:

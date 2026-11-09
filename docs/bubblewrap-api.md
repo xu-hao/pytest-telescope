@@ -24,8 +24,11 @@ make_plan(root, *, suites=None, structural_files=None)
   runs pytest bounds them.
 - `arguments` forwards supported pytest options and selectors to the suite sessions.
   `suites` selects configured suite names; `None` selects all suites.
-- `structural_files` narrows suite file membership before parsing and importing modules
+- `structural_files` narrows suite file membership before structural test parsing and
+  pytest collection
   ([structural narrowing](scoped-execution.md#invocation-only-structural-file-narrowing)).
+  Explicitly declared helper inputs remain readable and their frozen literal calls are
+  authenticated without adding helper tests to the inventory.
 - `force=True` executes scoped cases again even when a reusable success exists.
   `no_cache=True` bypasses result reading and recording. `explain=True` includes reuse and
   execution reasons in the result.
