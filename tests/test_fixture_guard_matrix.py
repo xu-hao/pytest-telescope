@@ -174,7 +174,7 @@ def test_item(): assert os.environ["GUARD_SYNTHETIC"]
     assert hashlib.sha256(secret.encode()).hexdigest().encode() not in evidence
 
 
-@pytest.mark.parametrize("corruption", ["nonce", "missing", "duplicate", "truncated"])
+@pytest.mark.parametrize("corruption", ["nonce", "missing", "duplicate", "truncated", "context_id", "group_id", "registry_id", "graph_id", "unexpected"])
 def test_real_inspection_transport_corruption_fails_closed(tmp_path, monkeypatch, corruption):
     configure(tmp_path)
     put(tmp_path, "tests/test_wire.py", '''import pytest
@@ -206,7 +206,10 @@ def test_item(): pass
             lines[index] = lines[index][:-4]
         else:
             data = json.loads(lines[index][len(prefix):])
-            data["nonce"] = ("1" if data["nonce"][0] == "0" else "0") + data["nonce"][1:]
+            if corruption == "unexpected":
+                data["unexpected"] = True
+            else:
+                data[corruption] = ("1" if data[corruption][0] == "0" else "0") + data[corruption][1:]
             lines[index] = prefix + json.dumps(data).encode()
         return code, b"\n".join(lines) + b"\n"
 

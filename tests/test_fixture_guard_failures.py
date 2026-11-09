@@ -127,3 +127,20 @@ def test_outer_cleanup_failure_preserves_observed_pass_without_publication(tmp_p
     monkeypatch.setattr(sandbox, "invocation", original)
     resumed = controller.run(tmp_path, fixture_guard="available-v1")
     assert resumed["status"] == "passed" and resumed["counts"]["executed"] == 1
+
+
+def test_real_descendant_process_is_bounded_and_not_cached(tmp_path):
+    configure(tmp_path)
+    put(tmp_path, "tests/test_descendant.py", '''import subprocess
+import pytest
+pytestmark = pytest.mark.telescope(inputs=[])
+def test_item(): subprocess.Popen(["sleep", "20"])
+''')
+    report = controller.run(tmp_path, fixture_guard="available-v1", timeout=4)
+    assert report["status"] == "infrastructure_error"
+    assert report["fixture_guard"]["state"] == "admitted"
+    assert report["groups"][0]["attempts"] == 2
+    assert not report["groups"][0]["cache_eligible"]
+    assert not any(record["schema"] == 7 for record in records(tmp_path))
+    scratch = tmp_path / ".pytest-telescope/scratch"
+    assert not list(scratch.iterdir())
