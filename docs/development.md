@@ -64,6 +64,14 @@ before interpreter, site or project imports. Do not inventory real `/etc` or use
 credentials as fixture inputs. Data-mode injection alone does not qualify a native
 runtime, nor does a source-snapshot check qualify an installed wheel or ambient runtime.
 
+Static trigger coverage is separate from full worker compatibility. A tiny owned static
+ELF can exercise actual runtime classification and a direct-program filesystem view.
+A synthetic standard prefix description used by such a test qualifies the startup path
+model only; it does not establish that CPython starts. Full worker controls must use
+the actual invoking interpreter description and explicitly pin its real runtime, loader
+cache and pytest dependencies. Adding a dynamic worker runtime to a static-tool test
+cannot prove that the static tool alone caused the native profile to activate.
+
 For documentation alone:
 
 ```sh
