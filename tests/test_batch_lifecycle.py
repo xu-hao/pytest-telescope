@@ -15,7 +15,8 @@ from pytest_telescope.result import validate_batch, validate_collection
 def result_for(request):
     ids = request["case_ids"]
     return dict(
-        protocol=6,
+        protocol=9,
+        declaration_error=False,
         context_id=request["group_id"],
         collection_skips=[],
         nonce="a" * 32,
@@ -52,7 +53,8 @@ def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
             return dict(
-                protocol=7,
+                protocol=10,
+                declaration_error=False,
                 context_id=request["context_id"],
                 collection_skips=[],
                 kind="collection",
@@ -240,7 +242,8 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
         for index, case in enumerate(ids)
     ]
     report = dict(
-        protocol=7,
+        protocol=10,
+        declaration_error=False,
         context_id="e" * 64,
         collection_skips=[],
         kind="collection",

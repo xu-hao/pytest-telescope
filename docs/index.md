@@ -147,6 +147,9 @@ run refuses; use a host that meets the [requirements](bubblewrap-api.md#host-req
 A refusal can occur after earlier tests have run, so inspect the result before retrying.
 The development [late-refusal accounting contract](result-schema.md#retained-observations-after-a-late-refusal)
 retains available observations without changing the typed refusal into a successful run.
+A plugin's nonzero session verdict can fail a run even when its case bodies passed.
+Those observed passes remain visible; a declaration refusal is identified separately
+by the [strict worker protocol](result-schema.md#internal-protocol-and-cache-versions).
 
 ### 5. Change an input and run again
 
