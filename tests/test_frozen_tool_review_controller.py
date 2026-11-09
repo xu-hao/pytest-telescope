@@ -97,23 +97,37 @@ def test_hard_killed_owned_controller_recovers_capture_and_keeps_old_cache(tmp_p
     previous = cache_bytes(project.root)
     before = entries(first), entries(second)
     ready = tmp_path / "controller-ready.json"
-    code = '''import json, os, sys, time
+    scratch = project.root / ".pytest-telescope/scratch"
+    assert not list(scratch.iterdir())
+    code = '''import json, os, signal, sys, time
+signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
+signal.setitimer(signal.ITIMER_REAL, 10)
+expected_parent = int(sys.argv[4])
+if os.getppid() != expected_parent:
+    os._exit(125)
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from pytest_telescope import controller, tool_capture
 original = tool_capture.Capture.__enter__
 def held(self):
     result = original(self)
-    pending = Path(sys.argv[3] + '.pending')
-    pending.write_text(json.dumps({'pid': os.getpid(), 'directory': str(self.directory.parent)}))
-    pending.replace(sys.argv[3])
-    while True: time.sleep(0.1)
+    try:
+        pending = Path(sys.argv[3] + '.pending')
+        pending.write_text(json.dumps({'pid': os.getpid(), 'directory': str(self.directory.parent)}))
+        pending.replace(sys.argv[3])
+        while os.getppid() == expected_parent:
+            time.sleep(0.02)
+        raise RuntimeError('owned fixture parent exited')
+    finally:
+        # Parent loss unwinds only this actual owned capture. SIGKILL deliberately
+        # bypasses this path; the independent alarm also ends the child at10s.
+        result.__exit__(None, None, None)
 tool_capture.Capture.__enter__ = held
 controller.run(Path(sys.argv[2]), timeout=10)
 '''
     process = subprocess.Popen(
         [sys.executable, "-I", "-B", "-c", code,
-         str(Path(pytest_telescope.__file__).parent.parent), str(project.root), str(ready)],
+         str(Path(pytest_telescope.__file__).parent.parent), str(project.root), str(ready), str(os.getpid())],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         start_new_session=True,
     )
@@ -140,6 +154,16 @@ controller.run(Path(sys.argv[2]), timeout=10)
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
             process.communicate(timeout=10)
-        if directory is not None and (directory / "tools").exists():
-            tool_capture._remove(directory / "tools")
-        sandbox.recover(project.root)
+        if process.stdout is not None:
+            process.stdout.close()
+        # The directory was empty immediately before this single child started.
+        # Even a failed/missing handshake may leave its one owned invocation.
+        residue = list(scratch.iterdir())
+        assert len(residue) <= 1
+        for owned in residue:
+            assert owned.parent == scratch and not owned.is_symlink()
+            assert owned.name.startswith("invocation-") and len(owned.name) == 43
+            int(owned.name.removeprefix("invocation-"), 16)
+            if (owned / "tools").exists():
+                tool_capture._remove(owned / "tools")
+            sandbox._remove(owned)

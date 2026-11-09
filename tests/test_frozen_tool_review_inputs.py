@@ -15,9 +15,11 @@ def bundle_project(tmp_path, files, consumers):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
     for index in range(files):
         put(project.root, f"package/value{index}.txt", b"owned\n")
+    for index in range(consumers):
+        put(project.root, f"consumer-inputs/value{index}.txt", b"distinct owned input\n")
     project.configure('[tool.pytest_telescope.bundles.shared]\ninputs = ["package"]\n')
     project.module("test_many.py", "import pytest\n" + "".join(
-        f"@pytest.mark.telescope(bundles=['shared'], inputs=['tests/test_many.py'])\n"
+        f"@pytest.mark.telescope(bundles=['shared'], inputs=['tests/test_many.py', 'consumer-inputs/value{index}.txt'])\n"
         f"def test_{index}(): pass\n" for index in range(consumers)
     ))
     return project
@@ -30,6 +32,10 @@ def test_shared_bundle_uses_one_bounded_expansion(tmp_path, monkeypatch):
     expected = {f"package/value{index}.txt" for index in range(80)}
     assert len(plan["declarations"]) == 12
     assert all(expected <= set(row["inputs"]) for row in plan["declarations"])
+    assert {name for row in plan["declarations"] for name in row["inputs"] if name.startswith("consumer-inputs/")} == {
+        f"consumer-inputs/value{index}.txt" for index in range(12)
+    }
+    assert all(sum(name.startswith("consumer-inputs/") for name in row["inputs"]) == 1 for row in plan["declarations"])
     assert plan["tools"] == {}
 
 
@@ -38,6 +44,10 @@ def test_many_consumers_of_one_real_bundle_fit_discovery_budget(tmp_path):
     plan = make_plan(project.root)
     assert len(plan["declarations"]) == 100
     assert all("package/value1999.txt" in row["inputs"] for row in plan["declarations"])
+    assert {name for row in plan["declarations"] for name in row["inputs"] if name.startswith("consumer-inputs/")} == {
+        f"consumer-inputs/value{index}.txt" for index in range(100)
+    }
+    assert all(sum(name.startswith("consumer-inputs/") for name in row["inputs"]) == 1 for row in plan["declarations"])
     assert plan["tools"] == {}
 
 
