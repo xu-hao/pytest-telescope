@@ -294,6 +294,17 @@ separately verified provenance table. The guarded batch request and response add
 match the admitted context. An empty fixture list is allowed only when enumeration is
 affirmatively complete.
 
+A body-free capture or inspection that detects a collection or declaration mismatch
+returns a strict `fixture-refusal-v1` worker result with exactly `protocol`, `nonce`,
+`context_id`, `mode` and `reason`. The nonce and context must match that request, mode
+must be its exact `guard-capture` or `guard-inspection` mode, reason must be
+`declaration`, and the worker must exit with status 4. Only this validated, unique
+response without a leaked descendant permits a public `DeclarationError`. A genuine
+fixture metadata problem remains `UnsupportedCapability` with capability
+`execution:fixture-metadata`; do not conflate the two. Missing, duplicate, malformed,
+stale or mismatched refusal responses, unexpected exit status and leaked descendants are
+infrastructure failures, subject to the bounded retry and cleanup rules.
+
 Malformed, stale, duplicate, truncated, missing, mismatched or oversized records fail
 closed. Cache envelope 7 and the guarded profile are distinct from unguarded cache 6;
 only a fresh guard preflight and matching current context can admit a guarded cache hit.
