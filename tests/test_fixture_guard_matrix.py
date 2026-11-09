@@ -159,6 +159,14 @@ def test_item(): assert os.environ["GUARD_SYNTHETIC"]
 ''')
     case = case_id("tests/test_private.py::test_item")
     row = {"case_id": case, "name": "GUARD_SYNTHETIC", "op": "equals", "value": secret}
+    requests = []
+    original = sandbox.execute
+
+    def observe(*args, request, **kwargs):
+        requests.append(json.dumps(request))
+        return original(*args, request=request, **kwargs)
+
+    monkeypatch.setattr(sandbox, "execute", observe)
     cold = controller.run(tmp_path, fixture_guard="available-v1", condition_checks=[row])
     warm = controller.run(tmp_path, fixture_guard="available-v1", condition_checks=[row])
     assert cold["status"] == warm["status"] == "passed" and warm["counts"]["reused"] == 1
@@ -166,8 +174,12 @@ def test_item(): assert os.environ["GUARD_SYNTHETIC"]
                     [{**row, "value": chr(0xD800)}], [{**row, "name": "PYTHONPATH"}]):
         with pytest.raises(DeclarationError):
             controller.run(tmp_path, fixture_guard="available-v1", condition_checks=invalid)
+    with pytest.raises(UnsupportedCapability) as mismatch:
+        controller.run(tmp_path, fixture_guard="available-v1", condition_checks=[{**row, "value": secret + "x"}])
+    assert mismatch.value.capability == "execution:condition-mismatch"
     captured = capsys.readouterr()
-    evidence = json.dumps([cold, warm]).encode() + captured.out.encode() + captured.err.encode()
+    evidence = (json.dumps([cold, warm, requests]).encode() + str(mismatch.value).encode()
+                + captured.out.encode() + captured.err.encode())
     for path in (tmp_path / ".pytest-telescope").rglob("*.json"):
         evidence += path.read_bytes()
     assert secret.encode() not in evidence
@@ -218,3 +230,15 @@ def test_item(): pass
     assert report["status"] == "infrastructure_error" and report["fixture_guard"]["state"] == "unavailable"
     assert len(mutations) == 2
     assert not any(group["cache_eligible"] for group in report["groups"])
+
+
+def test_unguarded_record_is_not_a_guarded_hit(tmp_path):
+    configure(tmp_path)
+    put(tmp_path, "tests/test_cache.py", 'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n')
+    ordinary = controller.run(tmp_path)
+    assert ordinary["schema"] == 4 and ordinary["counts"]["executed"] == 1
+    guarded = controller.run(tmp_path, fixture_guard="available-v1")
+    assert guarded["schema"] == 5 and guarded["status"] == "passed"
+    assert guarded["counts"]["executed"] == 1 and guarded["counts"]["reused"] == 0
+    assert controller.run(tmp_path, fixture_guard="available-v1")["counts"]["reused"] == 1
+    assert controller.run(tmp_path)["counts"]["reused"] == 1
