@@ -232,8 +232,8 @@ partial evidence or a failed lifecycle cannot establish a skip or authorize a re
 
 ## Internal protocol and cache versions
 
-Persistent cache envelopes use schema 6. Collection, singleton execution, batch execution
-and ordinary-session worker protocols use versions 7, 5, 6 and 2 respectively. Old cache
+Persistent cache envelopes use schema 7. Collection, singleton execution, batch execution
+and ordinary-session worker protocols use versions 8, 5, 6 and 3 respectively. Old cache
 records and protocols are ineligible; strict producers and validators advance together.
 Every request and worker common result carries an exact lowercase 64-hex `context_id`.
 For a batch it equals `group_id`; for a singleton or collection it equals the candidate
@@ -248,9 +248,29 @@ singleton protocol 5 includes `case_results` just as batch and ordinary sessions
 Counts and member order reconcile with these rows and the request. A singleton collection
 failure can have zero collected cases and empty `case_ids` and `case_results`; its known
 requested public member remains not-run, incomplete and failed under the case-profile
-collection verdict. Collection protocol 7 carries inventory items and collection skips,
+collection verdict. Collection protocol 8 carries inventory items and collection skips,
 never executed reports or passes. The existing nonce and exact request identity bind the
 worker response to its invocation.
+
+Each internal inventory item also carries sorted opaque `owners` digests and bounded
+`parameters` choices, each exactly a dimension digest and an alternative index. The
+worker derives the lineage from actual module, class MRO and defining callable bindings.
+Literal parameter choices bind the genuine generation-time call specification before
+Pytest can rewrite direct-argument indices. They are checked against unchanged literal
+parameter marks and repeated during collection/execution validation. No parameter
+values or collected node labels enter this evidence. Static registry entries bind a
+parameter marker's enclosing parametrization source position, alternative index and
+count; nonparameter entries have a null parameter binding. Controllers require both
+required origins and the absence of unrelated extra origins before assigning grants.
+Ownership and choices join the containing-file inventory digest and cache context;
+old or malformed evidence cannot reuse an inventory or result.
+
+The supported construction profile uses bounded actual Pytest 8.3/9 generation objects,
+parameter sets and unchanged marks, with at most 128 owner and parameter-dimension
+identities per case and 4,096 names per literal dimension. It checks the actual exported
+generation class and exact field shapes before retaining a choice. Unknown layouts or
+lost generation provenance refuse; there is no attempt to guess correspondence from
+collected indices, node labels or equal parameter values.
 
 ## Refusal envelope
 
