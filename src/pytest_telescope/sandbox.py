@@ -168,7 +168,7 @@ def _terminate(process):
             stream.close()
 
 
-def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None):
+def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None, on_start=None):
     """Run one child with bounded merged output; never retain more than the limit.
 
     A timeout of None sets no deadline: the caller's own job bounds that session.
@@ -187,6 +187,8 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
             env=env,
             cwd=cwd,
         )
+        if on_start is not None:
+            on_start()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
@@ -675,6 +677,7 @@ def execute(
     metadata_directory=None,
     tool_view=None,
     cancellation=None,
+    on_session_start=None,
     selection_disabled=False,
     allow_unknown_selectors=False,
 ):
@@ -804,6 +807,7 @@ def execute(
         env=_host_environment(),
         limit=MAX_COLLECTION if request["mode"] in {"collection", "batch"} else MAX_OUTPUT,
         cancellation=cancellation,
+        on_start=on_session_start,
     )
     try:
         unsupported = [

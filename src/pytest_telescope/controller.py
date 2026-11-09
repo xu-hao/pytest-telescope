@@ -1083,7 +1083,14 @@ def run(
                             else "no valid successful group record"
                         )
                         attempt_started = time.monotonic()
+                        sessions_started = 0
+
+                        def session_started():
+                            nonlocal sessions_started
+                            sessions_started += 1
+
                         for attempt in range(2):
+                            result = None
                             try:
                                 if cancellation.is_set():
                                     raise sandbox.InvocationInterrupted(
@@ -1125,6 +1132,7 @@ def run(
                                         metadata_directory=metadata,
                                         tool_view=tools.view(unit.tools),
                                         cancellation=cancellation,
+                                        on_session_start=session_started,
                                         request=request,
                                     )
                                 if result["exit_code"] == 4:
@@ -1135,11 +1143,24 @@ def run(
                                     job,
                                     result,
                                     mode,
-                                    attempts=attempt + 1,
+                                    attempts=sessions_started,
                                     reason=reason if explain else "",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
-                                return projected, group, result, False
+                                return projected, group, result, False, None
+                            except DeclarationError as exc:
+                                cancellation.set()
+                                projected, group = project_result(
+                                    job,
+                                    result,
+                                    mode,
+                                    attempts=sessions_started,
+                                    reason=str(exc),
+                                    attempt_seconds=time.monotonic() - attempt_started,
+                                )
+                                if result is None:
+                                    group["timing_complete"] = False
+                                return projected, group, None, False, exc
                             except (InfrastructureError, OSError) as exc:
                                 terminal = isinstance(exc, sandbox.CleanupError)
                                 if terminal:
@@ -1149,7 +1170,7 @@ def run(
                                         job,
                                         None,
                                         mode,
-                                        attempts=attempt + 1,
+                                        attempts=sessions_started,
                                         reason=str(exc)
                                         if isinstance(exc, InfrastructureError)
                                         else "owned storage operation failed",
@@ -1158,12 +1179,20 @@ def run(
                                     group["timing_complete"] = False
                                     if isinstance(exc, sandbox.InvocationInterrupted):
                                         group["stop_reason"] = "cancelled"
-                                    return projected, group, None, terminal
+                                    return projected, group, None, terminal, None
 
-                    def accept(job, projected, group):
+                    refusal = None
+
+                    def accept(job, projected, group, terminal, error):
+                        nonlocal blocked, refusal
                         groups[job["group_index"]] = group
                         for index, row in projected:
                             results[index] = row
+                        if error is not None and refusal is None:
+                            refusal = error
+                            cancellation.set()
+                        if terminal:
+                            blocked = "run stopped after owned cleanup failure or cancellation"
 
                     active, cursor = {}, 0
                     executor = ThreadPoolExecutor(max_workers=concurrency)
@@ -1182,12 +1211,8 @@ def run(
                             completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
                             for future in completed:
                                 job = active.pop(future)
-                                projected, group, result, terminal = future.result()
-                                accept(job, projected, group)
-                                if terminal:
-                                    blocked = (
-                                        "run stopped after owned cleanup failure or cancellation"
-                                    )
+                                projected, group, result, terminal, error = future.result()
+                                accept(job, projected, group, terminal, error)
                                 if (
                                     result is not None
                                     and result["exit_code"] == 0
@@ -1208,18 +1233,16 @@ def run(
                         executor.shutdown(wait=True, cancel_futures=False)
                         for future, job in active.items():
                             if future.done() and not future.cancelled():
-                                projected, group, _, terminal = future.result()
-                                accept(job, projected, group)
-                                if terminal:
-                                    blocked = (
-                                        "run stopped after owned cleanup failure or cancellation"
-                                    )
+                                projected, group, _, terminal, error = future.result()
+                                accept(job, projected, group, terminal, error)
                         if cancellation.is_set():
                             blocked = blocked or "run cancelled"
                             for job in jobs[cursor:]:
                                 groups[job["group_index"]]["stop_reason"] = "cancelled"
                                 for index, _ in job["members"]:
                                     results[index]["reason"] = blocked
+                    if refusal is not None:
+                        raise refusal
                     tools.verify(tuple(manifest.tools))
                 if blocked is None:
                     pending.publish()
