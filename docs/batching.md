@@ -1,5 +1,8 @@
 # Optional identical-scope batches
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 Batch mode lets scoped tests share a pytest session and its fixtures. It can reduce
 startup and fixture setup time when tests in the same module need exactly the same
 files. Ordinary cases already share one session per suite; batching applies only to
@@ -24,7 +27,7 @@ omission uses configured mode, defaulting to `case`. An override changes executi
 identity without rewriting project configuration. `plan` reports the configured mode but
 cannot predict dynamically collected group membership.
 
-The versioned execution profiles are `case-v1` and `batch-v1`. A batch occupies one
+The versioned execution profiles are `case-v2` and `batch-v2`. A batch occupies one
 worker slot regardless of member count; `workers` bounds how many cases or batches run at
 once. Set `workers` to choose the concurrency; pytest-telescope does not infer it from
 the host's CPUs. Batching does not change which source or metadata a test can read.
@@ -32,7 +35,8 @@ the host's CPUs. Batching does not change which source or metadata a test can re
 ## Exact scope and deterministic membership
 
 Cases share a batch only when they belong to the same suite and source module and have
-exactly equal readable files, declared absence, generated metadata and cache policy.
+exactly equal readable files, declared absence, generated metadata, effective environment
+names and captured presence/value context, and cache policy.
 File comparisons include contents and supported modes. Two declarations can be written
 differently and still produce the same scope after expansion. Cases with different
 scopes stay in separate batches; pytest-telescope does not combine their inputs.
@@ -90,7 +94,8 @@ nonreusable if any member fails or any requested member lacks completed teardown
 `-x` and `--maxfail` may stop a group partway through: preserve observed passes/failures/
 skips, explicitly account for not-run members, and mark the group incomplete. An observed
 pass remains an observed pass even when its group cannot be cached. Skips are counted,
-but skip reason text and arbitrary captured output are not supported diagnostics.
+and their bounded reason digests and observed phases are retained; raw reason text and
+arbitrary captured output are not supported diagnostics.
 
 Infrastructure retries remain bounded at two attempts per group. Only the final valid
 attempt supplies member results and worker time. Controller wall time spans all
@@ -108,7 +113,7 @@ prevents publication of all new records, including other groups' successes.
 
 ## Machine accounting
 
-Both execution modes and typed refusals use result schema 3. The
+Both execution modes and typed refusals use result schema 4. The
 [run result reference](result-schema.md) defines the inventory and case digests and
 count fields.
 
@@ -166,7 +171,7 @@ A group never submitted after cancellation has known `not_run` members with stat
 the whole membership without claiming that missing evidence proves no execution.
 
 All persistent membership uses opaque case/group identities. Raw collected node IDs,
-parameter values, skip reasons and exception messages do not enter group records or
+parameter values, raw skip reasons and exception messages do not enter group records or
 summaries. Explicit caller selector expressions still reach sandboxes unchanged.
 The existing bounded inventories, output and cache storage remain bounded; groups are
 limited by the same 100,000-case invocation bound and validated serialized record limits.

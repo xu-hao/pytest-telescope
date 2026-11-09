@@ -1,18 +1,22 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 Tests without a scope declaration run as ordinary pytest every time. Tests with a
 declaration run in a Bubblewrap sandbox and can reuse a previous successful result.
 The sandbox restricts which project files a test can read. It uses your installed
 Python environment and leaves resource limits and network policy to the job running
 pytest.
 
-This page defines the execution rules for pytest-telescope 0.1.0a6. See the
+This page defines the development execution contract following the published 0.1.0a6
+baseline. See the
 [API reference](bubblewrap-api.md) for interfaces and configuration, and the
-[result reference](result-schema.md) for schema 3 fields.
+[result reference](result-schema.md) for schema 4 fields.
 
 ## Which route a case takes
 
-A case is *scoped* when it has an `inputs`, `bundles` or `distributions` field in its
+A case is *scoped* when it has an `inputs`, `bundles`, `distributions` or `env` field in its
 literal declarations. Declarations inherit from module `pytestmark`,
 class, function and `pytest.param(..., marks=...)` levels, and a literal empty list still
 counts. Every other case is *ordinary*.
@@ -23,10 +27,11 @@ counts. Every other case is *ordinary*.
 | `@pytest.mark.telescope(cache=False)` | ordinary | never |
 | `@pytest.mark.telescope(absent=["local.json"])` | ordinary | never |
 | `@pytest.mark.telescope(inputs=[])` | scoped | yes |
+| `@pytest.mark.telescope(env=[])` | scoped | yes |
 | `@pytest.mark.telescope(inputs=[], cache=False)` | scoped | never |
 | module `pytestmark = pytest.mark.telescope(bundles=["shared"])` | scoped (every case in the module) | yes |
 
-Project `defaults` add files to scoped cases but never make a case scoped. An `absent`
+Project `defaults` add files and environment names to scoped cases but never make a case scoped. An `absent`
 declaration is still checked against the project for every case that carries it. A
 malformed, unsupported or mutated declaration refuses the run; it never turns a case
 ordinary.
@@ -105,7 +110,10 @@ when it exits. Pytest's cache provider is disabled and bytecode is not written.
 The sandbox environment variables are cleared, then set to a fixed `PATH` (the
 interpreter's directory followed by `/usr/local/bin:/usr/bin:/bin`), `HOME=/tmp`,
 `TMPDIR=/tmp`, `PYTHONDONTWRITEBYTECODE=1`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, and the
-names listed in `[tool.pytest_telescope] env`. Suite plugins are loaded explicitly.
+effective names declared globally and for that case or equal-scope group. Scoped
+discovery receives the potential collection union; execution receives only its own
+effective names.
+Suite plugins are loaded explicitly; autoload remains disabled.
 
 Bubblewrap creates a user namespace, a mount namespace and a PID namespace. The PID
 namespace is required for a correct view: the host `/proc` would expose other processes'
@@ -144,8 +152,9 @@ selected membership differs.
 
 A scoped result is keyed by the case's actual pytest identity, the frozen bytes and
 modes of its effective declared files, declared absence, selected metadata, the
-containing file's case inventory, the suite configuration and arguments, the forwarded
-environment values, the runner implementation, the sandbox policy version, the
+containing file's case inventory, the suite configuration and arguments, the effective
+forwarded environment names and their captured presence and values, the runner
+implementation, the sandbox policy version, the
 interpreter identity (implementation, full version and build string, ABI and platform),
 the sorted names and versions of every distribution visible to the isolated
 interpreter, and how the environment reaches into the project. Installing, upgrading or

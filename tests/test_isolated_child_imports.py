@@ -210,7 +210,7 @@ def run(interpreter, project, *arguments):
         report = json.loads(completed.stdout)
     except ValueError:
         pytest.fail(completed.stdout + completed.stderr)
-    assert report["schema"] == 3 and report["sandbox"]["required"] is True, report
+    assert report["schema"] == 4 and report["sandbox"]["required"] is True, report
     return completed.returncode, report
 
 
@@ -238,7 +238,7 @@ def test_isolated_children_import_declared_source_through_an_editable_install(tm
     assert code == 0, report
     assert report["route_counts"]["scoped"]["executed"] == 3, report
     profiles = [group["profile"] for group in report["groups"]]
-    assert profiles == (["case-v1"] * 3 if mode == "case" else ["batch-v1"]), report
+    assert profiles == (["case-v2"] * 3 if mode == "case" else ["batch-v2"]), report
 
 
 def test_an_environment_inside_the_project_root_keeps_both_views(tmp_path):
@@ -317,7 +317,12 @@ def test_bubblewrap_never_writes_into_the_frozen_snapshot(tmp_path, location):
                 60,
                 root=root,
                 invocation_directory=worker_directory,
-                request={"mode": "collection", "registry": [], "selectors": []},
+                request={
+                    "mode": "collection",
+                    "context_id": "d" * 64,
+                    "registry": [],
+                    "selectors": [],
+                },
             )
         assert inventory["exit_code"] == 0, inventory["failures"]
         assert tree(view) == before

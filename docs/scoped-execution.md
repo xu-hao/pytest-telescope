@@ -1,5 +1,8 @@
 # Metadata, independent suites, and parallel workers
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 Use these settings when tests need local package metadata, when parts of your project
 have separate pytest configurations, or when you want to run scoped tests in parallel.
 The [declaration reference](execution-contract.md) explains how inputs are combined;
@@ -241,7 +244,7 @@ capabilities from arbitrary test bodies or retry under relaxed restrictions.
 
 ## Result and privacy contract
 
-The [run result reference](result-schema.md) defines schema 3, complete/incomplete
+The [run result reference](result-schema.md) defines schema 4, complete/incomplete
 inventories, routes, selected-case accounting and typed refusals for CLI and Python
 callers. Collection emits opaque case identities, hashed selector aliases and each
 selected case's actual execution-order position (null for unselected cases). Raw
