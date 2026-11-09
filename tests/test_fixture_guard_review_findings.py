@@ -20,8 +20,12 @@ def put(root, name, text):
 
 
 def configure(root):
-    put(root, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n')
+    put(
+        root,
+        "pyproject.toml",
+        '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
+        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n',
+    )
 
 
 def case_id(node):
@@ -31,7 +35,10 @@ def case_id(node):
 def narrow_project(tmp_path):
     configure(tmp_path)
     put(tmp_path, "flag.txt", "synthetic")
-    put(tmp_path, "tests/test_inventory.py", '''from pathlib import Path
+    put(
+        tmp_path,
+        "tests/test_inventory.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.mark.telescope(inputs=["flag.txt"])
@@ -39,7 +46,8 @@ def test_flagged(): pass
 def test_unflagged(): pass
 if Path("flag.txt").exists():
     def test_generated(): pass
-''')
+""",
+    )
 
 
 def test_unguarded_narrow_inventory_mismatch_is_declaration_error(tmp_path):
@@ -67,12 +75,16 @@ def test_narrow_inventory_mismatch_is_declaration_error_before_body(tmp_path, mo
 
 def test_unrepresentable_package_fixture_stays_fixture_metadata_refusal(tmp_path):
     configure(tmp_path)
-    put(tmp_path, "tests/test_package.py", '''import pytest
+    put(
+        tmp_path,
+        "tests/test_package.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.fixture(scope="package")
 def package_fixture(): return object()
 def test_item(package_fixture): assert package_fixture is not None
-''')
+""",
+    )
     with pytest.raises(UnsupportedCapability) as refusal:
         controller.run(tmp_path, fixture_guard="available-v1")
     assert refusal.value.capability == "execution:fixture-metadata"
@@ -82,14 +94,23 @@ def test_item(package_fixture): assert package_fixture is not None
 @pytest.mark.parametrize("action", ["exit"])
 def test_post_body_exit_code_four_does_not_claim_pre_dispatch(tmp_path, monkeypatch, action):
     configure(tmp_path)
-    body = ('pytest.exit("synthetic exit", returncode=4)' if action == "exit"
-            else 'pytest.mark.telescope(inputs=[])')
-    put(tmp_path, "tests/test_late.py", '''import os
+    body = (
+        'pytest.exit("synthetic exit", returncode=4)'
+        if action == "exit"
+        else "pytest.mark.telescope(inputs=[])"
+    )
+    put(
+        tmp_path,
+        "tests/test_late.py",
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 def test_item():
     os.write(1, b"F3_ACTUAL_BODY\\n")
-    ''' + body + '\n')
+    """
+        + body
+        + "\n",
+    )
     original = sandbox.capture
     events = []
 
@@ -113,13 +134,17 @@ def test_item():
 
 def test_literal_body_marker_is_rejected_before_any_worker(tmp_path, monkeypatch):
     configure(tmp_path)
-    put(tmp_path, "tests/test_early.py", '''import os
+    put(
+        tmp_path,
+        "tests/test_early.py",
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 def test_item():
     os.write(1, b"F3_BODY_MUST_NOT_RUN\\n")
     pytest.mark.telescope(inputs=[])
-''')
+""",
+    )
     calls = []
     original = sandbox.execute
 
@@ -136,40 +161,77 @@ def test_item():
 
 def test_class_fixture_visible_to_function_is_plain_pytest_compatible_but_guard_refuses(tmp_path):
     configure(tmp_path)
-    put(tmp_path, "tests/conftest.py", '''import pytest
+    put(
+        tmp_path,
+        "tests/conftest.py",
+        """import pytest
 @pytest.fixture(scope="class")
 def class_fixture():
     state = []
     yield state
     assert state == ["used"]
-''')
-    put(tmp_path, "tests/test_function.py", '''import pytest
+""",
+    )
+    put(
+        tmp_path,
+        "tests/test_function.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=["tests/conftest.py"])
 def test_item(class_fixture): class_fixture.append("used")
-''')
+""",
+    )
     env = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTHONDONTWRITEBYTECODE="1")
-    plain = subprocess.run([sys.executable, "-I", "-B", "-m", "pytest", "-p", "pytest_telescope.plugin", "-p", "no:cacheprovider", "-q", "tests/test_function.py"],
-                           cwd=tmp_path, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           timeout=30, check=False)
+    plain = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-m",
+            "pytest",
+            "-p",
+            "pytest_telescope.plugin",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            "tests/test_function.py",
+        ],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+        check=False,
+    )
     assert plain.returncode == 0, plain.stdout.decode("utf-8", "replace")
     with pytest.raises(UnsupportedCapability) as refusal:
         controller.run(tmp_path, fixture_guard="available-v1")
     assert refusal.value.capability == "execution:fixture-metadata"
 
 
-def test_invalid_unicode_expectation_is_not_retained_by_public_exception_chain(tmp_path, monkeypatch):
+def test_invalid_unicode_expectation_is_not_retained_by_public_exception_chain(
+    tmp_path, monkeypatch
+):
     configure(tmp_path)
     monkeypatch.setenv("SYNTHETIC_F6_OPTION", "valid")
-    put(tmp_path, "tests/test_value.py", '''import pytest
+    put(
+        tmp_path,
+        "tests/test_value.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(env=["SYNTHETIC_F6_OPTION"])
 def test_item(): pass
-''')
+""",
+    )
     case = case_id("tests/test_value.py::test_item")
     base = {"case_id": case, "name": "SYNTHETIC_F6_OPTION", "op": "equals", "value": "valid"}
-    assert controller.run(tmp_path, fixture_guard="available-v1", condition_checks=[base])["status"] == "passed"
+    assert (
+        controller.run(tmp_path, fixture_guard="available-v1", condition_checks=[base])["status"]
+        == "passed"
+    )
     secret = "F6_private_value_31c5" + chr(0xD800) + "_tail"
     with pytest.raises(DeclarationError) as failure:
-        controller.run(tmp_path, fixture_guard="available-v1", condition_checks=[{**base, "value": secret}])
+        controller.run(
+            tmp_path, fixture_guard="available-v1", condition_checks=[{**base, "value": secret}]
+        )
     pending = [failure.value]
     seen = set()
     while pending:
@@ -177,21 +239,28 @@ def test_item(): pass
         if error is None or id(error) in seen:
             continue
         seen.add(id(error))
-        if (getattr(error, "object", None) == secret or secret in error.args
-                or repr(secret) in repr(error)):
+        if (
+            getattr(error, "object", None) == secret
+            or secret in error.args
+            or repr(secret) in repr(error)
+        ):
             pytest.fail("synthetic condition value retained by exception chain", pytrace=False)
         pending.extend([error.__context__, error.__cause__])
 
 
 def test_unguarded_post_body_exit_four_reports_declaration_error(tmp_path, monkeypatch):
     configure(tmp_path)
-    put(tmp_path, "tests/test_late.py", '''import os
+    put(
+        tmp_path,
+        "tests/test_late.py",
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 def test_item():
     os.write(1, b"F3_PLAIN_BODY\\n")
     pytest.exit("synthetic exit", returncode=4)
-''')
+""",
+    )
     original = sandbox.capture
     events = []
 

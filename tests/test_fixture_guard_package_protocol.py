@@ -20,42 +20,70 @@ def different(value):
 
 
 def project(root):
-    put(root, "pyproject.toml", '[tool.pytest.ini_options]\npythonpath = ["tests"]\n'
+    put(
+        root,
+        "pyproject.toml",
+        '[tool.pytest.ini_options]\npythonpath = ["tests"]\n'
         '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n')
-    put(root, "tests/pkg/__init__.py", '''state = []
+        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n',
+    )
+    put(
+        root,
+        "tests/pkg/__init__.py",
+        """state = []
 def setup_module(): state.append("started")
 def teardown_module(): assert state == ["started"]
-''')
-    put(root, "tests/pkg/test_item.py", '''import pytest
+""",
+    )
+    put(
+        root,
+        "tests/pkg/test_item.py",
+        """import pytest
 from pkg import state
 pytestmark = pytest.mark.telescope(inputs=["tests/pkg/__init__.py"])
 def test_item(): assert state == ["started"]
-''')
+""",
+    )
 
 
 def recommit(data, mode):
     if mode == "guard-capture":
-        data["content_id"] = fingerprint({"protocol": "fixture-content-v1",
-            "registry_id": data["registry_id"], "case_ids": data["case_ids"], "items": data["items"]})
+        data["content_id"] = fingerprint(
+            {
+                "protocol": "fixture-content-v1",
+                "registry_id": data["registry_id"],
+                "case_ids": data["case_ids"],
+                "items": data["items"],
+            }
+        )
     else:
-        data["graph_id"] = fingerprint({"protocol": data["protocol"], "context_id": data["context_id"],
-            "group_id": data["group_id"], "case_ids": data["case_ids"],
-            "registry_id": data["registry_id"], "items": data["items"]})
+        data["graph_id"] = fingerprint(
+            {
+                "protocol": data["protocol"],
+                "context_id": data["context_id"],
+                "group_id": data["group_id"],
+                "case_ids": data["case_ids"],
+                "registry_id": data["registry_id"],
+                "items": data["items"],
+            }
+        )
 
 
-@pytest.mark.parametrize("mode,fault", [
-    ("guard-capture", "missing"),
-    ("guard-capture", "lifecycle-recommitted"),
-    ("guard-inspection", "missing"),
-    ("guard-inspection", "extra-field"),
-    ("guard-inspection", "malformed-lifecycle"),
-    ("guard-inspection", "malformed-owner"),
-    ("guard-inspection", "duplicate-owner"),
-    ("guard-inspection", "owner-recommitted"),
-    ("guard-inspection", "lifecycle-recommitted"),
-    ("guard-inspection", "graph-mismatch"),
-])
+@pytest.mark.parametrize(
+    "mode,fault",
+    [
+        ("guard-capture", "missing"),
+        ("guard-capture", "lifecycle-recommitted"),
+        ("guard-inspection", "missing"),
+        ("guard-inspection", "extra-field"),
+        ("guard-inspection", "malformed-lifecycle"),
+        ("guard-inspection", "malformed-owner"),
+        ("guard-inspection", "duplicate-owner"),
+        ("guard-inspection", "owner-recommitted"),
+        ("guard-inspection", "lifecycle-recommitted"),
+        ("guard-inspection", "graph-mismatch"),
+    ],
+)
 def test_package_graph_corruption_fails_closed_before_body(tmp_path, monkeypatch, mode, fault):
     project(tmp_path)
     original = sandbox.capture
@@ -75,7 +103,7 @@ def test_package_graph_corruption_fails_closed_before_body(tmp_path, monkeypatch
         indices = [index for index, line in enumerate(lines) if line.startswith(prefix)]
         assert len(indices) == 1
         index = indices[0]
-        data = json.loads(lines[index][len(prefix):])
+        data = json.loads(lines[index][len(prefix) :])
         item = data["items"][0]
         assert len(item["packages"]) == 1
         package = item["packages"][0]
@@ -104,7 +132,11 @@ def test_package_graph_corruption_fails_closed_before_body(tmp_path, monkeypatch
     monkeypatch.setattr(sandbox, "capture", alter)
     report = controller.run(tmp_path, fixture_guard="available-v1")
     assert report["schema"] == 5 and report["status"] == "infrastructure_error"
-    assert report["fixture_guard"] == {"profile": "available-v1", "state": "unavailable", "conditions": []}
+    assert report["fixture_guard"] == {
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": [],
+    }
     assert mode in events and "guard-batch" not in events
     assert not any(group["cache_eligible"] for group in report["groups"])
     for path in (tmp_path / ".pytest-telescope/cache").glob("*.json"):

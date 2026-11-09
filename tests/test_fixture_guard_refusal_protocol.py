@@ -15,29 +15,57 @@ def put(root, name, text):
 
 
 def narrow_project(root, *, leaked=False):
-    put(root, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n')
+    put(
+        root,
+        "pyproject.toml",
+        '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
+        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n',
+    )
     put(root, "flag.txt", "synthetic")
-    leak_source = '''import subprocess
+    leak_source = (
+        """import subprocess
 if not Path("flag.txt").exists(): subprocess.Popen(["sleep", "20"])
-''' if leaked else ""
-    put(root, "tests/test_inventory.py", '''from pathlib import Path
+"""
+        if leaked
+        else ""
+    )
+    put(
+        root,
+        "tests/test_inventory.py",
+        """from pathlib import Path
 import pytest
-''' + leak_source + '''pytestmark = pytest.mark.telescope(inputs=[])
+"""
+        + leak_source
+        + """pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.mark.telescope(inputs=["flag.txt"])
 def test_flagged(): pass
 def test_unflagged(): pass
 if Path("flag.txt").exists():
     def test_generated(): pass
-''')
+""",
+    )
 
 
 def different(value):
     return ("1" if value[0] == "0" else "0") + value[1:]
 
 
-@pytest.mark.parametrize("fault", ["missing", "duplicate", "truncated", "protocol", "nonce",
-                                  "context", "mode", "reason", "extra", "exit", "leaked-field"])
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing",
+        "duplicate",
+        "truncated",
+        "protocol",
+        "nonce",
+        "context",
+        "mode",
+        "reason",
+        "extra",
+        "exit",
+        "leaked-field",
+    ],
+)
 def test_real_fixture_refusal_corruption_fails_closed(tmp_path, monkeypatch, fault):
     narrow_project(tmp_path)
     original = sandbox.capture
@@ -58,12 +86,16 @@ def test_real_fixture_refusal_corruption_fails_closed(tmp_path, monkeypatch, fau
         if len(indices) != 1:
             return code, output
         index = indices[0]
-        data = json.loads(lines[index][len(prefix):])
+        data = json.loads(lines[index][len(prefix) :])
         if data.get("protocol") != "fixture-refusal-v1":
             return code, output
-        assert code == 4 and data == {"protocol": "fixture-refusal-v1", "nonce": request["nonce"],
-                                     "context_id": request["context_id"], "mode": request["mode"],
-                                     "reason": "declaration"}
+        assert code == 4 and data == {
+            "protocol": "fixture-refusal-v1",
+            "nonce": request["nonce"],
+            "context_id": request["context_id"],
+            "mode": request["mode"],
+            "reason": "declaration",
+        }
         altered.append(fault)
         if fault == "missing":
             del lines[index]
@@ -81,7 +113,9 @@ def test_real_fixture_refusal_corruption_fails_closed(tmp_path, monkeypatch, fau
             elif fault == "context":
                 data["context_id"] = different(data["context_id"])
             elif fault == "mode":
-                data["mode"] = "guard-inspection" if data["mode"] == "guard-capture" else "guard-capture"
+                data["mode"] = (
+                    "guard-inspection" if data["mode"] == "guard-capture" else "guard-capture"
+                )
             elif fault == "reason":
                 data["reason"] = "metadata"
             elif fault == "extra":
@@ -95,7 +129,11 @@ def test_real_fixture_refusal_corruption_fails_closed(tmp_path, monkeypatch, fau
     report = controller.run(tmp_path, fixture_guard="available-v1")
     assert altered == [fault, fault]
     assert report["schema"] == 5 and report["status"] == "infrastructure_error"
-    assert report["fixture_guard"] == {"profile": "available-v1", "state": "unavailable", "conditions": []}
+    assert report["fixture_guard"] == {
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": [],
+    }
     assert "guard-batch" not in events
     assert not any(group["cache_eligible"] for group in report["groups"])
 
