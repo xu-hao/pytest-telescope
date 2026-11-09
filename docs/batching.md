@@ -41,8 +41,8 @@ The development frozen Git declaration and its context also participate in equal
 Git consumers and nonconsumers remain in separate groups.
 Frozen tools likewise require exactly equal selected names and complete closure identity:
 manifest/lock records, bytes/modes/links, original and logical aliases, command mappings,
-Python/executable runtime relations and closed native-loader views. Different tool sets
-or contents never share a batch. Collection's compatible union is discovery-only;
+Python/executable runtime relations and closed native configuration and loader views.
+Different tool sets or contents never share a batch. Collection's compatible union is discovery-only;
 execution and recollection receive the group's own complete tools.
 File comparisons include contents and supported modes. Two declarations can be written
 differently and still produce the same scope after expansion. Cases with different

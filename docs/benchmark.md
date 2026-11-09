@@ -108,6 +108,10 @@ python -m pytest -q benchmarks/frozen_runtime --basetemp /tmp/telescope-runtime-
 Use a new owned temporary directory and explicit caller resource limits for each run.
 The fixture names every source root and byte pin, retains actual link and command
 semantics, closes native library search directories, and refuses unsupported layouts.
+The native configuration contract also requires explicit frozen configuration inputs;
+host DNS, certificate and font settings are not implicitly available through `/etc`.
+The authored compatibility controls require qualification against that contract before
+any successful-runtime claim; earlier ambient-preservation evidence does not qualify it.
 Missing prerequisites and failed required controls are failures, never skips or evidence
 that the runtime is supported. Record the selected source revision, executable and
 closure digests, complete output, resource receipt and observed outcomes with each

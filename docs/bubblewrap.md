@@ -147,9 +147,9 @@ invocation. Inside, the filesystem looks like this:
 | Everything else, such as `/home` outside the environment and `/run` | Absent | read-only |
 
 Explicit frozen Git and tool declarations add only their documented views. A selected
-native tool may also replace library-search directories with the narrower frozen view
-[below](#frozen-tools-and-runtime-files-development-contract); without it the table is
-unchanged.
+native tool replaces `/etc` and may also replace library-search directories with the
+narrower frozen view [below](#frozen-tools-and-runtime-files-development-contract);
+without it the table is unchanged.
 
 An undeclared project file does not exist at `/project/...` or at its host path.
 `open`, `stat`, `os.path.exists`, native code and subprocesses all see it as absent.
@@ -167,7 +167,8 @@ Scoped tests run with the same executable
 and installed distributions as the invoking pytest-telescope process, including the
 active virtual environment, mounted read-only. There is no runtime build or wheel download.
 Installed packages, `sys.executable` subprocesses and native
-extensions work as on the host, but nothing in the environment can be modified. An import
+extensions use that environment, subject to explicitly selected native tools' closed
+configuration and runtime views below. Nothing in the environment can be modified. An import
 directory that contains or lies inside the project is never bound from the host.
 
 Installing the project into the
@@ -223,7 +224,7 @@ source files, installs a runtime or infers arbitrary program dependencies.
 | Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. |
 | `/tools/.commands/SCOPE_DIGEST` | Readonly command-name symlinks to exact pinned executables; first in the controlled PATH. |
 | Declared native library-search directories | Closed readonly trees synthesized from the selected runtime entries; all other host siblings are absent. |
-| Native profile's private `/etc` composition | Existing baseline direct-entry grants, overlaid by explicit frozen tool entries, the pinned loader cache and fixed empty readonly preload file. |
+| Native profile's closed `/etc` | Only selected frozen configuration entries, the loader cache when required or declared, and the fixed empty regular `0444` preload file; undeclared host entries are absent. |
 
 For declared frozen entries, source modes bind identity; files/directories use the source rwx mode with write
 bits removed. Writes to any of these views fail. A link remains a link with the exact
@@ -246,13 +247,15 @@ loader uses actual pinned cache and loader bytes; declared search directories ex
 unbound host libraries, including competing hardware-capability candidates. Unsupported
 or ambiguous lookup refuses. The selected closure must also include the invoking Python
 worker's native/runtime needs; a preflight failure occurs before project imports.
-The profile may privately compose `/etc` to provide its exact loader controls while
-preserving the existing baseline grants, including DNS. This uses bounded direct-entry
-metadata and stable no-follow source handles, without recursive inspection or baseline
-content capture. The [composition contract](bubblewrap-api.md#preserving-baseline-system-configuration)
-defines identity, revalidation and descriptor cleanup; it does not require retaining the
-original directory mount. Explicit frozen entries take precedence, and nonconsumers
-retain their baseline view.
+The [native configuration contract](bubblewrap-api.md#declared-native-system-configuration)
+replaces `/etc` with an owned readonly hierarchy of declared frozen entries and exact
+loader controls. Supported static or dynamic ELF in a tool's closure, or a nonnull
+loader profile, activates this view; data-only tools without either keep the baseline.
+For example, `/etc/resolv.conf` is absent unless selected and pinned. Declared certificate
+files expose exact frozen bytes without granting unselected siblings. No ambient `/etc`
+inventory or source/configuration descriptor transport is used. The complete mount plan,
+including environment overlays, preserves this closure before interpreter, site and
+project imports. Nonconsumers retain their baseline view.
 
 Browser executables, driver/bootstrap scripts, subprocesses and resources follow these
 same records. A browser name or version is not sufficient. Its actual executable must
@@ -265,7 +268,8 @@ Tool selection does not remove packages already present in the baseline environm
 from nonconsumers. It adds frozen identity for explicitly claimed files. A case without
 the tool gets no new `/tools` entries or external aliases and retains the baseline
 system view. Only consumers key the selected manifest/lock bytes, mappings, actual file
-bytes/modes/link text, executable/runtime graph, command map and closed loader view.
+bytes/modes/link text, executable/runtime graph, command map and closed configuration
+and loader views. Unselected ambient configuration is not a consuming input.
 The existing invoking-interpreter and installed-distribution identity remains in every
 scoped key; names and versions alone do not identify claimed mutable runtime files.
 
@@ -281,9 +285,12 @@ reports no CPU usage. Workers are child processes, so they stay inside the limit
 CI job, container or scheduler applies to the pytest invocation. Measure CPU and memory
 there.
 
-Sandboxed tests share the host network, including DNS through the host `/etc`. The cache
-key cannot track changes to network services. Leave tests that depend on those services
-ordinary, or add `cache=False` to their scope declarations.
+Sandboxed tests share the host network. The default system view includes host resolver
+configuration; native-tool consumers instead need explicitly declared frozen resolver
+and other required configuration. This filesystem difference does not isolate the
+network or promise DNS availability. The cache key cannot track changes to network
+services. Leave tests that depend on those services ordinary, or add `cache=False`
+to their scope declarations.
 
 The view prevents accidental reads of undeclared files and accidental writes. It does
 not protect against code that deliberately attacks the kernel or shared network.

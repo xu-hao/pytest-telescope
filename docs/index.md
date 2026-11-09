@@ -205,6 +205,14 @@ the [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-cont
 for native, browser or installed Python closures. Unsupported layouts refuse; this
 feature does not install tools. Published 0.1.0a6 does not implement this opt-in.
 
+Selecting a native closure also closes system configuration: `/etc/resolv.conf` is
+absent unless the selected manifest pins it and preserves its path. Required certificate
+or fixture configuration likewise appears only as declared frozen bytes, alongside the
+required loader controls. A data-only tool without ELF files or a loader profile keeps
+the existing system view, as do nonconsumers. See
+[declared native configuration](bubblewrap-api.md#declared-native-system-configuration)
+for the exact trigger and examples; dependencies remain the caller's responsibility.
+
 ## Use it in CI
 
 Install your test dependencies and Bubblewrap, then use the same `run` command in your

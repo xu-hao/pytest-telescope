@@ -219,6 +219,15 @@ The manifest's `loader` is `null` when there is no native loader, or exactly:
 {"profile":"linux-x86_64-glibc-v1","directories":["/usr/lib","/usr/local/lib"],"cache":{"root":"loader_control","path":"ld.so.cache"}}
 ```
 
+The native configuration profile applies when validation finds any supported ELF file
+in the selected tool's pinned closure, or when its `loader` is nonnull. Validation
+examines all pinned regular files, including libraries and Python extensions, rather
+than just executable entry points. Static ELF also selects the profile; a null loader
+or cache does not opt it out. A script's declared interpreter/runtime closure determines
+whether it is native under the same rule. A data-only tool with no ELF files and
+`loader=null` keeps the existing system view. A discovery union or execution view uses
+the closed configuration profile if any of its selected tools requires it.
+
 `directories` is a sorted unique list of at most 64 canonical absolute search-directory
 subtrees. The list must cover every normalized default search root of the supported
 loader, every selected ELF RPATH/RUNPATH location, and every cache candidate directory
@@ -240,7 +249,7 @@ imports; it does not borrow a collection sibling's runtime.
 
 Dynamic ELF requires a nonnull reference to actual pinned `/etc/ld.so.cache` bytes in the
 supported bounded glibc cache format. The cache is not regenerated. A null cache is
-accepted only with static ELF and no dynamic loader. Every candidate for a required
+accepted only when the closure has no dynamic ELF. Every candidate for a required
 SONAME must resolve to the exact declared frozen file or be absent in the closed view;
 candidates outside closed directories refuse. Irrelevant cache entries need not have
 files. Multiple available compatible candidates require verified loader ordering or an
@@ -250,52 +259,73 @@ Its exact empty contents, type, mode and destination bind identity; physical abs
 not claimed. The loader cannot read or execute the host preload contents, and explicitly
 declared nonempty preload inputs are unsupported. The exact overlay destination must
 be verified; unsupported path indirection refuses. Other required loader-control inputs
-must be precisely controlled or explicitly pinned. The rest of `/etc`, including the
-baseline DNS view, retains its existing path grants through the private composition
-below; the original directory mount itself is not required. Nonconsumers retain their
-baseline view. All selected loader profiles, cache bytes/paths and colliding search
-entries must agree.
+must be precisely controlled or explicitly pinned. The
+[closed configuration view](#declared-native-system-configuration) contains only selected
+frozen configuration and these loader controls. All selected loader profiles, cache
+bytes/paths and colliding search entries must agree.
 
 Runtime `dlopen`, data, imports and subprocess dependencies remain the caller's explicit
 responsibility. Byte validation and mandatory ELF/shebang relations do not infer arbitrary
 program dependencies or certify package-manager installation semantics.
 
-### Preserving baseline system configuration
+### Declared native system configuration
 
-When the native profile needs its fixed loader controls, the controller may compose a
-private `/etc` directory containing only the already-granted baseline direct entries,
-the explicitly frozen `ld.so.cache` and the fixed empty `ld.so.preload`. This permits a
-control file to exist even when its host counterpart is absent. Existing declared tool
-roots and entries at or below `/etc` remain authoritative overlays. The composition
-preserves the baseline DNS and other path grants; it neither selects another host path
-nor introduces an arbitrary live parent-directory bind.
+Native-tool consumers receive only explicitly declared frozen system configuration and
+required pinned or fixed loader controls. Their `/etc` is a wholly owned readonly
+hierarchy built from selected entries, plus the pinned loader cache when required or
+declared and the fixed empty regular `ld.so.preload` with mode `0444`. An undeclared
+entry is absent, including host resolver and certificate configuration. Declared
+directories retain their source mode with write bits removed; required empty synthetic
+ancestors use `0555` and grant no host contents. The controller
+does not inventory ambient `/etc`, preserve its live entries or consult it for a fallback.
+This replaces the earlier, unlanded ambient-configuration preservation design.
 
-Capture enumerates only direct entry metadata under the
-[composition bounds](execution-contract.md#frozen-tool-capture-and-reuse). It records
-membership, entry types, permissions and ownership, literal link text, source identities
-and destination mappings privately. It does not recursively inspect directories, read
-baseline regular-file or credential contents, or copy them into a tool snapshot. The
-cache and preload slots use their frozen or fixed inputs instead of host contents.
-Unsupported special entries or loader-control path indirection refuse. Enumeration
-must detect changes and refuse rather than omit entries or truncate the description.
+Configuration uses the existing root and entry records, with no additional manifest
+field or arbitrary destination remapping. To expose `/etc/resolv.conf`, declare its
+existing regular file or its complete supported link closure, pin its bytes and modes,
+and preserve the original path. A `coverage="files"` root at `/etc` can name that file
+and its explicit ancestor records without selecting siblings. A narrow complete
+configuration subtree can use `coverage="tree"`; a whole `/etc` tree remains unsupported.
+Only selected roots with `preserve_source=true` contribute their original `/etc` paths;
+other selected roots remain available at their logical tool paths.
 
-Admission opens `/etc` and each admitted regular file or directory through verified
-no-follow handles, checks the held entry against its observed metadata, and retains the
-stable handle for readonly mount setup. It never reopens an unchecked source pathname
-that a replacement link could redirect. Symlinks retain verified literal text without
-resolving or granting an additional host target. Baseline directory contents retain
-their existing readonly source semantics; this composition does not claim to freeze
-their bytes. Explicit frozen tool overlays retain their stronger byte identity.
+| Configuration input | Native consumer's `/etc` view |
+| --- | --- |
+| No resolver declaration | `/etc/resolv.conf` is absent, even if it exists on the host. |
+| Selected, pinned resolver file | `/etc/resolv.conf` contains exactly the frozen bytes, with write bits removed. |
+| Selected `/etc/ssl/certs/example.pem`, with required ancestors and link targets | That certificate has its declared bytes and type; unselected sibling certificates are absent. |
+| Configuration registered only for another case | Its original entries are absent from this case's closed view. |
+| No dynamic loader and no cache declaration | `/etc/ld.so.cache` is absent; `/etc/ld.so.preload` is still an empty regular `0444` file. |
 
-The bounded membership, type, metadata, link and mapping description participates in
-each consuming context's identity and is revalidated against held source identities
-before relevant hits, execution and publication. Mutation refuses with bounded
-infrastructure evidence. Entry names and source maps stay controller-private: public
-reports, logs, worker requests and cache payloads carry no host-entry list. Handles
-remain controller-owned until consuming children drain, are unavailable to pytest and
-tool children after mount setup, and are closed through bounded owned cleanup.
-Nonconsumers keep the existing readonly `/etc` view. No environment, network, resource
-controller or host-content grant is added.
+Every configuration link preserves its literal text and must resolve through the same
+tool's combined declared frozen closure at both logical and original paths. Missing or
+escaping targets refuse; a link never discovers or grants a host target. All selected
+configuration mappings must agree on bytes, type, mode and link topology. Conflicting
+parents, leaf types, loader-cache mappings or preload contents refuse before launch;
+mount order does not resolve a conflict. Explicit preload declarations are compatible
+only when they describe the same empty regular file with frozen mode `0444`.
+
+Capture and revalidation use the same bounded no-follow reads and immutable owned copies
+as other tool inputs. No live configuration parent is bound, and no source/configuration
+descriptor is passed to mount setup, pytest or tool children. Controller-local capture
+handles are closed through owned cleanup. The final mount plan, including environment
+overlays, must preserve the declared configuration and runtime closure before any
+interpreter, site or project imports. Startup cannot borrow a live file and validate it
+later; there is no private configuration-identity bootstrap.
+
+The closed-view rule, selected bytes, source modes, links, original/logical mappings and
+exact loader controls bind consuming collection and execution identity. Unselected
+ambient `/etc` membership and metadata are not inputs. Source mutation or owned-copy
+corruption follows the existing bounded refusal/recovery rules; cleanup must complete
+before pending results publish. Public evidence retains opaque identities and failure
+categories, never configuration contents or raw source inventories.
+
+Ordinary cases, scopes without a native selection and data-only tools retain the
+existing system view. The native profile closes `/etc` and declared runtime search
+paths; it does not discover every configuration location an arbitrary program may use.
+Callers must declare other required configuration and resource dependencies explicitly.
+Network policy is unchanged: a loopback-only test need not select resolver settings,
+while a program needing DNS or certificate files must declare its required inputs.
 
 ### Scripts and pinned command lookup
 

@@ -153,18 +153,23 @@ closure prepared. The [versioned manifest](bubblewrap-api.md#frozen-tool-manifes
 lists exact supported bytes, types, source modes, link text and runtime relations.
 
 Scoped discovery may receive the union of potential tools for its files, including a
-compatible union of command maps and closed library trees. No case body executes there.
+compatible union of command maps, closed library trees and declared configuration.
+If any selected runtime requires the native profile, discovery receives its closed
+`/etc` view. No case body executes there.
 Each case or identical-scope batch receives only its complete effective closure, before
 imports and recollection. Missing execution dependencies cannot be borrowed from another
 case. Tool names and identities participate in [batch equality](batching.md#exact-scope-and-deterministic-membership).
-Conflicting aliases, loader mappings or command names refuse the union; there is no
-arbitrary winner or relaxed execution view.
+Conflicting aliases, configuration entries, loader mappings or command names refuse
+the union; there is no arbitrary winner or relaxed execution view.
 
 Consumer identity includes selected manifest bytes, automatically included lock files
 and project-link relations, coverage mode, source/logical mappings, normalized entry
 records, actual content/modes/link texts, executable and Python runtime relations,
-loader/cache/search trees and command lookup. The collection identity uses its required
-union; case/group keys do not inherit unrelated external bytes from that union. Updating
+loader/cache/search trees, closed configuration selection and command lookup. Exact
+configuration bytes, modes, links, mappings and the fixed empty `0444` preload control
+are consumer inputs; undeclared ambient `/etc` membership and metadata are not.
+The collection identity uses its required union; case/group keys do not inherit unrelated
+external bytes from that union. Updating
 a valid manifest and its matching installation refreshes the affected consumer. A stale
 pin refuses. An unrelated narrow case remains reusable when only another tool's external
 contents or manifest changes; editing project configuration retains its existing broader
@@ -190,14 +195,13 @@ failure, not a valid snapshot. Old valid cache records survive unsuccessful new 
 | Declared installed Python distributions | 64 |
 | Command names per tool / selected scope | 256 / 1,024 |
 | Native loader search-directory declarations per tool | 64 |
-| Preserved baseline `/etc` direct entries / encoded composition metadata | 4,096 / 1 MiB |
 
 These tool-file bounds are separate from the project snapshot's source-file bound.
 Hash/copy uses bounded chunks; a large admitted executable is not read into one buffer.
-Baseline `/etc` composition counts only direct entry metadata, never recursive contents.
-Its encoded description uses the canonical JSON rules defined for root digests; the
-entry and byte limits are enforced while enumerating. It shares the capture deadline
-and cancellation checks, and all admitted source handles have bounded owned cleanup.
+Declared system configuration counts toward these same entry, byte, path and traversal
+bounds. Its owned readonly projection contains only selected pinned entries and the
+fixed loader controls; no separate ambient-configuration inventory is captured. Source
+descriptors remain controller-local and are not passed to mount setup or children.
 Each capture attempt has the lesser of the configured session timeout and 120 seconds,
 with cancellation checks during traversal and hashing. There are at most two attempts,
 each with fresh exclusive staging. Bounds refuse explicitly without truncating entries

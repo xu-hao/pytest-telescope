@@ -135,6 +135,13 @@ input; use sparse explicit runtime files when that directory also contains unrel
 installed packages. Missing support refuses before project imports and never causes
 ordinary replay or construction of another environment.
 
+Supported ELF in the selected Python runtime or extension closure also activates the
+[declared native configuration view](bubblewrap-api.md#declared-native-system-configuration).
+The isolated child sees only selected frozen `/etc` entries and required loader controls;
+resolver, certificate and other needed configuration must be explicit dependencies.
+The same rule applies to a static ELF closure. It does not change the baseline system
+view of cases that select no native tool.
+
 ## Independent suites and structural membership
 
 ```toml
@@ -285,7 +292,8 @@ network. It does not install tools, build runtimes, limit resources or isolate t
 network.
 
 Explicit [frozen tools](bubblewrap.md#frozen-tools-and-runtime-files-development-contract)
-add their declared immutable roots and aliases and may narrow selected native search
+add their declared immutable roots and aliases. Native selections close `/etc` to
+declared frozen configuration and loader controls and may narrow native search
 directories. The exact closure is per consumer; unselected external tool material is
 absent. Unsupported declarations and layouts refuse without adding a live host mount.
 

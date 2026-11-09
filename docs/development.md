@@ -47,14 +47,22 @@ Host-dependent runtime compatibility checks run separately under
 outside the default functional gate. The frozen-tool declaration, data-view, identity
 and injected lifecycle controls remain required functional tests.
 
-System-composition controls use an owned synthetic baseline directory through the
-production admission seam. They retain actual controller handles while real Bubblewrap
-mount setup and the startup guard run, then attempt to reopen those handles from the
-isolated worker. They also cover source swaps, exact control slots and metadata, private
-inventory, cleanup before cache publication, and guard refusal before worker imports.
-These checks never inventory real host `/etc` or read credential contents. A passed
-functional source-snapshot check qualifies those mechanisms for that candidate; it does
-not qualify an installed wheel or an ambient native/browser runtime.
+The earlier unlanded ambient-configuration preservation controls are superseded by the
+[declared configuration contract](bubblewrap-api.md#declared-native-system-configuration).
+Their recorded failures remain historical evidence; removing the superseded mechanism
+does not turn those failures or unexecuted proofs into passes.
+
+Replacement functional coverage must exercise actual runtime validation, capture,
+projection and Bubblewrap execution with owned configuration fixtures. It must show
+exact frozen bytes and modes, readonly access, undeclared and unselected sibling
+absence, pinned loader-cache bytes and the fixed empty `0444` preload file. Required
+controls also cover static and dynamic profile selection, consumer-only invalidation,
+source/copy mutation, safe links and conflicting mappings, unchanged nonconsumer views,
+bounded retry/cancellation, and cleanup before publication. Source/configuration
+descriptors must not enter mount setup or children. Startup must use the closed view
+before interpreter, site or project imports. Do not inventory real `/etc` or use host
+credentials as fixture inputs. Data-mode injection alone does not qualify a native
+runtime, nor does a source-snapshot check qualify an installed wheel or ambient runtime.
 
 For documentation alone:
 
