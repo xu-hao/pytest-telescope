@@ -440,12 +440,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     execution = spec.get("execution", {})
     worker_count(execution)
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
+    pending_inputs = []
 
     def declaration(item, label):
         item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions", "env", "tools"})
         # Expand after structural discovery establishes the potential tool bindings.
         # A function may inherit the tool owning one of its project directory links.
-        inputs = set(sequence(item.get("inputs", []), label + " inputs"))
+        inputs = sorted(set(sequence(item.get("inputs", []), label + " inputs")))
+        dependencies = []
         absent = set(expanded(item.get("absent", []), label + " absence", missing=True))
         metadata = set(sequence(item.get("distributions", []), "distributions"))
         selected_tools = set(sequence(item.get("tools", []), "tools"))
@@ -456,21 +458,23 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             raise DeclarationError("unknown local distribution")
         for dependency in sequence(item.get("bundles", []), "bundle references"):
             child = bundle(dependency)
-            inputs.update(child.inputs)
+            dependencies.append(child)
             absent.update(child.absent)
             metadata.update(child.distributions)
             selected_tools.update(child.tools)
             env.update(child.env)
-        for name in metadata:
-            inputs.update(distributions[name].inputs)
         if type(item.get("cache", True)) is not bool:
             raise DeclarationError("cache must be a boolean")
         if len(inputs) + len(absent) > 100_000:
             raise DeclarationError("effective declaration exceeds 100000 paths")
-        return Unit(
-            label, [], sorted(inputs), sorted(absent), item.get("cache", True), sorted(metadata),
+        unit = Unit(
+            label, [], [], sorted(absent), item.get("cache", True), sorted(metadata),
             env=sorted(env), tools=sorted(selected_tools),
         )
+        # Dependencies are appended first by bundle(), so resolution below is
+        # topological. Only this declaration's own raw patterns are expanded.
+        pending_inputs.append((unit, inputs, dependencies))
+        return unit
 
     def bundle(name):
         if name not in bundles:
@@ -569,8 +573,15 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             needed_tools.update(declarations[row["id"]].tools)
     tools = tool_context.load_selected(root, tool_definitions, needed_tools)
     tool_links = tool_context.project_links(tools, sorted(tools))
-    for unit in [defaults, *resolved.values(), *declarations.values()]:
-        unit.inputs = expanded(unit.inputs, "inputs")
+    for unit, inputs, dependencies in pending_inputs:
+        effective = set(expanded(inputs, "inputs"))
+        for dependency in dependencies:
+            effective.update(dependency.inputs)
+        for name in unit.distributions:
+            effective.update(distributions[name].inputs)
+        if len(effective) + len(unit.absent) > 100_000:
+            raise DeclarationError("effective declaration exceeds 100000 paths")
+        unit.inputs = sorted(effective)
     for tool in tools.values():
         hashes[tool.registration["manifest"]] = hashlib.sha256(tool.raw).hexdigest()
 

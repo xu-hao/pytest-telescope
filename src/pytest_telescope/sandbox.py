@@ -250,6 +250,14 @@ def _allocation(state):
 
 def _remove(directory):
     try:
+        # Abruptly terminated captures can leave read-only copies behind. Use
+        # the same owned-only restoration as normal Capture cleanup, including
+        # when no tools were selected but the empty .views directory exists.
+        tools = directory / "tools"
+        if os.path.lexists(tools):
+            from .tool_capture import _remove as remove_tools
+
+            remove_tools(tools)
         shutil.rmtree(directory)
     except FileNotFoundError:
         pass

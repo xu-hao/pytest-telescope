@@ -32,7 +32,7 @@ COMMAND = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\Z", re.ASCII)
 DIGEST = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 ROOT_FIELDS = {"id", "source", "coverage", "preserve_source", "entries"}
 MANIFEST_FIELDS = {"schema", "roots", "executables", "python", "links", "locks", "commands", "loader"}
-PROTECTED_PARTS = {".git", ".hg", ".svn", ".ssh", ".aws", ".gnupg", ".codex", ".agents", ".pytest-telescope"}
+PROTECTED_PARTS = {".git", ".hg", ".svn", ".ssh", ".aws", ".gnupg", ".docker", ".kube", ".netrc", ".codex", ".agents", ".pytest-telescope"}
 
 
 def unsupported(kind, message):
@@ -220,7 +220,8 @@ def _root(value, project):
         or source == PurePosixPath(Path.home())
         or (value["coverage"] == "tree" and source in {PurePosixPath(sys.prefix), PurePosixPath(sys.base_prefix)})
         or source in map(PurePosixPath, ("/home", "/root", "/tmp", "/dev/shm"))
-        or any(source.is_relative_to(prefix) for prefix in ("/proc", "/dev", "/run", "/sys", "/tools", "/telescope", "/metadata"))
+        or (source.is_relative_to("/dev") and not source.is_relative_to("/dev/shm"))
+        or any(source.is_relative_to(prefix) for prefix in ("/proc", "/run", "/sys", "/tools", "/telescope", "/metadata"))
         or (value["coverage"] == "tree" and source in map(PurePosixPath, ("/usr", "/etc", "/opt", "/var", "/usr/local", "/usr/lib", "/usr/lib64", "/usr/local/lib", "/lib", "/lib64")))
     ):
         unsupported("layout", "frozen-tool source is not a supported narrow input")

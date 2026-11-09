@@ -24,10 +24,10 @@ def _signature(info):
 def _parent(filename):
     """Open every absolute ancestor without following links, including above roots."""
     filename = Path(filename)
-    descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    descriptor = os.open("/", os.O_PATH | os.O_DIRECTORY)
     try:
         for part in filename.parts[1:-1]:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            child = os.open(part, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
         yield descriptor, filename.name
@@ -286,12 +286,13 @@ class Capture:
                 if root["coverage"] == "tree" and _tree_names(source, budget) != {row["path"] for row in root["entries"]}:
                     declaration.unsupported("identity", "frozen-tool tree differs from its complete inventory")
                 frozen = target / root["id"]
-                for row in root["entries"]:
+                ordered = sorted(root["entries"], key=lambda row: (len(Path(row["path"]).parts), row["path"]))
+                for row in ordered:
                     filename = source / row["path"]
                     if filename == Path("/etc/ld.so.preload") and (row["kind"] != "file" or row["size"] != 0):
                         declaration.unsupported("layout", "nonempty or indirect native preload inputs are unsupported")
                     self.sources[name, root["id"], row["path"]] = _measure(filename, row, budget, frozen / row["path"])
-                for row in reversed(root["entries"]):
+                for row in reversed(ordered):
                     if row["kind"] == "directory":
                         (frozen / row["path"]).chmod(row["mode"] & 0o555)
             target.chmod(0o555)
