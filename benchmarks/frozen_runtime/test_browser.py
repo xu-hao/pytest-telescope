@@ -1,7 +1,6 @@
 """Explicitly invoked full-browser benchmark; never part of functional readiness."""
 
 import pytest
-
 from frozen_tool_fixtures import assert_counts, file_digest
 from frozen_tool_program_fixture import ProgramConfiguration, capture_evidence
 from frozen_tool_worker_fixture import WorkerConfiguration

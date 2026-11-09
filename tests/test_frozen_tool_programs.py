@@ -1,7 +1,6 @@
 """Owned frontend programs with explicit existing Node prerequisites."""
 
 import pytest
-
 from frozen_tool_fixtures import assert_counts, cache_bytes, file_digest, put
 from frozen_tool_program_fixture import ProgramConfiguration, capture_evidence
 from frozen_tool_worker_fixture import WorkerConfiguration

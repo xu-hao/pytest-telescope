@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from frozen_tool_installed_fixture import InstalledConfiguration
 from frozen_tool_program_fixture import ProgramConfiguration
 from frozen_tool_worker_fixture import WorkerConfiguration
