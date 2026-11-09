@@ -109,6 +109,8 @@ also selects a separate worker tool. The controlled frontend explicitly selects 
 zlib, libuv, OpenSSL, libstdc++ and libgcc_s pins; competing bundled candidates remain
 unselected. These choices still need actual program compatibility checks. Its sparse
 Node prefix preserves relative `bin`/`lib` lookup paths without exposing live siblings.
+The empty local-font search directory is not selected. It contributes no page resource
+and stays absent in the closed prefix; its source permissions are never rewritten.
 
 Preparation and the individual controls have separate verdicts. Authoring these tests,
 or passing a smaller worker or static-program control, does not qualify the Node,

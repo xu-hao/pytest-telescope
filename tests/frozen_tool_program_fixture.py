@@ -216,9 +216,12 @@ class ProgramConfiguration:
             self.tree_root("fontconfig", Path("/etc/fonts"), owned=worker.config / "fonts")
             for name, path in (
                 ("fontdefaults", "/usr/share/fontconfig/conf.avail"),
-                ("fonts", "/usr/share/fonts"), ("localfonts", "/usr/local/share/fonts"),
+                ("fonts", "/usr/share/fonts"),
             ):
                 self.tree_root(name, Path(path), maximum=FONT_BYTES)
+            # The measured local-font directory is empty and has setgid mode.
+            # It supplies no page resource: leave it unselected/absent in the
+            # closed /usr view rather than changing or masking its source mode.
         self.finish()
         self.identity = prerequisite_identity({"worker": worker.document, "frontend": self.document})
         if require_receipt:
