@@ -27,7 +27,7 @@ def project(root, names):
     )
     for name in names:
         (root / "tests" / f"test_{name}.py").write_text(
-            'import os\nimport pytest\npytestmark = pytest.mark.telescope(inputs=[])\n'
+            "import os\nimport pytest\npytestmark = pytest.mark.telescope(inputs=[])\n"
             f'def test_item(): os.write(1, b"CONTINUATION_{name.upper()}\\n")\n',
             encoding="utf-8",
         )
@@ -101,9 +101,7 @@ def test_concurrent_active_worker_is_drained_after_other_exhausts(tmp_path, monk
         return result
 
     monkeypatch.setattr(sandbox, "execute", execute)
-    report = controller.run(
-        tmp_path, fixture_guard="available-v1", workers=2, arguments=["-s"]
-    )
+    report = controller.run(tmp_path, fixture_guard="available-v1", workers=2, arguments=["-s"])
     a, b, c = (group(report, name) for name in ("a", "b", "c"))
     assert ready.is_set() and released.is_set()
     assert [name for name, _ in modes].count("a") == 1
@@ -148,7 +146,8 @@ def test_k_deselection_condition_rejects_zero_selected(tmp_path, monkeypatch):
     project(tmp_path, ("a",))
     (tmp_path / "tests/test_a.py").write_text(
         'import pytest\npytestmark = pytest.mark.telescope(env=["CONTROL_NAME"])\n'
-        'def test_item(): pass\n', encoding="utf-8"
+        "def test_item(): pass\n",
+        encoding="utf-8",
     )
     monkeypatch.setenv("CONTROL_NAME", "present")
     events = []

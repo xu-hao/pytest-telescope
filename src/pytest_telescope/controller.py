@@ -1326,9 +1326,9 @@ def run(
                                 group["timing_complete"] = False
                                 return projected, group, None, True
                             except (InfrastructureError, OSError) as exc:
-                                terminal = isinstance(exc, (sandbox.CleanupError, _FixtureDrift)) or (
-                                    bool(fixture_guard) and attempt == 1
-                                )
+                                terminal = isinstance(
+                                    exc, (sandbox.CleanupError, _FixtureDrift)
+                                ) or (bool(fixture_guard) and attempt == 1)
                                 if terminal:
                                     cancellation.set()
                                 if attempt == 1 or terminal:
