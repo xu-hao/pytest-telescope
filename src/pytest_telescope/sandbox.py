@@ -653,7 +653,12 @@ def execute(
     if any(key.startswith("TELESCOPE_") for key in environment):
         raise DeclarationError("environment must not override worker protocol")
     if type(request) is not dict or request.get("mode") not in (
-        "collection", "execution", "batch", "guard-capture", "guard-inspection", "guard-batch"
+        "collection",
+        "execution",
+        "batch",
+        "guard-capture",
+        "guard-inspection",
+        "guard-batch",
     ):
         raise InfrastructureError("worker requires an explicit request protocol")
     guarded = request["mode"] in ("guard-capture", "guard-inspection", "guard-batch")
@@ -662,9 +667,27 @@ def execute(
         if request["mode"] == "collection"
         else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id"}
         if request["mode"] == "guard-capture"
-        else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id", "registry_id"}
+        else {
+            "mode",
+            "registry",
+            "group_id",
+            "case_ids",
+            "expected_digest",
+            "context_id",
+            "registry_id",
+        }
         if request["mode"] == "guard-inspection"
-        else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id", "registry_id", "graph_id", "guard_protocol"}
+        else {
+            "mode",
+            "registry",
+            "group_id",
+            "case_ids",
+            "expected_digest",
+            "context_id",
+            "registry_id",
+            "graph_id",
+            "guard_protocol",
+        }
         if request["mode"] == "guard-batch"
         else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id"}
         if request["mode"] == "batch"
@@ -675,23 +698,37 @@ def execute(
     if (
         type(request["context_id"]) is not str
         or not re.fullmatch(r"[0-9a-f]{64}", request["context_id"])
-        or (request["mode"] in ("batch", "guard-capture", "guard-inspection", "guard-batch") and request["context_id"] != request["group_id"])
+        or (
+            request["mode"] in ("batch", "guard-capture", "guard-inspection", "guard-batch")
+            and request["context_id"] != request["group_id"]
+        )
     ):
         raise InfrastructureError("worker request context does not match its protocol")
     if guarded and (
         type(request["case_ids"]) is not list
         or not 0 < len(request["case_ids"]) <= 4096
-        or any(type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case) for case in request["case_ids"])
+        or any(
+            type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case)
+            for case in request["case_ids"]
+        )
         or len(set(request["case_ids"])) != len(request["case_ids"])
         or type(request["expected_digest"]) is not str
         or not re.fullmatch(r"[0-9a-f]{64}", request["expected_digest"])
-        or (request["mode"] in ("guard-inspection", "guard-batch") and (
-            type(request["registry_id"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", request["registry_id"])
-        ))
-        or (request["mode"] == "guard-batch" and (
-            request["guard_protocol"] != "batch-guard-v1" or type(request["graph_id"]) is not str
-            or not re.fullmatch(r"[0-9a-f]{64}", request["graph_id"])
-        ))
+        or (
+            request["mode"] in ("guard-inspection", "guard-batch")
+            and (
+                type(request["registry_id"]) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", request["registry_id"])
+            )
+        )
+        or (
+            request["mode"] == "guard-batch"
+            and (
+                request["guard_protocol"] != "batch-guard-v1"
+                or type(request["graph_id"]) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", request["graph_id"])
+            )
+        )
     ):
         raise InfrastructureError("invalid guarded worker request")
     if metadata_directory is not None:
@@ -702,14 +739,19 @@ def execute(
     guard_envelope = None
     if request["mode"] == "guard-capture":
         guard_envelope = {
-            "protocol": "fixture-capture-v1", "nonce": nonce,
-            "base_context_id": request["context_id"], "case_ids": request["case_ids"],
+            "protocol": "fixture-capture-v1",
+            "nonce": nonce,
+            "base_context_id": request["context_id"],
+            "case_ids": request["case_ids"],
         }
     elif request["mode"] == "guard-inspection":
         guard_envelope = {
-            "protocol": "fixture-inspection-v1", "nonce": nonce,
-            "context_id": request["context_id"], "group_id": request["group_id"],
-            "case_ids": request["case_ids"], "registry_id": request["registry_id"],
+            "protocol": "fixture-inspection-v1",
+            "nonce": nonce,
+            "context_id": request["context_id"],
+            "group_id": request["group_id"],
+            "case_ids": request["case_ids"],
+            "registry_id": request["registry_id"],
         }
     control = directory / "control"
     control.mkdir(exist_ok=True)
@@ -760,7 +802,10 @@ def execute(
         argv,
         timeout,
         env=_host_environment(),
-        limit=MAX_COLLECTION if request["mode"] in {"collection", "batch", "guard-capture", "guard-inspection", "guard-batch"} else MAX_OUTPUT,
+        limit=MAX_COLLECTION
+        if request["mode"]
+        in {"collection", "batch", "guard-capture", "guard-inspection", "guard-batch"}
+        else MAX_OUTPUT,
         cancellation=cancellation,
     )
     try:
@@ -778,8 +823,14 @@ def execute(
                 "project-metadata:runtime-conflict",
                 "local metadata conflicts with a distribution installed in the environment",
             )
-        if code == 4 and len(unsupported) == 1 and json.loads(unsupported[0]) == {"capability": "execution:fixture-metadata"}:
-            raise UnsupportedCapability("execution:fixture-metadata", "fixture metadata cannot be validated")
+        if (
+            code == 4
+            and len(unsupported) == 1
+            and json.loads(unsupported[0]) == {"capability": "execution:fixture-metadata"}
+        ):
+            raise UnsupportedCapability(
+                "execution:fixture-metadata", "fixture metadata cannot be validated"
+            )
         reports = [
             line[len(b"TELESCOPE_RESULT ") :]
             for line in output.splitlines()
@@ -795,14 +846,32 @@ def execute(
         result = json.loads(reports[0])
         if request["mode"] in ("guard-capture", "guard-inspection"):
             from importlib.metadata import version
-            from .fixture_guard import framework_definition_ids, validate_capture, validate_inspection
+
+            from .fixture_guard import (
+                framework_definition_ids,
+                validate_capture,
+                validate_inspection,
+            )
 
             if code != 0:
                 raise InfrastructureError("fixture inspection worker failed")
             expected_framework = framework_definition_ids(version("pytest"))
             if request["mode"] == "guard-capture":
-                return validate_capture(result, nonce=nonce, base_context_id=request["context_id"], case_ids=request["case_ids"], framework_ids=expected_framework)
-            return validate_inspection(result, nonce=nonce, group_id=request["group_id"], case_ids=request["case_ids"], registry_id=request["registry_id"], framework_ids=expected_framework)
+                return validate_capture(
+                    result,
+                    nonce=nonce,
+                    base_context_id=request["context_id"],
+                    case_ids=request["case_ids"],
+                    framework_ids=expected_framework,
+                )
+            return validate_inspection(
+                result,
+                nonce=nonce,
+                group_id=request["group_id"],
+                case_ids=request["case_ids"],
+                registry_id=request["registry_id"],
+                framework_ids=expected_framework,
+            )
         if type(result) is dict and result.get("leaked_descendants") is True:
             raise InfrastructureError("worker left descendant processes running")
         valid = (
@@ -817,8 +886,12 @@ def execute(
             )
             if request["mode"] == "batch"
             else validate_guarded_batch(
-                result, nonce=nonce, group_id=request["group_id"], case_ids=request["case_ids"],
-                registry_id=request["registry_id"], graph_id=request["graph_id"],
+                result,
+                nonce=nonce,
+                group_id=request["group_id"],
+                case_ids=request["case_ids"],
+                registry_id=request["registry_id"],
+                graph_id=request["graph_id"],
             )
             if request["mode"] == "guard-batch"
             else validate_result(

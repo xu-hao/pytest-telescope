@@ -16,21 +16,34 @@ def put(root, name, text):
 
 
 def configure(root):
-    put(root, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n')
+    put(
+        root,
+        "pyproject.toml",
+        '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
+        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n',
+    )
 
 
-@pytest.mark.parametrize("mode,field", [
-    ("guard-capture", "nonce"),
-    ("guard-capture", "base_context_id"),
-    ("guard-capture", "registry_id"),
-    ("guard-capture", "content_id"),
-    ("guard-batch", "nonce"),
-    ("guard-batch", "graph_id"),
-])
-def test_actual_worker_response_mismatch_is_bounded_and_not_cached(tmp_path, monkeypatch, mode, field):
+@pytest.mark.parametrize(
+    "mode,field",
+    [
+        ("guard-capture", "nonce"),
+        ("guard-capture", "base_context_id"),
+        ("guard-capture", "registry_id"),
+        ("guard-capture", "content_id"),
+        ("guard-batch", "nonce"),
+        ("guard-batch", "graph_id"),
+    ],
+)
+def test_actual_worker_response_mismatch_is_bounded_and_not_cached(
+    tmp_path, monkeypatch, mode, field
+):
     configure(tmp_path)
-    put(tmp_path, "tests/test_item.py", 'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n')
+    put(
+        tmp_path,
+        "tests/test_item.py",
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n",
+    )
     original = sandbox.capture
     corrupted = []
 
@@ -47,7 +60,7 @@ def test_actual_worker_response_mismatch_is_bounded_and_not_cached(tmp_path, mon
         indices = [i for i, line in enumerate(lines) if line.startswith(prefix)]
         assert len(indices) == 1
         index = indices[0]
-        data = json.loads(lines[index][len(prefix):])
+        data = json.loads(lines[index][len(prefix) :])
         data[field] = ("1" if data[field][0] == "0" else "0") + data[field][1:]
         lines[index] = prefix + json.dumps(data).encode()
         corrupted.append(field)
@@ -56,7 +69,9 @@ def test_actual_worker_response_mismatch_is_bounded_and_not_cached(tmp_path, mon
     monkeypatch.setattr(sandbox, "capture", alter)
     report = controller.run(tmp_path, fixture_guard="available-v1")
     assert len(corrupted) == 2 and report["status"] == "infrastructure_error"
-    assert report["fixture_guard"]["state"] == ("unavailable" if mode == "guard-capture" else "admitted")
+    assert report["fixture_guard"]["state"] == (
+        "unavailable" if mode == "guard-capture" else "admitted"
+    )
     assert not any(group["cache_eligible"] for group in report["groups"])
     for path in (tmp_path / ".pytest-telescope/cache").glob("*.json"):
         assert json.loads(path.read_text())["schema"] != 7
@@ -64,8 +79,12 @@ def test_actual_worker_response_mismatch_is_bounded_and_not_cached(tmp_path, mon
 
 def test_guard_refuses_mixed_ordinary_boundary_before_ordinary_session(tmp_path, monkeypatch):
     configure(tmp_path)
-    put(tmp_path, "tests/test_scoped.py", 'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n')
-    put(tmp_path, "tests/test_ordinary.py", 'def test_item(): pass\n')
+    put(
+        tmp_path,
+        "tests/test_scoped.py",
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n",
+    )
+    put(tmp_path, "tests/test_ordinary.py", "def test_item(): pass\n")
     calls = []
     original = ordinary.session
 

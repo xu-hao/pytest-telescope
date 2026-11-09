@@ -54,7 +54,7 @@ def test_function_fixtures_with_distinct_inputs_execute_separately_and_reuse(tmp
     put(
         tmp_path,
         "tests/test_precise.py",
-        '''from pathlib import Path
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_left(per_case):
 def test_right(per_case):
     assert Path("right.txt").read_text() == "right-v1"
     assert not Path("left.txt").exists()
-''',
+""",
     )
     left = "tests/test_precise.py::test_left"
     right = "tests/test_precise.py::test_right"
@@ -95,7 +95,7 @@ def test_shared_user_fixture_is_one_ordered_atomic_group(tmp_path):
     put(
         tmp_path,
         "tests/test_shared.py",
-        '''import pytest
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 created = []
 @pytest.fixture(scope="module")
@@ -109,7 +109,7 @@ def shared():
 def test_shared(number, shared):
     assert shared == list(range(number))
     shared.append(number)
-''',
+""",
     )
     cold = controller.run(tmp_path, fixture_guard="available-v1")
     admitted(cold)
@@ -122,7 +122,9 @@ def test_shared(number, shared):
     for row in cold["units"]:
         assert row["result_status"] == "passed"
         assert [(report["phase"], report["outcome"]) for report in row["reports"]] == [
-            ("setup", "passed"), ("call", "passed"), ("teardown", "passed")
+            ("setup", "passed"),
+            ("call", "passed"),
+            ("teardown", "passed"),
         ]
     warm = controller.run(tmp_path, fixture_guard="available-v1")
     admitted(warm)
@@ -137,7 +139,7 @@ def test_split_possible_shared_user_fixture_refuses(tmp_path):
     put(
         tmp_path,
         "tests/test_split.py",
-        '''import pytest
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 @pytest.fixture(scope="module")
 def shared():
@@ -146,7 +148,7 @@ def shared():
 def test_left(shared): pass
 @pytest.mark.telescope(inputs=["right.txt"])
 def test_right(shared): pass
-''',
+""",
     )
     with pytest.raises(UnsupportedCapability) as captured:
         controller.run(tmp_path, fixture_guard="available-v1")
@@ -155,13 +157,19 @@ def test_right(shared): pass
     refusal = controller.error_result(captured.value, fixture_guard="available-v1")
     assert refusal["schema"] == 5 and refusal["status"] == "unsupported"
     assert refusal["fixture_guard"] == {
-        "profile": "available-v1", "state": "unavailable", "conditions": []
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": [],
     }
 
 
 def test_default_unguarded_route_remains_schema4_and_reusable(tmp_path):
     configure(tmp_path)
-    put(tmp_path, "tests/test_default.py", 'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_ok(): pass\n')
+    put(
+        tmp_path,
+        "tests/test_default.py",
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_ok(): pass\n",
+    )
     first = controller.run(tmp_path)
     assert first["schema"] == 4 and first["status"] == "passed"
     assert "fixture_guard" not in first
@@ -171,8 +179,12 @@ def test_default_unguarded_route_remains_schema4_and_reusable(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "error", [DeclarationError("synthetic"), InfrastructureError("synthetic"),
-              UnsupportedCapability("execution:fixture-sharing", "synthetic")]
+    "error",
+    [
+        DeclarationError("synthetic"),
+        InfrastructureError("synthetic"),
+        UnsupportedCapability("execution:fixture-sharing", "synthetic"),
+    ],
 )
 def test_converter_has_no_phase_or_attempt_evidence(error):
     old = controller.error_result(error)
@@ -198,7 +210,9 @@ def test_cli_outer_exception_with_guard_reports_unknown_phase(monkeypatch, capsy
     result = json.loads(capsys.readouterr().out)
     assert result["schema"] == 5 and result["status"] == "infrastructure_error"
     assert result["fixture_guard"] == {
-        "profile": "available-v1", "state": "unavailable", "conditions": []
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": [],
     }
     assert "units" not in result and "groups" not in result
 
@@ -215,18 +229,22 @@ def test_conditions_bind_selected_case_and_current_captured_environment(tmp_path
     put(
         tmp_path,
         "tests/test_condition.py",
-        '''import os
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(env=["SYNTHETIC_GUARD_OPTION"])
 def test_case():
     assert os.environ["SYNTHETIC_GUARD_OPTION"] == "fixture-guard-synthetic-value"
-''',
+""",
     )
     node = "tests/test_condition.py::test_case"
     checks = [
         {"case_id": case_id(node), "name": "SYNTHETIC_GUARD_OPTION", "op": "present"},
-        {"case_id": case_id(node), "name": "SYNTHETIC_GUARD_OPTION", "op": "equals",
-         "value": "fixture-guard-synthetic-value"},
+        {
+            "case_id": case_id(node),
+            "name": "SYNTHETIC_GUARD_OPTION",
+            "op": "equals",
+            "value": "fixture-guard-synthetic-value",
+        },
     ]
     cold = controller.run(tmp_path, fixture_guard="available-v1", condition_checks=checks)
     warm = controller.run(tmp_path, fixture_guard="available-v1", condition_checks=checks)

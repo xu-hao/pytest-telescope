@@ -27,8 +27,12 @@ def put(root, name, contents):
 
 
 def configure(root):
-    put(root, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n')
+    put(
+        root,
+        "pyproject.toml",
+        '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
+        '[tool.pytest_telescope.execution]\nmode = "batch"\nworkers = 1\n',
+    )
 
 
 def different_digest(value):
@@ -43,7 +47,10 @@ def distinct_groups(root, body_a="pass", body_b="pass", fixture=""):
     configure(root)
     put(root, "a.txt", "a")
     put(root, "b.txt", "b")
-    put(root, "tests/test_groups.py", f'''import pytest
+    put(
+        root,
+        "tests/test_groups.py",
+        f"""import pytest
 pytestmark = pytest.mark.telescope(inputs=[])
 {fixture}
 @pytest.mark.telescope(inputs=["a.txt"])
@@ -52,11 +59,14 @@ def test_a():
 @pytest.mark.telescope(inputs=["b.txt"])
 def test_b():
     {body_b}
-''')
+""",
+    )
 
 
 def test_e83_02_shared_fixture_refusal_has_no_guarded_body_dispatch(tmp_path, monkeypatch):
-    distinct_groups(tmp_path, fixture='@pytest.fixture(scope="module")\ndef shared(): return object()')
+    distinct_groups(
+        tmp_path, fixture='@pytest.fixture(scope="module")\ndef shared(): return object()'
+    )
     events = []
     original = sandbox.execute
 
@@ -92,7 +102,10 @@ def test_e83_04_real_capture_inspection_bind_nonce_context_and_members(tmp_path,
     report = controller.run(tmp_path, fixture_guard="available-v1", workers=1)
     assert report["status"] == "passed" and report["fixture_guard"]["state"] == "admitted"
     assert [mode for mode, _, _ in observed] == [
-        "guard-capture", "guard-inspection", "guard-capture", "guard-inspection"
+        "guard-capture",
+        "guard-inspection",
+        "guard-capture",
+        "guard-inspection",
     ]
     framework_ids = framework_definition_ids(version("pytest"))
     for index in (0, 2):
@@ -108,16 +121,25 @@ def test_e83_04_real_capture_inspection_bind_nonce_context_and_members(tmp_path,
             damaged = copy.deepcopy(capture)
             damaged[key] = [] if key == "case_ids" else different_digest(capture[key])
             with pytest.raises(InfrastructureError):
-                validate_capture(damaged, nonce=capture["nonce"],
-                    base_context_id=capture["base_context_id"], case_ids=capture["case_ids"],
-                    framework_ids=framework_ids)
+                validate_capture(
+                    damaged,
+                    nonce=capture["nonce"],
+                    base_context_id=capture["base_context_id"],
+                    case_ids=capture["case_ids"],
+                    framework_ids=framework_ids,
+                )
         for key in ("nonce", "context_id", "group_id", "registry_id", "graph_id", "case_ids"):
             damaged = copy.deepcopy(inspection)
             damaged[key] = [] if key == "case_ids" else different_digest(inspection[key])
             with pytest.raises(InfrastructureError):
-                validate_inspection(damaged, nonce=inspection["nonce"],
-                    group_id=inspection["group_id"], case_ids=inspection["case_ids"],
-                    registry_id=inspection["registry_id"], framework_ids=framework_ids)
+                validate_inspection(
+                    damaged,
+                    nonce=inspection["nonce"],
+                    group_id=inspection["group_id"],
+                    case_ids=inspection["case_ids"],
+                    registry_id=inspection["registry_id"],
+                    framework_ids=framework_ids,
+                )
 
 
 def test_e83_04_late_graph_drift_retains_first_result_and_publishes_nothing(tmp_path, monkeypatch):
@@ -167,7 +189,9 @@ def test_pre_admission_infrastructure_run_preserves_unavailable_observations(tmp
     assert report["schema"] == 5 and report["kind"] == "run"
     assert report["status"] == "infrastructure_error"
     assert report["fixture_guard"] == {
-        "profile": "available-v1", "state": "unavailable", "conditions": []
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": [],
     }
     assert report["inventory_complete"] and len(report["units"]) == 2
     assert observed.count("guard-capture") == 2
@@ -175,11 +199,13 @@ def test_pre_admission_infrastructure_run_preserves_unavailable_observations(tmp
 
 
 def test_framework_mutable_state_is_group_local(tmp_path):
-    distinct_groups(tmp_path,
+    distinct_groups(
+        tmp_path,
         body_a='request.getfixturevalue("doctest_namespace")["synthetic"] = "first"; '
-               'request.getfixturevalue("pytestconfig")._synthetic_group = "first"',
+        'request.getfixturevalue("pytestconfig")._synthetic_group = "first"',
         body_b='assert "synthetic" not in request.getfixturevalue("doctest_namespace"); '
-               'assert not hasattr(request.getfixturevalue("pytestconfig"), "_synthetic_group")')
+        'assert not hasattr(request.getfixturevalue("pytestconfig"), "_synthetic_group")',
+    )
     path = tmp_path / "tests/test_groups.py"
     source = path.read_text(encoding="utf-8").replace("def test_a():", "def test_a(request):")
     source = source.replace("def test_b():", "def test_b(request):")

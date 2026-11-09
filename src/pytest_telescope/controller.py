@@ -25,10 +25,10 @@ from .model import (
     InfrastructureError,
     UnsupportedCapability,
     case_unit,
+    environment_names,
     fingerprint,
     load,
     materialize,
-    environment_names,
     render_json,
     snapshot,
 )
@@ -78,8 +78,15 @@ def lock(path, timeout):
 
 
 def read_record(
-    path, key, *, kind="execution", case_id=None, group_id=None, case_ids=None,
-    registry_id=None, graph_id=None,
+    path,
+    key,
+    *,
+    kind="execution",
+    case_id=None,
+    group_id=None,
+    case_ids=None,
+    registry_id=None,
+    graph_id=None,
 ):
     limit = 64 * 1024 * 1024 if kind in {"collection", "batch", "guarded-batch"} else 1_048_576
     try:
@@ -101,14 +108,23 @@ def read_record(
             or record["checksum"] != fingerprint(result)
         ):
             return None
-        from .result import validate_batch, validate_collection, validate_guarded_batch, validate_result
+        from .result import (
+            validate_batch,
+            validate_collection,
+            validate_guarded_batch,
+            validate_result,
+        )
 
         valid = (
             validate_collection(result, successful_only=True, context_id=key)
             if kind == "collection"
             else validate_guarded_batch(
-                result, successful_only=True, group_id=group_id, case_ids=case_ids,
-                registry_id=registry_id, graph_id=graph_id,
+                result,
+                successful_only=True,
+                group_id=group_id,
+                case_ids=case_ids,
+                registry_id=registry_id,
+                graph_id=graph_id,
             )
             if kind == "guarded-batch"
             else validate_batch(
@@ -125,8 +141,17 @@ def read_record(
 
 
 def write_record(path, key, result, *, kind="execution"):
-    limit = 64 * 1024 * 1024 if kind in {"collection", "guarded-batch"} or result["protocol"] == 6 else 1_048_576
-    record = {"schema": 7 if kind == "guarded-batch" else SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
+    limit = (
+        64 * 1024 * 1024
+        if kind in {"collection", "guarded-batch"} or result["protocol"] == 6
+        else 1_048_576
+    )
+    record = {
+        "schema": 7 if kind == "guarded-batch" else SCHEMA,
+        "key": key,
+        "result": result,
+        "checksum": fingerprint(result),
+    }
     content = json.dumps(record, sort_keys=True).encode()
     if len(content) > limit:
         raise InfrastructureError("successful result exceeds record size limit")
@@ -530,7 +555,9 @@ def run(
     mode = choose_mode(manifest.execution, execution_mode)
     if fixture_guard is not None:
         if mode != "batch" or any(manifest.ordinary_files[suite.name] for suite in manifest.suites):
-            raise UnsupportedCapability("execution:fixture-profile", "fixture guard requires scoped batch execution")
+            raise UnsupportedCapability(
+                "execution:fixture-profile", "fixture guard requires scoped batch execution"
+            )
         from .fixture_guard import framework_definition_ids
 
         framework_definition_ids(version("pytest"))
@@ -1096,7 +1123,9 @@ def run(
                                         materialize(pool, unit, frozen, record_map)
                                         suite_directories(frozen, suite)
                                         metadata = directory / "metadata"
-                                        materialize_metadata(manifest.distributions, unit.distributions, metadata)
+                                        materialize_metadata(
+                                            manifest.distributions, unit.distributions, metadata
+                                        )
                                         request = {
                                             "mode": inspection_mode,
                                             "registry": candidate["registry"],
@@ -1106,35 +1135,54 @@ def run(
                                             "context_id": candidate["key"],
                                         }
                                         if inspection_mode == "guard-inspection":
-                                            request["registry_id"] = candidate["capture"]["registry_id"]
+                                            request["registry_id"] = candidate["capture"][
+                                                "registry_id"
+                                            ]
                                         return sandbox.execute(
-                                            box, frozen,
-                                            _session_arguments(suite, candidate["options"], ["/project/" + candidate["item"]["file"]]),
-                                            candidate["environment"], timeout,
-                                            root=manifest.root, invocation_directory=directory,
-                                            suite_root=suite.root, suite_cwd=suite.cwd, suite=suite.name,
-                                            metadata_directory=metadata, request=request,
+                                            box,
+                                            frozen,
+                                            _session_arguments(
+                                                suite,
+                                                candidate["options"],
+                                                ["/project/" + candidate["item"]["file"]],
+                                            ),
+                                            candidate["environment"],
+                                            timeout,
+                                            root=manifest.root,
+                                            invocation_directory=directory,
+                                            suite_root=suite.root,
+                                            suite_cwd=suite.cwd,
+                                            suite=suite.name,
+                                            metadata_directory=metadata,
+                                            request=request,
                                         )
                                 except (InfrastructureError, OSError) as exc:
                                     if attempt == 1 or isinstance(exc, sandbox.CleanupError):
                                         if isinstance(exc, OSError):
-                                            raise InfrastructureError("fixture inspection storage failed") from exc
+                                            raise InfrastructureError(
+                                                "fixture inspection storage failed"
+                                            ) from exc
                                         raise
 
                         inspections = []
                         for candidate in candidates:
                             candidate["capture"] = inspect_candidate(candidate, "guard-capture")
                             candidate["key"] = guarded_group_id(
-                                candidate["key"], candidate["capture"]["registry_id"],
+                                candidate["key"],
+                                candidate["capture"]["registry_id"],
                                 candidate["capture"]["content_id"],
                             )
                             candidate["path"] = state / (candidate["key"] + ".json")
                             candidate["profile"] = profile
-                            candidate["inspection"] = inspect_candidate(candidate, "guard-inspection")
+                            candidate["inspection"] = inspect_candidate(
+                                candidate, "guard-inspection"
+                            )
                             require_capture_match(candidate["capture"], candidate["inspection"])
                             inspections.append(candidate["inspection"])
                         require_conservation(inspections, candidates)
-                        guard_state["conditions"] = evaluate_conditions(condition_checks, candidates)
+                        guard_state["conditions"] = evaluate_conditions(
+                            condition_checks, candidates
+                        )
                         guard_state["admitted"] = True
                     jobs = []
                     for candidate in candidates:
@@ -1149,12 +1197,20 @@ def run(
                             read_record(
                                 candidate["path"],
                                 candidate["key"],
-                                kind="guarded-batch" if fixture_guard else "batch" if mode == "batch" else "execution",
+                                kind="guarded-batch"
+                                if fixture_guard
+                                else "batch"
+                                if mode == "batch"
+                                else "execution",
                                 case_id=candidate["case_ids"][0],
                                 group_id=candidate["key"],
                                 case_ids=candidate["case_ids"],
-                                registry_id=candidate["inspection"]["registry_id"] if fixture_guard else None,
-                                graph_id=candidate["inspection"]["graph_id"] if fixture_guard else None,
+                                registry_id=candidate["inspection"]["registry_id"]
+                                if fixture_guard
+                                else None,
+                                graph_id=candidate["inspection"]["graph_id"]
+                                if fixture_guard
+                                else None,
                             )
                             if candidate["enabled"] and not force
                             else None
@@ -1194,7 +1250,11 @@ def run(
                                         manifest.distributions, unit.distributions, metadata
                                     )
                                     request = dict(
-                                        mode="guard-batch" if fixture_guard else "batch" if mode == "batch" else "execution",
+                                        mode="guard-batch"
+                                        if fixture_guard
+                                        else "batch"
+                                        if mode == "batch"
+                                        else "execution",
                                         registry=job["registry"],
                                         expected_digest=job["digest"],
                                         context_id=job["key"],
@@ -1248,7 +1308,10 @@ def run(
                                     raise
                                 cancellation.set()
                                 projected, group = project_result(
-                                    job, None, mode, attempts=attempt + 1,
+                                    job,
+                                    None,
+                                    mode,
+                                    attempts=attempt + 1,
                                     reason="guarded execution capability became unavailable",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
@@ -1308,7 +1371,9 @@ def run(
                                     and job["enabled"]
                                     and not cancellation.is_set()
                                 ):
-                                    pending.stage(job["path"], job["key"], result, guarded=bool(fixture_guard))
+                                    pending.stage(
+                                        job["path"], job["key"], result, guarded=bool(fixture_guard)
+                                    )
                                     eligible_groups.add(job["key"])
                     except (sandbox.InvocationInterrupted, KeyboardInterrupt):
                         blocked = (
@@ -1372,7 +1437,9 @@ def split_arguments(arguments):
 
 def error_result(error, *, fixture_guard=None):
     """Versioned refusal envelope when no complete inventory can be established."""
-    if fixture_guard is not None and (type(fixture_guard) is not str or fixture_guard != "available-v1"):
+    if fixture_guard is not None and (
+        type(fixture_guard) is not str or fixture_guard != "available-v1"
+    ):
         raise DeclarationError("invalid fixture guard")
     result = {
         "schema": RESULT_SCHEMA,
@@ -1390,7 +1457,11 @@ def error_result(error, *, fixture_guard=None):
         result["capability"] = error.capability
     if fixture_guard is not None:
         result["schema"] = 5
-        result["fixture_guard"] = {"profile": "available-v1", "state": "unavailable", "conditions": []}
+        result["fixture_guard"] = {
+            "profile": "available-v1",
+            "state": "unavailable",
+            "conditions": [],
+        }
     return result
 
 
@@ -1452,7 +1523,13 @@ def main(argv=None):
             else 0
         )
     except KeyboardInterrupt:
-        print(json.dumps(error_result(InfrastructureError("invocation interrupted"), fixture_guard=guard_context)))
+        print(
+            json.dumps(
+                error_result(
+                    InfrastructureError("invocation interrupted"), fixture_guard=guard_context
+                )
+            )
+        )
         return 3
     except DeclarationError as exc:
         print(json.dumps(error_result(exc, fixture_guard=guard_context)))
