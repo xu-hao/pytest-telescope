@@ -128,7 +128,7 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
         calls.append(request["mode"])
         if request["mode"] == "collection":
             return dict(
-                protocol=7,
+                protocol=8,
                 context_id=request["context_id"],
                 collection_skips=[],
                 kind="collection",
@@ -188,7 +188,7 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     rows = module_rows(tmp_path, [("test_unit.py", ["unit"])])
     collected = {
-        "protocol": 7,
+        "protocol": 8,
         "context_id": "d" * 64,
         "collection_skips": [],
         "kind": "collection",

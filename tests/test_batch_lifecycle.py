@@ -52,7 +52,7 @@ def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
             return dict(
-                protocol=7,
+                protocol=8,
                 context_id=request["context_id"],
                 collection_skips=[],
                 kind="collection",
@@ -231,6 +231,8 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
             case_id=case,
             file="test_one.py",
             origins=[],
+            owners=[hashlib.sha256(b"test_one.py").hexdigest()],
+            parameters=[],
             selected=True,
             order=index,
             aliases=sorted([case, hashlib.sha256(b"test_one.py").hexdigest()]),
@@ -238,7 +240,7 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
         for index, case in enumerate(ids)
     ]
     report = dict(
-        protocol=7,
+        protocol=8,
         context_id="e" * 64,
         collection_skips=[],
         kind="collection",

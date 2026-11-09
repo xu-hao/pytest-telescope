@@ -167,7 +167,7 @@ def test_execution_case_binding_accepts_only_the_expected_case():
 
 def collection_record():
     return {
-        "protocol": 7,
+        "protocol": 8,
         "context_id": "d" * 64,
         "collection_skips": [],
         "kind": "collection",
@@ -180,6 +180,8 @@ def collection_record():
                 "case_id": "c" * 64,
                 "file": "test_subject.py",
                 "origins": [],
+                "owners": [hashlib.sha256(b"test_subject.py").hexdigest()],
+                "parameters": [],
                 "aliases": sorted(["c" * 64, hashlib.sha256(b"test_subject.py").hexdigest()]),
                 "selected": True,
                 "order": 0,
@@ -254,7 +256,7 @@ def ordinary_record():
     return {
         **good_result(),
         "kind": "ordinary",
-        "protocol": 2,
+        "protocol": 3,
         "inventory_complete": True,
         "dispatch_started": True,
         "declaration_error": False,
@@ -449,7 +451,7 @@ def run_worker(root, box, source, *, arguments=(), timeout=10, registry=None):
             json.dumps(
                 sorted(
                     (
-                        {"case_id": row["case_id"], "origins": row["origins"]}
+                        {key: row[key] for key in ("case_id", "origins", "owners", "parameters")}
                         for row in inventory["items"]
                     ),
                     key=lambda row: row["case_id"],
@@ -593,6 +595,7 @@ import hashlib, json, sys
 sys.path.insert(0, sys.argv[1])
 from pathlib import Path
 from pytest_telescope import sandbox
+from pytest_telescope.controller import _file_digest
 root = Path(sys.argv[2])
 box = sandbox.prepare(root)
 with sandbox.invocation(root) as directory:
@@ -609,8 +612,13 @@ with sandbox.invocation(root) as directory:
     (project / 'test_subject.py').chmod(0o444)
     nodeid = 'test_subject.py::test_wait'
     case_id = hashlib.sha256(json.dumps(['default', nodeid], separators=(',', ':')).encode()).hexdigest()
-    digest = hashlib.sha256(json.dumps([{{'case_id': case_id, 'origins': []}}],
-                                       sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    with sandbox.invocation(root) as collection_worker:
+        inventory = sandbox.execute(
+            box, project, ['test_subject.py'], {{}}, 10, root=root,
+            invocation_directory=collection_worker,
+            request={{'mode': 'collection', 'context_id': 'd' * 64, 'registry': [], 'selectors': []}},
+        )
+    digest = _file_digest(inventory['items'], 'test_subject.py')
     with sandbox.invocation(root) as worker:
         sandbox.execute(box, project, ['test_subject.py'], {{}}, 40, root=root,
                         invocation_directory=worker,
