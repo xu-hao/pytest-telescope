@@ -21,9 +21,12 @@ async function main() {
         "--disable-background-networking", "--user-data-dir=" + profile,
     ], {stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"], detached: true});
     let exitCode = null;
+    let exitSignal = null;
+    let spawnError = null;
     let closed = false;
-    const exited = new Promise((resolve) => browser.once("close", (code) => {
+    const exited = new Promise((resolve) => browser.once("close", (code, signal) => {
         exitCode = code;
+        exitSignal = signal;
         closed = true;
         resolve();
     }));
@@ -32,6 +35,9 @@ async function main() {
     let nextId = 0;
     let received = Buffer.alloc(0);
     let stderrBytes = 0;
+    const stderrHash = createHash("sha256");
+    const stderrPrefix = [];
+    let stderrRetained = 0;
     let fatal = null;
     const fail = (message) => {
         fatal = new Error(message);
@@ -46,10 +52,17 @@ async function main() {
         }
         events.clear();
     };
-    browser.once("error", () => fail("browser process could not start"));
+    browser.once("error", (error) => {
+        spawnError = {code: error.code, errno: error.errno, syscall: error.syscall};
+        fail("browser process could not start");
+    });
     browser.once("exit", () => fail("browser transport closed"));
     browser.stderr.on("data", (chunk) => {
         stderrBytes += chunk.length;
+        stderrHash.update(chunk);
+        const retained = chunk.subarray(0, Math.max(0, 16384 - stderrRetained));
+        if (retained.length) stderrPrefix.push(retained);
+        stderrRetained += retained.length;
         if (stderrBytes > 1024 * 1024) {
             fail("browser stderr exceeded its fixture bound");
             browser.kill("SIGTERM");
@@ -134,6 +147,8 @@ async function main() {
         try { process.kill(-browser.pid, "SIGKILL"); } catch {}
     }, 45000);
     let answer;
+    let commandError = null;
+    let cleanupError = null;
     try {
         const target = await request("Target.createTarget", {url: "about:blank"});
         const attached = await request("Target.attachToTarget", {targetId: target.targetId, flatten: true});
@@ -156,9 +171,28 @@ async function main() {
         }, session);
         if (observed.result.value !== "clicked") throw new Error("real browser click did not update DOM");
         answer = {clicked: observed.result.value, args: process.argv.slice(3), node_sha256: await sha256(process.execPath)};
+    } catch (error) {
+        commandError = error.message;
+        throw error;
     } finally {
         clearTimeout(watchdog);
-        await stop();
+        try {
+            await stop();
+        } catch (error) {
+            cleanupError = error.message;
+            throw error;
+        } finally {
+            if (commandError !== null || cleanupError !== null || exitCode !== 0) {
+                try {
+                    process.stderr.write("OWNED_BROWSER_OBSERVATION " + JSON.stringify({
+                        exitCode, exitSignal, spawnError, commandError, cleanupError,
+                        stderr: {bytes: stderrBytes, sha256: stderrHash.digest("hex"),
+                            truncated: stderrBytes > stderrRetained,
+                            base64: Buffer.concat(stderrPrefix).toString("base64")},
+                    }) + "\n");
+                } catch {} // Preserve the original operation's failure.
+            }
+        }
     }
     if (exitCode !== 0) throw new Error("browser did not exit cleanly");
     process.stdout.write(JSON.stringify(answer) + "\n");
