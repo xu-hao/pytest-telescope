@@ -1244,6 +1244,10 @@ def main(request=None, *, ordinary=False):
         # No raw report, reason or traceback may cross the worker boundary.
         print("TELESCOPE_EVIDENCE_ERROR invalid observed outcome evidence", flush=True)
         return 3
+    if mode in ("guard-capture", "guard-inspection") and leaked:
+        # Cleanup failure takes precedence over a simultaneous declaration error.
+        print("TELESCOPE_EVIDENCE_ERROR worker left descendant processes running", flush=True)
+        return 3
     common = {
         "nonce": request["nonce"],
         "exit_code": exit_code,
