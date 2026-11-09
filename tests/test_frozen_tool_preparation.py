@@ -5,7 +5,10 @@ import sys
 import types
 
 import pytest
-from test_functional_gate import gates, write  # noqa: F401
+from test_functional_gate import gates as shared_gates
+from test_functional_gate import write
+
+gates = shared_gates
 
 
 @pytest.fixture
