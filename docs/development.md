@@ -6,6 +6,8 @@ Use a dedicated Python 3.11+ virtual environment. From the repository root:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install '.[dev]'
+mkdir -m 700 /tmp/telescope-check-scratch
+export TMPDIR=/tmp/telescope-check-scratch
 python scripts/check.py --node /absolute/path/to/node --artifacts /tmp/telescope-check
 ```
 
@@ -19,6 +21,13 @@ dependencies may need network access. No package is uploaded by this command. Ea
 has a five-minute deadline, except prerequisite preparation and the behavioral suite,
 which each have fifteen minutes. A timeout fails the gate.
 
+Use new, owned scratch and artifact paths for each attempt. The example above creates
+the scratch directory before the gate starts; remove that directory after the gate has
+terminated and its owned children have been cleaned. The outer job must still enforce
+its explicit CPU, memory, scratch-byte and inode limits. When a resource coordinator
+already provides an existing absolute `TMPDIR`, retain that claimed directory instead
+of assigning a different location.
+
 ## Installed candidate and functional prerequisites
 
 This is the gate contract for the unreleased frozen-tool candidate. Select an existing
@@ -28,6 +37,8 @@ does not discover Node through `PATH`, download it, or select a replacement. For
 the equivalent environment-based invocation is:
 
 ```sh
+mkdir -m 700 /tmp/telescope-check-next-scratch
+export TMPDIR=/tmp/telescope-check-next-scratch
 TELESCOPE_FIXTURE_NODE=/absolute/path/to/node \
   python scripts/check.py --artifacts /tmp/telescope-check-next
 ```
@@ -36,6 +47,12 @@ The outer job must provide an existing absolute `TMPDIR` and explicit resource l
 All preparation copies, subprocess scratch and temporary runtime declarations stay below
 that actual caller-provided directory. The new artifact directory holds the complete
 logs, final result and prerequisite evidence; it is not a substitute scratch location.
+Automated callers must provide these same prerequisites explicitly. A hosted runner's
+temporary directory can supply `TMPDIR` when it exists and belongs to that job; installing
+Node alone does not select its executable for the gate. Missing prerequisites must stop
+before any build, installer or qualification stage. Workflow-entry unit controls load
+the actual workflow invocation and exercise gate preflight with owned interpreter,
+executable and stage doubles. They do not qualify hosted actions or run an installed gate.
 
 After building and installing the exact candidate wheel with the gate interpreter,
 a standard-library-only guard verifies the candidate before importing it. The guard
