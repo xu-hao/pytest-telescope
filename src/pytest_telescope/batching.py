@@ -40,7 +40,7 @@ def group_row(job, mode):
         suite=job["suite"].name,
         files=[job["item"]["file"]],
         route="scoped",
-        profile=mode + "-v2",
+        profile=job.get("profile", mode + "-v2"),
         case_ids=job["case_ids"],
         outcome="infrastructure_error",
         complete=False,

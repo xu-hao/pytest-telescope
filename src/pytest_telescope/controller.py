@@ -28,6 +28,7 @@ from .model import (
     fingerprint,
     load,
     materialize,
+    environment_names,
     render_json,
     snapshot,
 )
@@ -37,6 +38,10 @@ SCHEMA = 6
 RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
+
+
+class _FixtureDrift(InfrastructureError):
+    """A guarded worker refused its admitted graph before dispatch."""
 
 
 def suite_directories(snapshot, suite):
@@ -72,8 +77,11 @@ def lock(path, timeout):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def read_record(path, key, *, kind="execution", case_id=None, group_id=None, case_ids=None):
-    limit = 64 * 1024 * 1024 if kind in {"collection", "batch"} else 1_048_576
+def read_record(
+    path, key, *, kind="execution", case_id=None, group_id=None, case_ids=None,
+    registry_id=None, graph_id=None,
+):
+    limit = 64 * 1024 * 1024 if kind in {"collection", "batch", "guarded-batch"} else 1_048_576
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
@@ -88,16 +96,21 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
         result = record["result"]
         if (
             type(record["schema"]) is not int
-            or record["schema"] != SCHEMA
+            or record["schema"] != (7 if kind == "guarded-batch" else SCHEMA)
             or record["key"] != key
             or record["checksum"] != fingerprint(result)
         ):
             return None
-        from .result import validate_batch, validate_collection, validate_result
+        from .result import validate_batch, validate_collection, validate_guarded_batch, validate_result
 
         valid = (
             validate_collection(result, successful_only=True, context_id=key)
             if kind == "collection"
+            else validate_guarded_batch(
+                result, successful_only=True, group_id=group_id, case_ids=case_ids,
+                registry_id=registry_id, graph_id=graph_id,
+            )
+            if kind == "guarded-batch"
             else validate_batch(
                 result, successful_only=True, group_id=group_id, case_ids=case_ids, context_id=key
             )
@@ -112,8 +125,8 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
 
 
 def write_record(path, key, result, *, kind="execution"):
-    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 6 else 1_048_576
-    record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
+    limit = 64 * 1024 * 1024 if kind in {"collection", "guarded-batch"} or result["protocol"] == 6 else 1_048_576
+    record = {"schema": 7 if kind == "guarded-batch" else SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
     content = json.dumps(record, sort_keys=True).encode()
     if len(content) > limit:
         raise InfrastructureError("successful result exceeds record size limit")
@@ -196,9 +209,9 @@ class PendingRecords:
     def __enter__(self):
         return self
 
-    def stage(self, final, key, result, *, kind="execution"):
+    def stage(self, final, key, result, *, kind="execution", guarded=False):
         path = final.with_name(key + "." + self.token + ".pending")
-        write_record(path, key, result, kind=kind)
+        write_record(path, key, result, kind="guarded-batch" if guarded else kind)
         size = path.stat().st_size
         self.paths[path] = (final, kind, size)
         self.sequence += 1
@@ -437,6 +450,46 @@ def _ordinary_group(suite, files, result, effective, attempt_seconds):
     )
 
 
+def _guard_conditions(fixture_guard, condition_checks):
+    """Validate transient caller predicates without rendering their values."""
+    if fixture_guard not in (None, "available-v1") or (
+        fixture_guard is not None and type(fixture_guard) is not str
+    ):
+        raise DeclarationError("invalid fixture guard")
+    if type(condition_checks) not in (tuple, list) or len(condition_checks) > 4096:
+        raise DeclarationError("invalid fixture guard conditions")
+    if fixture_guard is None and condition_checks:
+        raise DeclarationError("fixture guard conditions require the fixture guard")
+    seen, total = set(), 0
+    for row in condition_checks:
+        if type(row) is not dict:
+            raise DeclarationError("invalid fixture guard condition")
+        op = row.get("op")
+        keys = {"case_id", "name", "op", "value"} if op == "equals" else {"case_id", "name", "op"}
+        if set(row) != keys or type(op) is not str or op not in ("absent", "present", "equals"):
+            raise DeclarationError("invalid fixture guard condition")
+        case, name = row["case_id"], row["name"]
+        if type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case):
+            raise DeclarationError("invalid fixture guard condition")
+        if type(name) is not str or environment_names([name]) != [name]:
+            raise DeclarationError("invalid fixture guard condition")
+        if (case, name, op) in seen:
+            raise DeclarationError("duplicate fixture guard condition")
+        seen.add((case, name, op))
+        if op == "equals":
+            value = row["value"]
+            if type(value) is not str:
+                raise DeclarationError("invalid fixture guard condition")
+            try:
+                size = len(value.encode("utf-8"))
+            except UnicodeError as exc:
+                raise DeclarationError("invalid fixture guard condition") from exc
+            total += size
+            if size > 4096 or total > 1_048_576:
+                raise DeclarationError("fixture guard condition limit exceeded")
+    return condition_checks
+
+
 def run(
     root,
     *,
@@ -450,6 +503,8 @@ def run(
     suites=None,
     execution_mode=None,
     structural_files=None,
+    fixture_guard=None,
+    condition_checks=(),
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -462,6 +517,7 @@ def run(
     from .model import Unit, scoped_item
     from .project_metadata import materialize_metadata, metadata_records
 
+    condition_checks = _guard_conditions(fixture_guard, condition_checks)
     started = time.monotonic()
     if not math.isfinite(timeout) or not 0.1 <= timeout <= 3600:
         raise DeclarationError("timeout must be between 0.1 and 3600 seconds")
@@ -472,8 +528,14 @@ def run(
     )
     manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
     mode = choose_mode(manifest.execution, execution_mode)
+    if fixture_guard is not None:
+        if mode != "batch" or any(manifest.ordinary_files[suite.name] for suite in manifest.suites):
+            raise UnsupportedCapability("execution:fixture-profile", "fixture guard requires scoped batch execution")
+        from .fixture_guard import framework_definition_ids
+
+        framework_definition_ids(version("pytest"))
     concurrency = worker_count(manifest.execution, workers)
-    profile = mode + "-v2"
+    profile = "batch-available-v1" if fixture_guard else mode + "-v2"
     configured = list(zip(manifest.suites, manifest.units))
     all_tests = set().union(*(set(suite.inventory) for suite, _ in configured))
     all_unit = Unit("all", sorted(all_tests), [], [], True)
@@ -525,6 +587,7 @@ def run(
     progress = dict(
         grouping_complete=False, published=False, setup=None, scoped_rows=False, parked=0
     )
+    guard_state = {"admitted": False, "conditions": []}
 
     def observation(suite, route):
         return next(
@@ -608,8 +671,8 @@ def run(
                 for skip in row["skips"]
             ],
         )
-        return dict(
-            schema=RESULT_SCHEMA,
+        report = dict(
+            schema=5 if fixture_guard else RESULT_SCHEMA,
             kind="run",
             status=status,
             execution=dict(mode=mode, profile=profile, workers=concurrency),
@@ -645,6 +708,13 @@ def run(
             if progress["setup"] is not None
             else time.monotonic() - started,
         )
+        if fixture_guard:
+            report["fixture_guard"] = {
+                "profile": fixture_guard,
+                "state": "admitted" if guard_state["admitted"] else "unavailable",
+                "conditions": guard_state["conditions"],
+            }
+        return report
 
     def ordinary_sessions(scoped):
         """Run each suite's ordinary session once; False when its inventory failed."""
@@ -1009,6 +1079,63 @@ def run(
                         )
 
                     candidates = group_jobs(jobs, mode, state)
+                    if fixture_guard:
+                        from .fixture_guard import (
+                            evaluate_conditions,
+                            guarded_group_id,
+                            require_capture_match,
+                            require_conservation,
+                        )
+
+                        def inspect_candidate(candidate, inspection_mode):
+                            suite, unit = candidate["suite"], candidate["unit"]
+                            for attempt in range(2):
+                                try:
+                                    with sandbox.invocation(manifest.root) as directory:
+                                        frozen = directory / "project"
+                                        materialize(pool, unit, frozen, record_map)
+                                        suite_directories(frozen, suite)
+                                        metadata = directory / "metadata"
+                                        materialize_metadata(manifest.distributions, unit.distributions, metadata)
+                                        request = {
+                                            "mode": inspection_mode,
+                                            "registry": candidate["registry"],
+                                            "expected_digest": candidate["digest"],
+                                            "group_id": candidate["key"],
+                                            "case_ids": candidate["case_ids"],
+                                            "context_id": candidate["key"],
+                                        }
+                                        if inspection_mode == "guard-inspection":
+                                            request["registry_id"] = candidate["capture"]["registry_id"]
+                                        return sandbox.execute(
+                                            box, frozen,
+                                            _session_arguments(suite, candidate["options"], ["/project/" + candidate["item"]["file"]]),
+                                            candidate["environment"], timeout,
+                                            root=manifest.root, invocation_directory=directory,
+                                            suite_root=suite.root, suite_cwd=suite.cwd, suite=suite.name,
+                                            metadata_directory=metadata, request=request,
+                                        )
+                                except (InfrastructureError, OSError) as exc:
+                                    if attempt == 1 or isinstance(exc, sandbox.CleanupError):
+                                        if isinstance(exc, OSError):
+                                            raise InfrastructureError("fixture inspection storage failed") from exc
+                                        raise
+
+                        inspections = []
+                        for candidate in candidates:
+                            candidate["capture"] = inspect_candidate(candidate, "guard-capture")
+                            candidate["key"] = guarded_group_id(
+                                candidate["key"], candidate["capture"]["registry_id"],
+                                candidate["capture"]["content_id"],
+                            )
+                            candidate["path"] = state / (candidate["key"] + ".json")
+                            candidate["profile"] = profile
+                            candidate["inspection"] = inspect_candidate(candidate, "guard-inspection")
+                            require_capture_match(candidate["capture"], candidate["inspection"])
+                            inspections.append(candidate["inspection"])
+                        require_conservation(inspections)
+                        guard_state["conditions"] = evaluate_conditions(condition_checks, candidates)
+                        guard_state["admitted"] = True
                     jobs = []
                     for candidate in candidates:
                         candidate["group_index"] = len(groups)
@@ -1022,10 +1149,12 @@ def run(
                             read_record(
                                 candidate["path"],
                                 candidate["key"],
-                                kind="batch" if mode == "batch" else "execution",
+                                kind="guarded-batch" if fixture_guard else "batch" if mode == "batch" else "execution",
                                 case_id=candidate["case_ids"][0],
                                 group_id=candidate["key"],
                                 case_ids=candidate["case_ids"],
+                                registry_id=candidate["inspection"]["registry_id"] if fixture_guard else None,
+                                graph_id=candidate["inspection"]["graph_id"] if fixture_guard else None,
                             )
                             if candidate["enabled"] and not force
                             else None
@@ -1065,7 +1194,7 @@ def run(
                                         manifest.distributions, unit.distributions, metadata
                                     )
                                     request = dict(
-                                        mode="batch" if mode == "batch" else "execution",
+                                        mode="guard-batch" if fixture_guard else "batch" if mode == "batch" else "execution",
                                         registry=job["registry"],
                                         expected_digest=job["digest"],
                                         context_id=job["key"],
@@ -1074,6 +1203,12 @@ def run(
                                         request.update(
                                             group_id=job["key"], case_ids=job["case_ids"]
                                         )
+                                        if fixture_guard:
+                                            request.update(
+                                                guard_protocol="batch-guard-v1",
+                                                registry_id=job["inspection"]["registry_id"],
+                                                graph_id=job["inspection"]["graph_id"],
+                                            )
                                     else:
                                         request["case_id"] = item["case_id"]
                                     result = sandbox.execute(
@@ -1094,6 +1229,8 @@ def run(
                                         request=request,
                                     )
                                 if result["exit_code"] == 4:
+                                    if fixture_guard:
+                                        raise _FixtureDrift("fixture plan changed before dispatch")
                                     raise DeclarationError(
                                         "case collection or declarations differ from validated inventory"
                                     )
@@ -1106,8 +1243,19 @@ def run(
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
                                 return projected, group, result, False
+                            except UnsupportedCapability:
+                                if not fixture_guard:
+                                    raise
+                                cancellation.set()
+                                projected, group = project_result(
+                                    job, None, mode, attempts=attempt + 1,
+                                    reason="guarded execution capability became unavailable",
+                                    attempt_seconds=time.monotonic() - attempt_started,
+                                )
+                                group["timing_complete"] = False
+                                return projected, group, None, True
                             except (InfrastructureError, OSError) as exc:
-                                terminal = isinstance(exc, sandbox.CleanupError)
+                                terminal = isinstance(exc, (sandbox.CleanupError, _FixtureDrift))
                                 if terminal:
                                     cancellation.set()
                                 if attempt == 1 or terminal:
@@ -1160,7 +1308,7 @@ def run(
                                     and job["enabled"]
                                     and not cancellation.is_set()
                                 ):
-                                    pending.stage(job["path"], job["key"], result)
+                                    pending.stage(job["path"], job["key"], result, guarded=bool(fixture_guard))
                                     eligible_groups.add(job["key"])
                     except (sandbox.InvocationInterrupted, KeyboardInterrupt):
                         blocked = (
@@ -1222,8 +1370,10 @@ def split_arguments(arguments):
     return options, selectors
 
 
-def error_result(error):
+def error_result(error, *, fixture_guard=None):
     """Versioned refusal envelope when no complete inventory can be established."""
+    if fixture_guard is not None and (type(fixture_guard) is not str or fixture_guard != "available-v1"):
+        raise DeclarationError("invalid fixture guard")
     result = {
         "schema": RESULT_SCHEMA,
         "kind": "refusal",
@@ -1238,6 +1388,9 @@ def error_result(error):
     }
     if isinstance(error, UnsupportedCapability):
         result["capability"] = error.capability
+    if fixture_guard is not None:
+        result["schema"] = 5
+        result["fixture_guard"] = {"profile": "available-v1", "state": "unavailable", "conditions": []}
     return result
 
 
@@ -1258,11 +1411,15 @@ def main(argv=None):
     execution.add_argument("--cache-dir", type=Path)
     execution.add_argument("--timeout", type=float, default=60)
     execution.add_argument("--execution-mode", choices=("case", "batch"))
+    execution.add_argument("--fixture-guard", choices=("available-v1",))
     execution.add_argument("--workers", type=int)
     execution.add_argument("--suite", action="append", dest="suites")
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
+    guard_context = None
     try:
         options = parser.parse_args(argv)
+        if options.command == "run":
+            guard_context = options.fixture_guard
         if options.command == "plan":
             from .plan import make_plan
 
@@ -1282,6 +1439,7 @@ def main(argv=None):
                 workers=options.workers,
                 suites=options.suites,
                 execution_mode=options.execution_mode,
+                fixture_guard=options.fixture_guard,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
@@ -1294,19 +1452,20 @@ def main(argv=None):
             else 0
         )
     except KeyboardInterrupt:
-        print(json.dumps(error_result(InfrastructureError("invocation interrupted"))))
+        print(json.dumps(error_result(InfrastructureError("invocation interrupted"), fixture_guard=guard_context)))
         return 3
     except DeclarationError as exc:
-        print(json.dumps(error_result(exc)))
+        print(json.dumps(error_result(exc, fixture_guard=guard_context)))
         return 4
     except InfrastructureError as exc:
-        print(json.dumps(error_result(exc)))
+        print(json.dumps(error_result(exc, fixture_guard=guard_context)))
         return 3
     except (OSError, RecursionError, MemoryError):
         print(
             json.dumps(
                 error_result(
-                    InfrastructureError("bounded project storage or parsing operation failed")
+                    InfrastructureError("bounded project storage or parsing operation failed"),
+                    fixture_guard=guard_context,
                 )
             )
         )
