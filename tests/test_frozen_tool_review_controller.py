@@ -77,9 +77,15 @@ def test_deferred_typed_view_refusal_retains_available_ordinary_accounting(tmp_p
     monkeypatch.setattr(tool_capture.Capture, "view", deferred)
     report = project.run()
     assert counter.read_text() == "x"
-    assert report["kind"] == "run", report
-    assert report["route_counts"]["ordinary"]["executed"] == 1, report
-    assert report["status"] != "passed", report
+    assert report["kind"] == "refusal", report
+    assert report["status"] == "unsupported" and report["capability"] == "tool:layout", report
+    accounting = report["accounting"]
+    assert set(accounting) == {"version", "state", "observations"}
+    assert accounting["version"] == 1 and accounting["state"] == "available"
+    observed = accounting["observations"]
+    assert observed["route_counts"]["ordinary"]["executed"] == 1, report
+    assert report["inventory_complete"] == observed["inventory_complete"]
+    assert report["inventory_digest"] == observed["inventory_digest"]
     assert not cache_bytes(project.root)
     assert not list((project.root / ".pytest-telescope/scratch").iterdir())
 
