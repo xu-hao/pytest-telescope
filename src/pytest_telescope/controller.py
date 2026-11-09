@@ -542,18 +542,19 @@ def run(
             progress["setup"] = time.monotonic() - started
 
     def summary():
-        if not progress["scoped_rows"]:
-            # Known scoped cases stay accounted when planning stopped before their groups.
-            for suite, item, _ in scoped:
+        represented = {(row["suite"], row["case_id"]) for row in results}
+        for suite, item, _ in scoped:
+            if (suite.name, item["case_id"]) not in represented:
                 results.append(
                     _row(item, suite, "scoped", "not-selected")
                     if not item["selected"]
-                    else _row(
-                        item, suite, "scoped", "infrastructure_error", "execution not started"
-                    )
+                    else _row(item, suite, "scoped", "infrastructure_error", "execution not started")
                 )
-                progress["parked"] += item["selected"]
-            progress["scoped_rows"] = True
+        progress["parked"] = sum(
+            row["selected"] and row["group_id"] is None and row["attempts"] == 0
+            and row["outcome"] == "infrastructure_error"
+            for row in results
+        )
         if mode == "batch":
             for row in results:
                 if row["route"] == "scoped":
@@ -648,6 +649,21 @@ def run(
             if progress["setup"] is not None
             else time.monotonic() - started,
         )
+
+    def retain_refusal(error):
+        if progress["setup"] is not None:
+            from . import model
+            from .accounting import FIELDS, RefusalAccounting
+
+            observed = summary()
+            try:
+                accounting = RefusalAccounting(
+                    {name: observed[name] for name in FIELDS},
+                    metadata=error_result(error), maximum=model.MAX_OUTPUT_BYTES,
+                )
+                error.attach_accounting(accounting)
+            except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as exc:
+                raise InfrastructureError("cannot retain valid bounded refusal accounting") from exc
 
     def ordinary_sessions(scoped):
         """Run each suite's ordinary session once; False when its inventory failed."""
@@ -750,11 +766,15 @@ def run(
 
     if not manifest.scope_possible:
         # All-ordinary: no sandbox, frozen copy, cache directory or lock.
-        if ordinary_sessions(scoped):
-            if requested_selectors - seen_aliases - seen_files:
-                raise DeclarationError("selector does not identify a collected case")
-            progress["grouping_complete"] = True
-        return summary()
+        try:
+            if ordinary_sessions(scoped):
+                if requested_selectors - seen_aliases - seen_files:
+                    raise DeclarationError("selector does not identify a collected case")
+                progress["grouping_complete"] = True
+            return summary()
+        except DeclarationError as error:
+            retain_refusal(error)
+            raise
 
     try:
         box = sandbox.prepare(manifest.root)
@@ -1207,6 +1227,9 @@ def run(
                 else:
                     # A completed success is not reusable until every owned copy is removed.
                     stop("infrastructure_error", blocked)
+    except DeclarationError as error:
+        retain_refusal(error)
+        raise
     except (InfrastructureError, OSError) as exc:
         stop(
             "infrastructure_error",
@@ -1238,7 +1261,7 @@ def split_arguments(arguments):
 
 
 def error_result(error):
-    """Versioned refusal envelope when no complete inventory can be established."""
+    """Versioned typed refusal, retaining established inventory and observations."""
     result = {
         "schema": RESULT_SCHEMA,
         "kind": "refusal",
@@ -1253,6 +1276,10 @@ def error_result(error):
     }
     if isinstance(error, UnsupportedCapability):
         result["capability"] = error.capability
+    if isinstance(error, DeclarationError) and error.accounting is not None:
+        result["inventory_complete"] = error.accounting.inventory_complete
+        result["inventory_digest"] = error.accounting.inventory_digest
+        result["accounting"] = error.accounting.render()
     return result
 
 
@@ -1312,10 +1339,10 @@ def main(argv=None):
         print(json.dumps(error_result(InfrastructureError("invocation interrupted"))))
         return 3
     except DeclarationError as exc:
-        print(json.dumps(error_result(exc)))
+        print(render_json(error_result(exc)))
         return 4
     except InfrastructureError as exc:
-        print(json.dumps(error_result(exc)))
+        print(render_json(error_result(exc)))
         return 3
     except (OSError, RecursionError, MemoryError):
         print(

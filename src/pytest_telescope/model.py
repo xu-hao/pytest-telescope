@@ -15,7 +15,22 @@ from pathlib import Path
 
 
 class DeclarationError(ValueError):
-    pass
+    def __init__(self, *args, accounting=None):
+        super().__init__(*args)
+        self._accounting = None
+        if accounting is not None:
+            self.attach_accounting(accounting)
+
+    @property
+    def accounting(self):
+        return self._accounting
+
+    def attach_accounting(self, value):
+        from .accounting import RefusalAccounting
+
+        if type(value) is not RefusalAccounting or self._accounting is not None:
+            raise TypeError("refusal accounting requires one validated immutable value")
+        self._accounting = value
 
 
 class UnsupportedCapability(DeclarationError):
@@ -584,6 +599,25 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         unit.inputs = sorted(effective)
     for tool in tools.values():
         hashes[tool.registration["manifest"]] = hashlib.sha256(tool.raw).hexdigest()
+
+    # Validate statically certain inheritance before an ordinary body can run.
+    # Parameter siblings are alternatives: only this parameter plus unconditional
+    # enclosing declarations are known to coexist before actual collection.
+    for row in registry:
+        selected_tools = set(defaults.tools)
+        env = set(global_env) | set(defaults.env)
+        scoped = False
+        for ancestor in rows_by_file[row["file"]]:
+            if ancestor is row or (
+                ancestor["kind"] in {"scope", "decorator"}
+                and row["owner"][:len(ancestor["owner"])] == ancestor["owner"]
+            ):
+                unit = declarations[ancestor["id"]]
+                selected_tools.update(unit.tools)
+                env.update(unit.env)
+                scoped = scoped or scoping(ancestor)
+        if scoped:
+            tool_context.validate_environment(sorted(env), sorted(selected_tools))
 
     def support(files):
         """Every file a scoped case of these files could see, plus its expected absence."""
