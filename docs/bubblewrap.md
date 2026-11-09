@@ -108,11 +108,15 @@ root are read-only. Writes there fail with a read-only file system error.
 when it exits. Pytest's cache provider is disabled and bytecode is not written.
 
 The sandbox environment variables are cleared, then set to a fixed `PATH` (the
-interpreter's directory followed by `/usr/local/bin:/usr/bin:/bin`), `HOME=/tmp`,
+interpreter's directory followed by `/usr/local/bin:/usr/bin:/bin`, with duplicate
+directories removed), `HOME=/tmp`,
 `TMPDIR=/tmp`, `PYTHONDONTWRITEBYTECODE=1`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`, and the
 effective names declared globally and for that case or equal-scope group. Scoped
 discovery receives the potential collection union; execution receives only its own
-effective names.
+effective names. All five fixed names are reserved and cannot be declared, even when
+the invoking variable is absent or empty. This applies to global, defaults, bundle and
+all marker declarations; invalid names refuse before any session starts. See the
+[complete reserved-name rules](specification.md#project-configuration).
 Suite plugins are loaded explicitly; autoload remains disabled.
 
 Bubblewrap creates a user namespace, a mount namespace and a PID namespace. The PID
