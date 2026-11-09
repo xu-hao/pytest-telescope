@@ -65,12 +65,13 @@ Environment names compose in the same places. For example:
 ```python
 pytestmark = pytest.mark.telescope(env=["MODULE_FEATURE"])
 
+
 @pytest.mark.telescope(env=["CLASS_FEATURE"])
 class TestVariants:
     @pytest.mark.telescope(env=["FUNCTION_FEATURE"])
-    @pytest.mark.parametrize("value", [
-        pytest.param("a", marks=pytest.mark.telescope(env=["PARAM_FEATURE"]))
-    ])
+    @pytest.mark.parametrize(
+        "value", [pytest.param("a", marks=pytest.mark.telescope(env=["PARAM_FEATURE"]))]
+    )
     def test_variant(self, value): ...
 ```
 
