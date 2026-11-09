@@ -1,5 +1,8 @@
 # pytest-telescope
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 pytest-telescope caches pytest results so repeated checks spend less time running tests
 whose inputs haven't changed. If coding agents are adding changes to a merge queue,
 reusing those results can reduce the test work each queued change needs.
@@ -100,7 +103,7 @@ conftest files, helpers and data need declarations.
 This makes the test *scoped*: it sees the declared project files read-only, plus the
 installed environment and system directories. Undeclared project files are absent.
 Writes belong in private scratch, for example through pytest's `tmp_path` fixture.
-Tests without an `inputs`, `bundles` or `distributions` declaration remain ordinary,
+Tests without an `inputs`, `bundles`, `distributions` or `env` declaration remain ordinary,
 including other tests in the same file.
 
 ### 4. Run the test twice
@@ -154,7 +157,9 @@ case executes again; a passing result becomes reusable on the next unchanged run
 Add declarations to more tests as you establish their dependencies. Use a module-level
 literal `pytestmark` when every test in a module should share a scope; use
 `pytest.param(..., marks=pytest.mark.telescope(...))` for parameter-specific inputs.
-Declarations at module, class, function and parameter levels add together. The
+Declarations at module, class, function and parameter levels add together. A literal
+`env=["OPTIONAL_FEATURE"]` marker scopes and forwards that name only to its consumers;
+`env=[]` also scopes a case. Top-level `env` still applies to every scoped case. The
 [marker reference](specification.md) shows the supported forms, defaults and bundles.
 
 Run the whole suite with your usual pytest arguments after `--`:

@@ -1,7 +1,10 @@
 # API, CLI and configuration
 
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
 This reference lists the interfaces of the [ordinary and Bubblewrap execution
-contract](bubblewrap.md). The [result reference](result-schema.md) defines every schema 3
+contract](bubblewrap.md). The [result reference](result-schema.md) defines every schema 4
 field, and [complete examples](bubblewrap-schema-examples.json) show whole reports.
 
 ## Python API
@@ -98,9 +101,9 @@ The project may be `/project` itself.
 | `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
 | `project:links` | A project input contains an unsupported directory symlink. |
 
-## Result schema 3
+## Result schema 4
 
-Run and refusal results use schema 3. The [result reference](result-schema.md) defines
+Run and refusal results use schema 4. The [result reference](result-schema.md) defines
 all fields and accounting rules.
 
 - `execution` reports the execution mode, profile and configured `workers`.
@@ -110,6 +113,6 @@ all fields and accounting rules.
 - Every unit and group has `route`, `"ordinary"` or `"scoped"`. `route_counts` gives the
   same seven count keys as `counts` for each route.
 - Groups list `files`; an ordinary group is one suite session
-  with profile `ordinary-v1`, never cache eligible.
+  with profile `ordinary-v2`, never cache eligible.
 - `collection.suites` has one row per suite and route, each with `route` and `files`.
 - Timings report wall-clock durations. CPU and resource accounting belong to the caller.

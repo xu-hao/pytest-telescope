@@ -1,23 +1,24 @@
 {
-  "description": "Synthetic schema 3 examples. Digests and timings are illustrative, not execution receipts.",
+  "description": "Synthetic unreleased schema 4 examples. Digests and timings are illustrative, not execution receipts.",
   "examples": {
     "mixed_cold_run": {
       "case_outcomes": {
         "cached_passed": 0,
         "cached_skipped": 0,
-        "fresh_passed": 3,
-        "fresh_skipped": 0
+        "fresh_passed": 2,
+        "fresh_skipped": 1
       },
       "cases": {
         "collected": 3,
         "failed": 0,
-        "passed": 3,
-        "skipped": 0
+        "passed": 2,
+        "skipped": 1
       },
       "collection": {
         "collected": 3,
         "failures": [],
         "outcome": "executed",
+        "skips": [],
         "suites": [
           {
             "collected": 2,
@@ -28,6 +29,7 @@
             "name": "default",
             "outcome": "executed",
             "route": "scoped",
+            "skips": [],
             "worker_seconds": 0.33
           },
           {
@@ -39,6 +41,7 @@
             "name": "default",
             "outcome": "executed",
             "route": "ordinary",
+            "skips": [],
             "worker_seconds": null
           }
         ],
@@ -56,7 +59,7 @@
       "elapsed_seconds": 1.48,
       "execution": {
         "mode": "case",
-        "profile": "case-v1",
+        "profile": "case-v2",
         "workers": 2
       },
       "grouping_complete": true,
@@ -68,17 +71,18 @@
           "case_ids": [
             "953ab877ce9713c249bca15004d08a5052903360659747ba4664b4196a84450e"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
           "files": [
             "tests/test_notes.py"
           ],
-          "group_id": "c660190d1cae9bd63fa2da9db4fe08d6b5a5d458999f9d57710acb2884118879",
+          "group_id": "0fbe26cc7905baa2f0774cfe2a0efb0ba2e8c72759d7ee33a696c4c02776a336",
           "not_run": 0,
           "outcome": "executed",
           "passed": 1,
-          "profile": "ordinary-v1",
+          "profile": "ordinary-v2",
           "route": "ordinary",
           "skipped": 0,
           "stop_reason": null,
@@ -94,6 +98,7 @@
           "case_ids": [
             "6a5a47c65d5a28557b3f8c7ef2eec3d4a81b05caec39ece9b039e7b7eaa8dbd1"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
@@ -104,7 +109,7 @@
           "not_run": 0,
           "outcome": "executed",
           "passed": 1,
-          "profile": "case-v1",
+          "profile": "case-v2",
           "route": "scoped",
           "skipped": 0,
           "stop_reason": null,
@@ -120,6 +125,7 @@
           "case_ids": [
             "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
@@ -129,10 +135,10 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "not_run": 0,
           "outcome": "executed",
-          "passed": 1,
-          "profile": "case-v1",
+          "passed": 0,
+          "profile": "case-v2",
           "route": "scoped",
-          "skipped": 0,
+          "skipped": 1,
           "stop_reason": null,
           "suite": "default",
           "timing_complete": true,
@@ -169,7 +175,7 @@
         "policy": "bubblewrap-view-v2",
         "required": true
       },
-      "schema": 3,
+      "schema": 4,
       "setup_seconds": 0.07,
       "status": "passed",
       "suites": [
@@ -184,11 +190,28 @@
           "failed": 0,
           "failures": [],
           "file": "tests/test_notes.py",
-          "group_id": "c660190d1cae9bd63fa2da9db4fe08d6b5a5d458999f9d57710acb2884118879",
+          "group_id": "0fbe26cc7905baa2f0774cfe2a0efb0ba2e8c72759d7ee33a696c4c02776a336",
           "name": "953ab877ce9713c249bca15004d08a5052903360659747ba4664b4196a84450e",
           "outcome": "executed",
           "passed": 1,
           "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "call",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
           "result_status": "passed",
           "route": "ordinary",
           "selected": true,
@@ -207,12 +230,33 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "name": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
           "outcome": "executed",
-          "passed": 1,
+          "passed": 0,
           "reason": "",
-          "result_status": "passed",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "skipped",
+              "phase": "call",
+              "skip_reason": {
+                "kind": "skip",
+                "profile": "pytest-reason-sha256-v1",
+                "sha256": "2f0ee7f1fc690b5f7edd118cbf8ccde7030420743324ee687de1fd9e92b8aa8b"
+              }
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
+          "result_status": "skipped",
           "route": "scoped",
           "selected": true,
-          "skipped": 0,
+          "skipped": 1,
           "suite": "default",
           "worker_seconds": 0.36
         },
@@ -229,6 +273,23 @@
           "outcome": "executed",
           "passed": 1,
           "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "call",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
           "result_status": "passed",
           "route": "scoped",
           "selected": true,
@@ -240,21 +301,22 @@
     },
     "mixed_warm_run": {
       "case_outcomes": {
-        "cached_passed": 2,
-        "cached_skipped": 0,
+        "cached_passed": 1,
+        "cached_skipped": 1,
         "fresh_passed": 1,
         "fresh_skipped": 0
       },
       "cases": {
         "collected": 3,
         "failed": 0,
-        "passed": 3,
-        "skipped": 0
+        "passed": 2,
+        "skipped": 1
       },
       "collection": {
         "collected": 3,
         "failures": [],
         "outcome": "executed",
+        "skips": [],
         "suites": [
           {
             "collected": 2,
@@ -265,6 +327,7 @@
             "name": "default",
             "outcome": "reused",
             "route": "scoped",
+            "skips": [],
             "worker_seconds": 0
           },
           {
@@ -276,6 +339,7 @@
             "name": "default",
             "outcome": "executed",
             "route": "ordinary",
+            "skips": [],
             "worker_seconds": null
           }
         ],
@@ -293,7 +357,7 @@
       "elapsed_seconds": 0.61,
       "execution": {
         "mode": "case",
-        "profile": "case-v1",
+        "profile": "case-v2",
         "workers": 2
       },
       "grouping_complete": true,
@@ -305,17 +369,18 @@
           "case_ids": [
             "953ab877ce9713c249bca15004d08a5052903360659747ba4664b4196a84450e"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
           "files": [
             "tests/test_notes.py"
           ],
-          "group_id": "c660190d1cae9bd63fa2da9db4fe08d6b5a5d458999f9d57710acb2884118879",
+          "group_id": "6ea7b500dcdd13ba781ea755b45e423954da301f5fda30ee133147cfaade9573",
           "not_run": 0,
           "outcome": "executed",
           "passed": 1,
-          "profile": "ordinary-v1",
+          "profile": "ordinary-v2",
           "route": "ordinary",
           "skipped": 0,
           "stop_reason": null,
@@ -331,6 +396,7 @@
           "case_ids": [
             "6a5a47c65d5a28557b3f8c7ef2eec3d4a81b05caec39ece9b039e7b7eaa8dbd1"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
@@ -341,7 +407,7 @@
           "not_run": 0,
           "outcome": "reused",
           "passed": 1,
-          "profile": "case-v1",
+          "profile": "case-v2",
           "route": "scoped",
           "skipped": 0,
           "stop_reason": null,
@@ -357,6 +423,7 @@
           "case_ids": [
             "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
@@ -366,10 +433,10 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "not_run": 0,
           "outcome": "reused",
-          "passed": 1,
-          "profile": "case-v1",
+          "passed": 0,
+          "profile": "case-v2",
           "route": "scoped",
-          "skipped": 0,
+          "skipped": 1,
           "stop_reason": null,
           "suite": "default",
           "timing_complete": true,
@@ -406,7 +473,7 @@
         "policy": "bubblewrap-view-v2",
         "required": true
       },
-      "schema": 3,
+      "schema": 4,
       "setup_seconds": 0.07,
       "status": "passed",
       "suites": [
@@ -421,11 +488,28 @@
           "failed": 0,
           "failures": [],
           "file": "tests/test_notes.py",
-          "group_id": "c660190d1cae9bd63fa2da9db4fe08d6b5a5d458999f9d57710acb2884118879",
+          "group_id": "6ea7b500dcdd13ba781ea755b45e423954da301f5fda30ee133147cfaade9573",
           "name": "953ab877ce9713c249bca15004d08a5052903360659747ba4664b4196a84450e",
           "outcome": "executed",
           "passed": 1,
           "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "call",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
           "result_status": "passed",
           "route": "ordinary",
           "selected": true,
@@ -444,12 +528,33 @@
           "group_id": "fba755fec51b34e3315ce12ae51b57e56a4e8f3227305960622bfd479dc58ac2",
           "name": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
           "outcome": "reused",
-          "passed": 1,
+          "passed": 0,
           "reason": "",
-          "result_status": "passed",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "skipped",
+              "phase": "call",
+              "skip_reason": {
+                "kind": "skip",
+                "profile": "pytest-reason-sha256-v1",
+                "sha256": "2f0ee7f1fc690b5f7edd118cbf8ccde7030420743324ee687de1fd9e92b8aa8b"
+              }
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
+          "result_status": "skipped",
           "route": "scoped",
           "selected": true,
-          "skipped": 0,
+          "skipped": 1,
           "suite": "default",
           "worker_seconds": 0
         },
@@ -466,6 +571,23 @@
           "outcome": "reused",
           "passed": 1,
           "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "call",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
           "result_status": "passed",
           "route": "scoped",
           "selected": true,
@@ -481,7 +603,7 @@
       "inventory_complete": false,
       "inventory_digest": null,
       "kind": "refusal",
-      "schema": 3,
+      "schema": 4,
       "status": "unsupported"
     },
     "ordinary_only_run": {
@@ -501,6 +623,7 @@
         "collected": 1,
         "failures": [],
         "outcome": "executed",
+        "skips": [],
         "suites": [
           {
             "collected": 1,
@@ -511,6 +634,7 @@
             "name": "default",
             "outcome": "executed",
             "route": "ordinary",
+            "skips": [],
             "worker_seconds": null
           }
         ],
@@ -528,7 +652,7 @@
       "elapsed_seconds": 0.52,
       "execution": {
         "mode": "case",
-        "profile": "case-v1",
+        "profile": "case-v2",
         "workers": 1
       },
       "grouping_complete": true,
@@ -540,17 +664,18 @@
           "case_ids": [
             "953ab877ce9713c249bca15004d08a5052903360659747ba4664b4196a84450e"
           ],
+          "collection_skips": [],
           "complete": true,
           "failed": 0,
           "failures": [],
           "files": [
             "tests/test_notes.py"
           ],
-          "group_id": "c660190d1cae9bd63fa2da9db4fe08d6b5a5d458999f9d57710acb2884118879",
+          "group_id": "07201a0e4b136f39fcaccd257ec7c773319b656ca15fac395f69808220c5aeea",
           "not_run": 0,
           "outcome": "executed",
           "passed": 1,
-          "profile": "ordinary-v1",
+          "profile": "ordinary-v2",
           "route": "ordinary",
           "skipped": 0,
           "stop_reason": null,
@@ -589,7 +714,7 @@
         "policy": "bubblewrap-view-v2",
         "required": false
       },
-      "schema": 3,
+      "schema": 4,
       "setup_seconds": 0.02,
       "status": "passed",
       "suites": [
@@ -604,11 +729,28 @@
           "failed": 0,
           "failures": [],
           "file": "tests/test_notes.py",
-          "group_id": "c660190d1cae9bd63fa2da9db4fe08d6b5a5d458999f9d57710acb2884118879",
+          "group_id": "07201a0e4b136f39fcaccd257ec7c773319b656ca15fac395f69808220c5aeea",
           "name": "953ab877ce9713c249bca15004d08a5052903360659747ba4664b4196a84450e",
           "outcome": "executed",
           "passed": 1,
           "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "call",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
           "result_status": "passed",
           "route": "ordinary",
           "selected": true,
