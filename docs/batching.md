@@ -201,8 +201,10 @@ fixtures available through autouse, inheritance, imports, overrides and dynamic
 `request.getfixturevalue`, even when a fixture is absent from the static dependency
 closure. Uncertain owners or bindings and possible cross-file, package or suite sharing
 refuse conservatively. Class lifetimes can be treated conservatively across the containing
-module when another selected group's class owner cannot be established. The present
-development adapter refuses package-scoped user fixture ownership rather than guessing
+module when another selected group's class owner cannot be established. The current
+development adapter also refuses when a class-scoped user fixture is available to a
+module-level function, including a single case, even though pytest can give that fixture
+function lifetime. The present development adapter refuses package-scoped user fixture ownership rather than guessing
 the package owner. Extra refusals are permitted. Function-scoped fixtures do not
 create a shared instance across cases.
 
@@ -278,8 +280,8 @@ apply, including no publication after incomplete member teardown, session failur
 outer cleanup failure.
 
 The guard bounds selected group membership to 4,096, fixture definitions per group to
-4,096, fixture-definition/item associations per invocation to 100,000, definition depth
-to 128 and canonical paths or identifiers to 4,096 bytes. Existing collection and
+4,096, fixture-definition/item associations per invocation to 100,000, and canonical
+paths or identifiers to 4,096 bytes. Existing collection and
 64 MiB group response bounds also apply. Limit violations refuse; missing or invalid
 worker records are bounded infrastructure failures rather than successful defaults.
 The [API](bubblewrap-api.md#required-fixture-guard-api-unreleased) and

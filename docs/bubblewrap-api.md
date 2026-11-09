@@ -137,8 +137,12 @@ belong to that case's effective inherited environment declaration.
 Evaluate conditions from the environment captured once for the invocation, before any
 selected body or cache acceptance. A mismatch raises
 `UnsupportedCapability("execution:condition-mismatch", ...)`. Values are transient
-controller memory: do not place raw values or their hashes in requests, cache, results,
-logs, exceptions or representations. A match proves only the bound condition for that
+controller memory: do not place raw values or unsalted hashes of individual values in
+requests, cache, results, logs, exceptions or representations. Group identities and cache
+keys are deterministic fingerprints of the wider execution context, including captured
+environment values. Someone who knows enough other key inputs may use those fingerprints
+to verify guesses of low-entropy values offline; they are not password-hardening or an
+authentication mechanism. A match proves only the bound condition for that
 captured case and group; it does not establish a skip, pass or teardown. Inspect the
 actual reports, group lifecycle and final run status too.
 
