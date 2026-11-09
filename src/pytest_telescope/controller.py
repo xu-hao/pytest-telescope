@@ -41,7 +41,7 @@ ROUTES = ("ordinary", "scoped")
 
 
 class _FixtureDrift(InfrastructureError):
-    """A guarded worker refused its admitted graph before dispatch."""
+    """A guarded execution cannot safely continue or publish results."""
 
 
 def suite_directories(snapshot, suite):
@@ -1290,7 +1290,9 @@ def run(
                                     )
                                 if result["exit_code"] == 4:
                                     if fixture_guard:
-                                        raise _FixtureDrift("fixture plan changed before dispatch")
+                                        raise _FixtureDrift(
+                                            "guarded execution or fixture validation failed"
+                                        )
                                     raise DeclarationError(
                                         "case collection or declarations differ from validated inventory"
                                     )
