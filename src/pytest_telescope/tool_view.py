@@ -65,14 +65,20 @@ class Projection:
             layout("selected command mapping exceeds its bound")
         if len(controls) > 1:
             layout("selected native loader caches disagree")
-        for name in names:
-            capture.runtimes[name].validate_union(originals, self.budget)
+        from .tool_ordering import validate_processes
+
+        worker = None
         if self.native:
             from .tool_startup import Startup
 
             self.startup = Startup(capture.sandbox, originals, self.budget, capture.manifest.root)
+            fields = capture.sandbox.description["startup"]
+            worker = (capture.sandbox.executable, (fields["stdlib"], fields["platstdlib"]))
             closed.extend(self.startup.roots)
             closed.append("/etc")
+        ordering_identity = validate_processes(
+            tuple(capture.runtimes[name] for name in names), self.budget, originals, worker,
+        )
         for filename, (graph, key) in originals.items():
             self.budget.tick()
             if graph.nodes[key]["kind"] == "symlink" and not inside(filename, trees):
@@ -111,6 +117,7 @@ class Projection:
             [[name, capture.manifest.tools[name].document, capture.graphs[name].prefix_identity()] for name in names],
             self.closed, sorted(self.commands.items()),
             [self.native, [[name, capture.runtimes[name].dynamic] for name in names]],
+            ordering_identity,
             None if not self.native else ["declared-configuration-v1", "/etc/ld.so.preload", "file", 0o444, 0],
             None if self.startup is None else self.startup.identity,
         ]

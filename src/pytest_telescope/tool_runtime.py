@@ -1,7 +1,6 @@
 """Validate mandatory native relations against one tool's frozen combined view."""
 
 import os
-import posixpath
 import re
 import sys
 from pathlib import Path
@@ -25,10 +24,6 @@ class Runtime:
         self.control = None
         self.native = False
         self.dynamic = False
-        self.lookup_names = {}
-        for filename in graph.mapping:
-            budget.tick()
-            self.lookup_names.setdefault(posixpath.basename(filename), []).append(filename)
         self.validate()
 
     def covered(self, filename):
@@ -44,48 +39,14 @@ class Runtime:
                 self.elfs[key] = native.read_elf(stream, self.graph.nodes[key]["size"])
         return self.elfs[key]
 
-    def _candidate(self, filename):
-        key = self.graph.resolve(filename, required=False)
-        if key is not None and self.graph.nodes[key]["kind"] != "file":
-            layout("native search candidate is not a regular pinned file")
-        return key
-
-    def candidates(self, info, name, alias, lookup_names=None):
-        if "/" in name:
-            if not name.startswith("/") or posixpath.normpath(name) != name:
-                layout("relative native dependency names are unsupported")
-            candidates = [name]
-        else:
-            directories = (*native.search_paths(info, alias), *native.DEFAULT_SEARCH)
-            candidates = [posixpath.join(directory, name) for directory in directories]
-            candidates += [filename for filename, _ in self.cache.get(name, ())]
-            # Closed directories may contain explicitly pinned hwcap/platform
-            # alternatives. Conservatively include every declared descendant with
-            # this SONAME: an unknown ordering refuses instead of borrowing a winner.
-            lookup = self.lookup_names if lookup_names is None else lookup_names
-            normalized = [self.graph.resolved_path(directory) for directory in directories]
-            candidates += [filename for filename in lookup.get(name, ()) if any(Path(filename).parent.is_relative_to(directory) for directory in normalized)]
-        if len(candidates) > MAX_RELATIONS:
-            layout("native lookup exceeds its candidate bound")
-        return sorted(set(candidates))
-
     def _find(self, key, info, name, alias):
-        resolved = {}
-        candidates = self.candidates(info, name, alias)
-        for filename in candidates:
-            is_logical = filename.startswith("/tools/" + self.graph.tool.name + "/")
-            if not is_logical and not self.covered(posixpath.dirname(filename)):
-                layout("native search candidate lies outside the declared closed directories")
-            selected = self._candidate(filename)
-            if selected is not None:
-                resolved[digest(self.graph.token(selected))] = selected
-        if len(resolved) != 1:
-            layout("native dependency is absent or ambiguous in the frozen view")
-        return next(iter(resolved.values()))
+        pair, _ = self.lookup.find(info, name, alias)
+        return pair[1]
 
     def _relations(self, key, info):
         self.graph.preserve(key)
         for directory in native.search_paths(info, self.graph.original(key)):
+            self.budget.tick(visit=True)
             if not self.covered(directory):
                 layout("ELF search path is not covered by closed directories")
         found = set()
@@ -106,52 +67,52 @@ class Runtime:
         self.dependencies[key] = found
 
     def validate_union(self, originals, budget):
-        """A discovery union cannot introduce a different loader search winner."""
-        lookup_names = {}
-        for filename in originals:
-            budget.tick()
-            lookup_names.setdefault(posixpath.basename(filename), []).append(filename)
-        def resolve(filename):
-            seen = set()
-            for _ in range(32):
-                filename = self.graph.normalize_prefix(posixpath.normpath(filename))
-                if filename in seen:
-                    layout("selected tool union contains a link cycle")
-                seen.add(filename)
-                parts = Path(filename).parts
-                for end in range(2, len(parts) + 1):
-                    prefix = str(Path(*parts[:end]))
-                    pair = originals.get(prefix)
-                    if pair is not None and pair[0].nodes[pair[1]]["kind"] == "symlink":
-                        filename = posixpath.join(posixpath.dirname(prefix), pair[0].nodes[pair[1]]["target"], *parts[end:])
-                        break
-                else:
-                    return originals.get(filename)
-            layout("selected tool union link traversal exceeds its bound")
+        """Reprove selection and process consistency against the combined view."""
+        from .tool_ordering import validate_processes
 
-        for key, info in self.elfs.items():
-            budget.tick()
-            for name in info.needed:
-                budget.tick()
-                expected = self.needed_targets[key, name]
-                for alias in (self.graph.logical(key), self.graph.original(key)):
-                    for filename in self.candidates(info, name, alias, lookup_names):
-                        if filename.startswith("/tools/"):
-                            continue
-                        selected = resolve(filename)
-                        if selected is not None and digest(selected[0].token(selected[1])) != expected:
-                            layout("selected tool union changes a native dependency candidate")
+        return validate_processes((self,), budget, originals)
+
+    def _resource_elfs(self, references, budget):
+        for row in references:
+            budget.tick(visit=True)
+            key = self.graph.reference(row)
+            if self.graph.nodes[key]["kind"] == "directory":
+                directory = self.graph.original(key)
+                for candidate in self.elfs:
+                    budget.tick(visit=True)
+                    if Path(self.graph.original(candidate)).is_relative_to(directory):
+                        yield candidate
+            elif key in self.elfs:
+                yield key
+
+    def processes(self, budget):
+        """Explicit resources belong to their executable, not every subprocess."""
+        for key, record in self.executables.items():
+            budget.tick(visit=True)
+            if record["format"] == "script":
+                continue
+            seeds = {key}
+            seeds.update(self._resource_elfs(record["resources"], budget))
+            # Installed package/runtime associations describe this invoking Python
+            # process. They never attach another executable's resources globally.
+            if self.graph.resolve(os.path.normpath(sys.executable), required=False) == key:
+                for package in self.graph.tool.document["python"]:
+                    seeds.update(self._resource_elfs([*package["packages"], *package["runtime"]], budget))
+            yield key, seeds
 
     def _closure(self, key):
-        found, pending = set(), list(self.dependencies[key])
+        found = set(self.dependencies[key])
+        pending = list(found)
         while pending:
+            self.budget.tick(visit=True)
             current = pending.pop()
-            if current in found:
-                continue
-            found.add(current)
-            if len(found) > MAX_RELATIONS:
-                layout("native dependency traversal exceeds its relation limit")
-            pending.extend(self.dependencies[current])
+            for child in self.dependencies[current]:
+                self.budget.tick(visit=True)
+                if child not in found:
+                    if len(found) >= MAX_RELATIONS:
+                        layout("native dependency traversal exceeds its relation limit")
+                    found.add(child)
+                    pending.append(child)
         return {digest(self.graph.token(item)) for item in found}
 
     def validate(self):
@@ -204,6 +165,9 @@ class Runtime:
                 content = self.graph.bytes(cache_key)
                 self.cache = native.read_cache(content)
                 self.control = cache_key
+        from .tool_ordering import Limit, Lookup
+
+        self.lookup = Lookup(self, Limit(self.budget)) if self.native else None
         for key, info in list(self.elfs.items()):
             self._relations(key, info)
         # _relations may reach a duplicate alias of a library already parsed.
@@ -250,6 +214,11 @@ class Runtime:
                 layout("closed native view lacks the invoking worker executable")
             # Actual imports are checked in the closed view by worker startup, before
             # project imports. All selected native stdlib bytes above are prevalidated.
+
+        from .tool_ordering import validate_processes
+
+        del self.lookup
+        self.proof_identity = validate_processes((self,), self.budget)
 
     def script(self, key, record, commands):
         if record["libraries"] or record["interpreter"] is None:

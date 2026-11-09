@@ -40,7 +40,9 @@ def cstring(content, offset):
 class Elf:
     interpreter: str | None
     needed: tuple
-    search: tuple
+    rpath: tuple
+    runpath: tuple
+    soname: str | None
     dynamic: bool
 
 
@@ -95,7 +97,7 @@ def read_elf(stream, size):
         refuse()
     if any(tag == 0x6ffffffb and value & ~(0x1 | 0x8 | 0x80 | 0x08000000) for tag, value in dynamic):
         refuse()
-    relations = [(tag, value) for tag, value in dynamic if tag in (1, 15, 29)]
+    relations = [(tag, value) for tag, value in dynamic if tag in (1, 14, 15, 29)]
     strings = b""
     if relations:
         addresses = [value for tag, value in dynamic if tag == 5]
@@ -107,10 +109,13 @@ def read_elf(stream, size):
             refuse()
         strings = read(locations[0], sizes[0])
     needed = tuple(cstring(strings, value) for tag, value in relations if tag == 1)
-    search = tuple(cstring(strings, value) for tag, value in relations if tag in (15, 29))
-    if len(needed) != len(set(needed)) or len(search) > 2:
+    tags = {tag: tuple(cstring(strings, value) for actual, value in relations if actual == tag)
+            for tag in (14, 15, 29)}
+    if (len(needed) != len(set(needed)) or any(len(values) > 1 for values in tags.values())
+            or (tags[15] and tags[29])):
         refuse()
-    return Elf(interpreters[0] if interpreters else None, needed, search, bool(dynamic))
+    return Elf(interpreters[0] if interpreters else None, needed, tags[15], tags[29],
+               tags[14][0] if tags[14] else None, bool(dynamic))
 
 
 def read_cache(content):
@@ -142,7 +147,7 @@ def read_cache(content):
 
 def search_paths(info, filename):
     result = []
-    for encoded in info.search:
+    for encoded in (*info.rpath, *info.runpath):
         for item in encoded.split(":"):
             value = item.replace("${ORIGIN}", os.path.dirname(filename)).replace("$ORIGIN", os.path.dirname(filename))
             if not value.startswith("/") or "$" in value or "\\" in value:
