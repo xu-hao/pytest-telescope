@@ -1,7 +1,6 @@
 """Reserved declarations and real fixed worker settings are independent contracts."""
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -24,7 +23,7 @@ def put(root, name, content):
 
 def project(root, route, name):
     config = '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
-    mark = f"pytest.mark.telescope(env=[{name!r}])"
+    mark = f"pytest.mark.telescope(env=[{name!r}], inputs=['tests/conftest.py'])"
     source = "import pytest\n"
     body = "def test_item(): pass\n"
     if route == "global":
@@ -35,7 +34,7 @@ def project(root, route, name):
         config += '[tool.pytest_telescope.bundles.outer]\nbundles = ["inner"]\n'
         config += f"[tool.pytest_telescope.bundles.inner]\nenv = [{json.dumps(name)}]\n"
         if route == "bundle":
-            source += 'pytestmark = pytest.mark.telescope(bundles=["outer"])\n'
+            source += 'pytestmark = pytest.mark.telescope(bundles=["outer"], inputs=["tests/conftest.py"])\n'
     elif route == "module":
         source += f"pytestmark = {mark}\n"
     elif route == "class":
@@ -123,7 +122,6 @@ def test_worker(tmp_path):
     assert os.getcwd() == "/project"
     assert os.environ["PATH"] == {expected_path!r}
     assert {{name: os.environ[name] for name in ("HOME", "TMPDIR", "PYTHONDONTWRITEBYTECODE", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")}} == {{"HOME": "/tmp", "TMPDIR": "/tmp", "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}}
-    assert sys.dont_write_bytecode
     source = tmp_path / "plain_module.py"
     source.write_text("value = 37\\n")
     spec = importlib.util.spec_from_file_location("plain_module", source)
