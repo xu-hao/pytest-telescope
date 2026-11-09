@@ -5,6 +5,8 @@ and bounded ELF dependencies are read. No host program or discovery helper is ex
 to construct this declaration. This is separate from ambient compatibility benchmarks.
 """
 
+import base64
+import hashlib
 import json
 import os
 import stat
@@ -17,8 +19,8 @@ from frozen_tool_configuration_fixtures import route_configuration
 from frozen_tool_elf import SYSTEM_SEARCH, native_relations
 from frozen_tool_fixtures import ToolProject, file_digest, manifest, put
 
-PACKAGES = {
-    "pytest": ("pytest", "_pytest"), "pluggy": ("pluggy",),
+DISTRIBUTION_MEMBERS = {
+    "pytest": ("pytest", "_pytest", "py.py"), "pluggy": ("pluggy",),
     "packaging": ("packaging",), "iniconfig": ("iniconfig",), "pygments": ("pygments",),
 }
 MAX_BYTES = 256 * 1024 * 1024
@@ -56,11 +58,14 @@ class WorkerConfiguration:
         if stdlib != Path(sys.base_prefix) / "lib" / f"python3.{sys.version_info.minor}":
             raise ValueError("controlled worker fixture requires standard CPython stdlib layout")
         self.named_tree(stdlib, stdlib=True)
-        for name, packages in PACKAGES.items():
+        for name, members in DISTRIBUTION_MEMBERS.items():
             distribution = metadata.distribution(name)
-            for package in packages:
-                self.named_tree(Path(distribution.locate_file(package)))
-            metadata_files = [row for row in distribution.files or () if row.name == "METADATA" and row.parent.name.endswith(".dist-info")]
+            records = distribution.files
+            if records is None:
+                raise ValueError("controlled worker distribution has no installed file records")
+            for member in members:
+                self.distribution_member(distribution, records, member)
+            metadata_files = [row for row in records if row.name == "METADATA" and row.parent.name.endswith(".dist-info")]
             if len(metadata_files) != 1:
                 raise ValueError("controlled worker package metadata is not uniquely installed")
             self.named_tree(Path(distribution.locate_file(metadata_files[0].parent)))
@@ -91,6 +96,38 @@ class WorkerConfiguration:
             "cache": {"root": "config", "path": "ld.so.cache"},
         }
         self.save()
+
+    def distribution_member(self, distribution, records, member):
+        """Select an explicitly named installed package tree or RECORD-owned module."""
+        path = Path(distribution.locate_file(member))
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            if not any(row.parts[0] == member and len(row.parts) > 1 for row in records):
+                raise ValueError("named package tree is not owned by its distribution")
+            self.named_tree(path)
+            return
+        owned = [row for row in records if row.as_posix() == member]
+        if (not stat.S_ISREG(info.st_mode) or len(owned) != 1
+                or owned[0].hash is None or owned[0].hash.mode != "sha256"
+                or owned[0].size != info.st_size or info.st_size > 64 * 1024 * 1024):
+            raise ValueError("named module requires an exact bounded regular distribution record")
+        digest = hashlib.sha256()
+        size = 0
+        with path.open("rb") as stream:
+            magic = stream.read(4)
+            stream.seek(0)
+            while chunk := stream.read(1024 * 1024):
+                size += len(chunk)
+                if size > 64 * 1024 * 1024 or self.read_bytes + size > MAX_BYTES:
+                    raise ValueError("controlled distribution module exceeds fixture byte bounds")
+                digest.update(chunk)
+        encoded = base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode("ascii")
+        if size != owned[0].size or encoded != owned[0].hash.value:
+            raise ValueError("named module bytes disagree with installed distribution ownership")
+        self.read_bytes += size
+        self.pin(path)
+        if magic == b"\x7fELF":
+            self.native.add(path.resolve())
 
     def anchor(self, path):
         candidates = [(len(root.parts), name) for name, root in self.anchors.items() if path.is_relative_to(root)]
