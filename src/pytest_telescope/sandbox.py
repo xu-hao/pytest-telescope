@@ -11,6 +11,7 @@ import re
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -484,12 +485,94 @@ def _project_paths(description, project):
     return sorted(found)
 
 
-def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False):
+def _closed_mountpoints(directory, closed):
+    """Make missing mountpoints privately, preserving the admitted system baseline.
+
+    A readonly bind cannot supply a new destination below itself. Reconstruct only
+    the necessary parent directories as readonly tmpfs scaffolding; existing
+    siblings remain readonly binds or literal links. No host directory is written
+    and no sibling becomes part of a selected frozen tool projection.
+    """
+    base = Path(directory)
+    missing = {}
+    arguments = []
+    visits = size = 0
+
+    def add(*parts):
+        nonlocal size
+        size += sum(len(part.encode()) + 1 for part in parts)
+        if size > MAX_OUTPUT:
+            raise InfrastructureError("system mountpoint arguments exceed their bound")
+        arguments.extend(parts)
+
+    def visit():
+        nonlocal visits
+        visits += 1
+        if visits > 4096:
+            raise InfrastructureError("system mountpoint entries exceed their bound")
+
+    def scaffold(parent, targets):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise InfrastructureError("system mountpoint parent changed type")
+        add("--perms", format(stat.S_IMODE(info.st_mode), "o"), "--tmpfs", str(parent))
+        children = {}
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                visit()
+                children[entry.name] = entry.stat(follow_symlinks=False)
+        branches = {target.relative_to(parent).parts[0] for target in targets}
+        for name, info in sorted(children.items()):
+            child = parent / name
+            if name in branches:
+                if child in targets or not stat.S_ISDIR(info.st_mode):
+                    raise InfrastructureError("system mountpoint ancestor changed type")
+                scaffold(child, [target for target in targets if target.is_relative_to(child)])
+            elif stat.S_ISLNK(info.st_mode):
+                add("--symlink", os.readlink(child), str(child))
+            elif stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode):
+                add("--ro-bind", str(child), str(child))
+            else:
+                raise InfrastructureError("unsupported system mountpoint sibling type")
+        for target in targets:
+            if target.relative_to(parent).parts[0] not in children:
+                add("--dir", str(target))
+        add("--remount-ro", str(parent))
+
+    try:
+        for name in closed:
+            target = Path(name)
+            if target == base or not target.is_relative_to(base):
+                continue
+            parent = base
+            for part in target.relative_to(base).parts:
+                visit()
+                child = parent / part
+                try:
+                    info = child.lstat()
+                except FileNotFoundError:
+                    missing[target] = parent
+                    break
+                if not stat.S_ISDIR(info.st_mode):
+                    raise InfrastructureError("closed system mountpoint is not a directory")
+                parent = child
+        roots = set(missing.values())
+        for parent in sorted(roots):
+            if not any(parent != other and parent.is_relative_to(other) for other in roots):
+                scaffold(parent, [target for target in missing if target.is_relative_to(parent)])
+    except OSError as exc:
+        raise InfrastructureError("system mountpoint baseline could not be read") from exc
+    return arguments
+
+
+def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False, closed_directories=()):
     """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
         if directory != "/etc" or not native:
             arguments += ["--ro-bind", directory, directory]
+            if native:
+                arguments += _closed_mountpoints(directory, closed_directories)
     prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
         if link in prefixes:
@@ -873,7 +956,13 @@ def execute(
 
         validate_environment(environment, tool_view.names)
     argv = [
-        *_base_arguments(box, project, frozen_prefixes=prefixes, native=native),
+        *_base_arguments(
+            box,
+            project,
+            frozen_prefixes=prefixes,
+            native=native,
+            closed_directories=() if tool_view is None else tool_view.closed,
+        ),
         *_project_arguments(box, view, project),
     ]
     if tool_view is not None:
