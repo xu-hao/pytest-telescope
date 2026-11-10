@@ -548,10 +548,14 @@ def run(
                 results.append(
                     _row(item, suite, "scoped", "not-selected")
                     if not item["selected"]
-                    else _row(item, suite, "scoped", "infrastructure_error", "execution not started")
+                    else _row(
+                        item, suite, "scoped", "infrastructure_error", "execution not started"
+                    )
                 )
         progress["parked"] = sum(
-            row["selected"] and row["group_id"] is None and row["attempts"] == 0
+            row["selected"]
+            and row["group_id"] is None
+            and row["attempts"] == 0
             and row["outcome"] == "infrastructure_error"
             for row in results
         )
@@ -659,7 +663,8 @@ def run(
             try:
                 accounting = RefusalAccounting(
                     {name: observed[name] for name in FIELDS},
-                    metadata=error_result(error), maximum=model.MAX_OUTPUT_BYTES,
+                    metadata=error_result(error),
+                    maximum=model.MAX_OUTPUT_BYTES,
                 )
                 error.attach_accounting(accounting)
             except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as exc:
@@ -761,7 +766,9 @@ def run(
             row.update(
                 outcome="failed" if result["declaration_error"] else "executed",
                 collected=len(result["items"]),
-                inventory_digest=None if result["declaration_error"] else fingerprint(
+                inventory_digest=None
+                if result["declaration_error"]
+                else fingerprint(
                     sorted([suite.name, item["case_id"], item["file"]] for item in result["items"])
                 ),
             )
@@ -858,7 +865,11 @@ def run(
                                 "metadata": metadata_identity(collection_unit.distributions),
                                 "files": collection_unit.tests,
                                 "registry": registry,
-                                **({"tools": collection_tools.identity} if collection_unit.tools else {}),
+                                **(
+                                    {"tools": collection_tools.identity}
+                                    if collection_unit.tools
+                                    else {}
+                                ),
                                 "environment": fingerprint(collection_environment),
                             }
                         )

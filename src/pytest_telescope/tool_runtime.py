@@ -97,7 +97,9 @@ class Runtime:
             # process. They never attach another executable's resources globally.
             if self.graph.resolve(os.path.normpath(sys.executable), required=False) == key:
                 for package in self.graph.tool.document["python"]:
-                    seeds.update(self._resource_elfs([*package["packages"], *package["runtime"]], budget))
+                    seeds.update(
+                        self._resource_elfs([*package["packages"], *package["runtime"]], budget)
+                    )
             yield key, seeds
 
     def _closure(self, key):
@@ -145,22 +147,57 @@ class Runtime:
         if dynamic and (loader is None or loader["cache"] is None):
             layout("dynamic native tools require their pinned loader cache")
         if loader is not None:
-            normalized = sorted(set(self.graph.resolved_path(name) for name in loader["directories"]))
+            normalized = sorted(
+                set(self.graph.resolved_path(name) for name in loader["directories"])
+            )
             for name in normalized:
                 path = Path(name)
                 entry = self.graph.resolve(name, required=False)
                 if entry is not None and self.graph.nodes[entry]["kind"] != "directory":
                     layout("native search root is not a pinned directory")
-                if name in ("/", "/usr", "/etc", "/tmp", "/dev/shm", "/home", "/root", "/opt", "/var", "/usr/local", str(Path.home()), sys.prefix, sys.base_prefix) or any(path.is_relative_to(point) for point in ("/proc", "/dev", "/sys", "/run", "/tools", "/telescope", "/metadata")):
+                if name in (
+                    "/",
+                    "/usr",
+                    "/etc",
+                    "/tmp",
+                    "/dev/shm",
+                    "/home",
+                    "/root",
+                    "/opt",
+                    "/var",
+                    "/usr/local",
+                    str(Path.home()),
+                    sys.prefix,
+                    sys.base_prefix,
+                ) or any(
+                    path.is_relative_to(point)
+                    for point in (
+                        "/proc",
+                        "/dev",
+                        "/sys",
+                        "/run",
+                        "/tools",
+                        "/telescope",
+                        "/metadata",
+                    )
+                ):
                     layout("native search roots cannot replace nonlibrary system roots")
-            self.directories = tuple(name for name in normalized if not any(name != other and Path(name).is_relative_to(other) for other in normalized))
+            self.directories = tuple(
+                name
+                for name in normalized
+                if not any(
+                    name != other and Path(name).is_relative_to(other) for other in normalized
+                )
+            )
             if dynamic:
                 if any(not self.covered(name) for name in native.DEFAULT_SEARCH):
                     layout("native profile does not close every default search directory")
             if loader["cache"] is not None:
                 cache_key = self.graph.reference(loader["cache"], kind="file")
                 self.graph.preserve(cache_key)
-                if self.graph.token(self.graph.resolve("/etc/ld.so.cache")) != self.graph.token(cache_key):
+                if self.graph.token(self.graph.resolve("/etc/ld.so.cache")) != self.graph.token(
+                    cache_key
+                ):
                     layout("loader cache reference does not preserve its actual control path")
                 content = self.graph.bytes(cache_key)
                 self.cache = native.read_cache(content)
@@ -196,9 +233,14 @@ class Runtime:
                 if record["interpreter"] is None:
                     layout("dynamic executable lacks its actual ELF interpreter")
                 declared = self.graph.reference(record["interpreter"], kind="file")
-                if self.graph.token(self.graph.resolve(info.interpreter)) != self.graph.token(declared):
+                if self.graph.token(self.graph.resolve(info.interpreter)) != self.graph.token(
+                    declared
+                ):
                     layout("ELF interpreter bytes or mapping disagree")
-            declared_libraries = {digest(self.graph.token(self.graph.reference(row, kind="file"))) for row in record["libraries"]}
+            declared_libraries = {
+                digest(self.graph.token(self.graph.reference(row, kind="file")))
+                for row in record["libraries"]
+            }
             if self._closure(key) != declared_libraries:
                 layout("declared ELF libraries disagree with the actual transitive graph")
         for key in self.executables:
@@ -207,7 +249,9 @@ class Runtime:
                 if current in seen or len(seen) >= 4:
                     layout("script interpreter chain is cyclic or exceeds the supported depth")
                 seen.add(current)
-                current = self.graph.reference(self.executables[current]["interpreter"], kind="file")
+                current = self.graph.reference(
+                    self.executables[current]["interpreter"], kind="file"
+                )
         if dynamic:
             worker = self.graph.resolve(os.path.normpath(sys.executable))
             if worker not in self.executables or self.elf(worker) is None:
@@ -237,11 +281,17 @@ class Runtime:
         if len(words) not in (1, 2) or not words[0].startswith("/"):
             layout("unsupported tool shebang syntax")
         interpreter = self.graph.reference(record["interpreter"], kind="file")
-        if interpreter not in self.executables or self.graph.token(self.graph.resolve(words[0])) != self.graph.token(interpreter):
+        if interpreter not in self.executables or self.graph.token(
+            self.graph.resolve(words[0])
+        ) != self.graph.token(interpreter):
             layout("shebang interpreter does not match the pinned executable")
         self.graph.preserve(interpreter)
         if len(words) == 2:
-            if self.executables[interpreter]["format"] != "env" or words[1] not in self.commands or self.commands[words[1]] not in commands:
+            if (
+                self.executables[interpreter]["format"] != "env"
+                or words[1] not in self.commands
+                or self.commands[words[1]] not in commands
+            ):
                 layout("env shebang requires its explicit pinned command mapping")
         elif self.executables[interpreter]["format"] == "env":
             layout("env shebang requires exactly one declared command")

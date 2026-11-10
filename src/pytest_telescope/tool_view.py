@@ -14,7 +14,11 @@ def inside(filename, parents):
 
 
 def minimal(paths):
-    return sorted(name for name in set(paths) if not any(name != other and Path(name).is_relative_to(other) for other in paths))
+    return sorted(
+        name
+        for name in set(paths)
+        if not any(name != other and Path(name).is_relative_to(other) for other in paths)
+    )
 
 
 class Projection:
@@ -56,7 +60,9 @@ class Projection:
             for command, key in runtime.commands.items():
                 # Logical mapping and the whole executable context are significant;
                 # equal executable bytes alone cannot make two commands equivalent.
-                signature = digest([graph.logical(key), graph.tool.document, graph.prefix_identity()])
+                signature = digest(
+                    [graph.logical(key), graph.tool.document, graph.prefix_identity()]
+                )
                 previous = self.commands.get(command)
                 if previous is not None and previous[0] != signature:
                     layout("selected tool command mappings conflict")
@@ -77,7 +83,10 @@ class Projection:
             closed.extend(self.startup.roots)
             closed.append("/etc")
         ordering_identity = validate_processes(
-            tuple(capture.runtimes[name] for name in names), self.budget, originals, worker,
+            tuple(capture.runtimes[name] for name in names),
+            self.budget,
+            originals,
+            worker,
         )
         for filename, (graph, key) in originals.items():
             self.budget.tick()
@@ -89,7 +98,11 @@ class Projection:
         protected = ("/", "/usr", "/etc", "/tmp", "/dev/shm", str(capture.manifest.root))
         for filename in self.closed:
             native_root = self.native and (filename == "/etc" or filename in self.startup.roots)
-            if (filename in protected and not native_root) or Path(capture.manifest.root).is_relative_to(filename) or Path(filename).is_relative_to(capture.manifest.root):
+            if (
+                (filename in protected and not native_root)
+                or Path(capture.manifest.root).is_relative_to(filename)
+                or Path(filename).is_relative_to(capture.manifest.root)
+            ):
                 layout("closed tool directory overlaps a protected mount or project")
         if self.native:
             from .tool_startup import environment
@@ -114,11 +127,21 @@ class Projection:
             if cache is not None and cache[0].nodes[cache[1]]["kind"] != "file":
                 layout("native loader cache control must be a direct regular file")
         payload = [
-            [[name, capture.manifest.tools[name].document, capture.graphs[name].prefix_identity()] for name in names],
-            self.closed, sorted(self.commands.items()),
+            [
+                [
+                    name,
+                    capture.manifest.tools[name].document,
+                    capture.graphs[name].prefix_identity(),
+                ]
+                for name in names
+            ],
+            self.closed,
+            sorted(self.commands.items()),
             [self.native, [[name, capture.runtimes[name].dynamic] for name in names]],
             ordering_identity,
-            None if not self.native else ["declared-configuration-v1", "/etc/ld.so.preload", "file", 0o444, 0],
+            None
+            if not self.native
+            else ["declared-configuration-v1", "/etc/ld.so.preload", "file", 0o444, 0],
             None if self.startup is None else self.startup.identity,
         ]
         self.identity = digest(payload)
@@ -130,8 +153,14 @@ class Projection:
             source = self.directory / ("closed-" + str(index))
             source.mkdir(mode=0o700)
             self.directories.add(source)
-            members = [(path, value) for path, value in originals.items() if Path(path).is_relative_to(destination)]
-            for filename, (graph, key) in sorted(members, key=lambda item: (len(Path(item[0]).parts), item[0])):
+            members = [
+                (path, value)
+                for path, value in originals.items()
+                if Path(path).is_relative_to(destination)
+            ]
+            for filename, (graph, key) in sorted(
+                members, key=lambda item: (len(Path(item[0]).parts), item[0])
+            ):
                 if self.native and filename == "/etc/ld.so.preload":
                     continue
                 self.materialize(graph, key, source / Path(filename).relative_to(destination))
@@ -147,7 +176,9 @@ class Projection:
                 else:
                     for row in root["entries"]:
                         destination = graph.original((root["id"], row["path"]))
-                        if row["kind"] == "file" and not inside(destination, [*trees, *self.closed]):
+                        if row["kind"] == "file" and not inside(
+                            destination, [*trees, *self.closed]
+                        ):
                             self.bindings[destination] = source / row["path"]
         if self.commands:
             directory = self.directory / "commands"
@@ -167,7 +198,9 @@ class Projection:
             self.entries[empty] = ("file", info.st_dev, info.st_ino, 0o444, 0)
         for directory in sorted(self.directories, key=lambda path: len(path.parts), reverse=True):
             row = self.entries.get(directory)
-            self.capture.owned_directories.freeze(directory, row[1] & 0o555 if row and row[0] == "directory" else 0o555)
+            self.capture.owned_directories.freeze(
+                directory, row[1] & 0o555 if row and row[0] == "directory" else 0o555
+            )
         self.directory.chmod(0o555)
 
     def planned_paths(self, originals):
@@ -219,14 +252,28 @@ class Projection:
         else:
             os.link(source, destination, follow_symlinks=False)
             info = source.stat(follow_symlinks=False)
-            self.entries[destination] = ("file", info.st_dev, info.st_ino, row["mode"] & 0o555, row["size"])
+            self.entries[destination] = (
+                "file",
+                info.st_dev,
+                info.st_ino,
+                row["mode"] & 0o555,
+                row["size"],
+            )
 
     def verify(self):
         budget = self.capture._budget()
-        if self.directory.is_symlink() or not self.directory.is_dir() or self.directory.stat().st_mode & 0o222:
+        if (
+            self.directory.is_symlink()
+            or not self.directory.is_dir()
+            or self.directory.stat().st_mode & 0o222
+        ):
             raise InfrastructureError("owned tool projection root changed")
         expected = set(self.entries) | self.directories
-        actual = {self.directory / name for name in self.capture.owned_directories.names(self.directory, budget) if name != "."}
+        actual = {
+            self.directory / name
+            for name in self.capture.owned_directories.names(self.directory, budget)
+            if name != "."
+        }
         if actual != expected:
             raise InfrastructureError("owned tool projection membership changed")
         for filename, row in self.entries.items():
@@ -237,7 +284,11 @@ class Projection:
             elif row[0] == "directory":
                 valid = stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == row[1] & 0o555
             else:
-                valid = stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode), info.st_size) == row[1:]
+                valid = (
+                    stat.S_ISREG(info.st_mode)
+                    and (info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode), info.st_size)
+                    == row[1:]
+                )
             if not valid:
                 raise InfrastructureError("owned tool projection mapping changed")
         for directory in self.directories:

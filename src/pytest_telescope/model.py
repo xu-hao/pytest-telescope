@@ -396,7 +396,16 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     mapping(
         spec,
         "pytest_telescope",
-        {"defaults", "bundles", "test_roots", "env", "suites", "distributions", "execution", "tools"},
+        {
+            "defaults",
+            "bundles",
+            "test_roots",
+            "env",
+            "suites",
+            "distributions",
+            "execution",
+            "tools",
+        },
     )
     tool_definitions = tool_context.registrations(spec.get("tools", {}))
     tool_links = {}
@@ -411,7 +420,12 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         key = (tuple(names), missing)
         if key not in expansions:
             expansions[key] = expand(
-                root, names, label, missing=missing, excluded=excluded, budget=budget,
+                root,
+                names,
+                label,
+                missing=missing,
+                excluded=excluded,
+                budget=budget,
                 tool_links=tool_links,
             )
         return expansions[key]
@@ -459,7 +473,9 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     pending_inputs = []
 
     def declaration(item, label):
-        item = mapping(item, label, {"inputs", "bundles", "absent", "cache", "distributions", "env", "tools"})
+        item = mapping(
+            item, label, {"inputs", "bundles", "absent", "cache", "distributions", "env", "tools"}
+        )
         # Expand after structural discovery establishes the potential tool bindings.
         # A function may inherit the tool owning one of its project directory links.
         inputs = sorted(set(sequence(item.get("inputs", []), label + " inputs")))
@@ -484,8 +500,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         if len(inputs) + len(absent) > MAX_INPUT_PATHS:
             raise DeclarationError("effective declaration exceeds 100000 paths")
         unit = Unit(
-            label, [], [], sorted(absent), item.get("cache", True), sorted(metadata),
-            env=sorted(env), tools=sorted(selected_tools),
+            label,
+            [],
+            [],
+            sorted(absent),
+            item.get("cache", True),
+            sorted(metadata),
+            env=sorted(env),
+            tools=sorted(selected_tools),
         )
         # Dependencies are appended first by bundle(), so resolution below is
         # topological. Only this declaration's own raw patterns are expanded.
@@ -501,7 +523,11 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             raise DeclarationError("bundle nesting exceeds 32 levels")
         if name not in resolved:
             active.add(name)
-            mapping(bundles[name], "bundle", {"inputs", "bundles", "absent", "distributions", "env", "tools"})
+            mapping(
+                bundles[name],
+                "bundle",
+                {"inputs", "bundles", "absent", "distributions", "env", "tools"},
+            )
             resolved[name] = declaration(bundles[name], "bundle " + name)
             depth = 1 + max((depths[dep] for dep in bundles[name].get("bundles", [])), default=0)
             if depth > 32:
@@ -611,7 +637,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         for ancestor in rows_by_file[row["file"]]:
             if ancestor is row or (
                 ancestor["kind"] in {"scope", "decorator"}
-                and row["owner"][:len(ancestor["owner"])] == ancestor["owner"]
+                and row["owner"][: len(ancestor["owner"])] == ancestor["owner"]
             ):
                 unit = declarations[ancestor["id"]]
                 selected_tools.update(unit.tools)
@@ -670,15 +696,25 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             sorted(absent),
             cache,
             sorted(metadata),
-            env=sorted(env), tools=sorted(selected_tools),
+            env=sorted(env),
+            tools=sorted(selected_tools),
             tool_links=tool_context.project_links(tools, sorted(selected_tools)),
         )
         validate_scope(root, collection)
         collections.append(collection)
-    pool = Unit(
-        "pool", [], sorted(pool_inputs), sorted(pool_absent), True,
-        tools=sorted(pool_tools), tool_links=tool_context.project_links(tools, sorted(pool_tools)),
-    ) if pool_inputs else None
+    pool = (
+        Unit(
+            "pool",
+            [],
+            sorted(pool_inputs),
+            sorted(pool_absent),
+            True,
+            tools=sorted(pool_tools),
+            tool_links=tool_context.project_links(tools, sorted(pool_tools)),
+        )
+        if pool_inputs
+        else None
+    )
     return Manifest(
         root,
         raw,
@@ -765,8 +801,14 @@ def case_unit(manifest, item, suite):
         inputs.update(manifest.distributions[name].inputs)
     inputs.update(tool_context.project_inputs(manifest.tools, sorted(selected_tools)))
     unit = Unit(
-        item["case_id"], [item["file"]], sorted(inputs), sorted(absent), cache, sorted(metadata),
-        env=sorted(env), tools=sorted(selected_tools),
+        item["case_id"],
+        [item["file"]],
+        sorted(inputs),
+        sorted(absent),
+        cache,
+        sorted(metadata),
+        env=sorted(env),
+        tools=sorted(selected_tools),
         tool_links=tool_context.project_links(manifest.tools, sorted(selected_tools)),
     )
     validate_scope(manifest.root, unit)
@@ -798,9 +840,11 @@ def snapshot(manifest, unit, destination):
                     if bound is None and Path(text).is_absolute():
                         raise InfrastructureError("leaf symlink changed to an absolute target")
                     resolved = source.resolve(strict=False)
-                    if bound is None and (not resolved.is_relative_to(manifest.root) or resolved.relative_to(
-                        manifest.root
-                    ).as_posix() not in {*unit.inputs, *unit.absent}):
+                    if bound is None and (
+                        not resolved.is_relative_to(manifest.root)
+                        or resolved.relative_to(manifest.root).as_posix()
+                        not in {*unit.inputs, *unit.absent}
+                    ):
                         raise InfrastructureError("symlink target changed outside its declaration")
                     target.symlink_to(text)
                     after = os.stat(leaf, dir_fd=directory, follow_symlinks=False)

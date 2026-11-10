@@ -17,9 +17,14 @@ def signature(box):
 
 
 def path(value):
-    if (type(value) is not str or not value.startswith("/") or value.startswith("//")
-            or posixpath.normpath(value) != value or len(value.encode("utf-8")) > 4096
-            or len(Path(value).parts) > 65):
+    if (
+        type(value) is not str
+        or not value.startswith("/")
+        or value.startswith("//")
+        or posixpath.normpath(value) != value
+        or len(value.encode("utf-8")) > 4096
+        or len(Path(value).parts) > 65
+    ):
         layout("native startup requires canonical absolute interpreter paths")
     return Path(value)
 
@@ -42,9 +47,17 @@ class Startup:
             layout("native startup supports standard Linux x86_64 CPython 3.11 through 3.13")
         fields = description.get("startup")
         required = {
-            "prefix", "exec_prefix", "base_prefix", "base_exec_prefix",
-            "base_executable", "stdlib", "platstdlib", "purelib", "platlib",
-            "platlibdir", "sites",
+            "prefix",
+            "exec_prefix",
+            "base_prefix",
+            "base_exec_prefix",
+            "base_executable",
+            "stdlib",
+            "platstdlib",
+            "purelib",
+            "platlib",
+            "platlibdir",
+            "sites",
         }
         if type(fields) is not dict or set(fields) != required or fields["platlibdir"] != "lib":
             layout("native startup requires the supported interpreter path description")
@@ -54,22 +67,43 @@ class Startup:
         self.roots = tuple(sorted({str(prefix), str(base)}))
         for root in self.roots:
             current = Path(root)
-            if root in ("/", "/etc", "/bin", "/lib", "/lib64", "/home", "/root", "/tmp", "/var", "/opt", str(Path.home())):
+            if root in (
+                "/",
+                "/etc",
+                "/bin",
+                "/lib",
+                "/lib64",
+                "/home",
+                "/root",
+                "/tmp",
+                "/var",
+                "/opt",
+                str(Path.home()),
+            ):
                 layout("native startup prefix overlaps a protected root")
             if current.is_relative_to(project) or Path(project).is_relative_to(current):
                 layout("native startup prefix overlaps the project")
-            if any(current.is_relative_to(p) or Path(p).is_relative_to(current) for p in ("/proc", "/dev", "/sys", "/run", "/tools", "/telescope", "/metadata")):
+            if any(
+                current.is_relative_to(p) or Path(p).is_relative_to(current)
+                for p in ("/proc", "/dev", "/sys", "/run", "/tools", "/telescope", "/metadata")
+            ):
                 layout("native startup prefix overlaps a protocol or control path")
         minor = (version >> 16) & 255
         library = f"python3.{minor}"
         stdlib = base / "lib" / library
-        if path(fields["stdlib"]) != stdlib or path(fields["platstdlib"]) != prefix / "lib" / library:
+        if (
+            path(fields["stdlib"]) != stdlib
+            or path(fields["platstdlib"]) != prefix / "lib" / library
+        ):
             layout("native startup requires the standard prefix library layout")
         executable = path(box.executable)
         base_executable = path(fields["base_executable"])
         if executable.parent != prefix / "bin" or base_executable.parent != base / "bin":
             layout("native startup requires a prefix bin interpreter")
-        if any(not re.fullmatch(r"python(?:3(?:\.\d+)?)?", p.name) for p in (executable, base_executable)):
+        if any(
+            not re.fullmatch(r"python(?:3(?:\.\d+)?)?", p.name)
+            for p in (executable, base_executable)
+        ):
             layout("native startup interpreter alias is unsupported")
         self.signature = signature(box)
         self.originals = originals
@@ -102,7 +136,8 @@ class Startup:
                 continue
             if current.suffix in (".pth", ".egg-link", "._pth") or any(
                 part == hook or part.startswith(hook + ".")
-                for part in current.parts for hook in ("sitecustomize", "usercustomize")
+                for part in current.parts
+                for hook in ("sitecustomize", "usercustomize")
             ):
                 layout("native startup import hooks are unsupported")
             if current.name == "pybuilddir.txt" or current.parts[-2:] == ("Modules", "Setup.local"):
@@ -129,14 +164,26 @@ class Startup:
                     if not separator or name in values:
                         raise ValueError
                     values[name] = value
-                if set(values) - {"home", "include-system-site-packages", "version", "executable", "command", "prompt"}:
+                if set(values) - {
+                    "home",
+                    "include-system-site-packages",
+                    "version",
+                    "executable",
+                    "command",
+                    "prompt",
+                }:
                     raise ValueError
-                if values.get("home") != str(base / "bin") or values.get("include-system-site-packages") not in ("true", "false"):
+                if values.get("home") != str(base / "bin") or values.get(
+                    "include-system-site-packages"
+                ) not in ("true", "false"):
                     raise ValueError
                 if "executable" in values:
                     configured = path(values["executable"])
                     graph, key = self.regular(configured)
-                    if configured.parent != base / "bin" or path(graph.resolved_path(str(configured))).parent != base / "bin":
+                    if (
+                        configured.parent != base / "bin"
+                        or path(graph.resolved_path(str(configured))).parent != base / "bin"
+                    ):
                         raise ValueError
             except (UnicodeError, ValueError):
                 layout("unsupported frozen virtual environment configuration")

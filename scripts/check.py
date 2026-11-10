@@ -34,37 +34,84 @@ def main() -> None:
     stages = Stages(output, root)
     error = None
     try:
-        with tempfile.TemporaryDirectory(prefix="telescope-functional-gate-", dir=claimed) as scratch:
+        with tempfile.TemporaryDirectory(
+            prefix="telescope-functional-gate-", dir=claimed
+        ) as scratch:
             scratch = Path(scratch)
             env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", TMPDIR=str(scratch))
-            for name in ("TELESCOPE_FIXTURE_ADMISSION", "TELESCOPE_FIXTURE_ADMISSION_SHA256",
-                         "TELESCOPE_FIXTURE_CHROMIUM"):
+            for name in (
+                "TELESCOPE_FIXTURE_ADMISSION",
+                "TELESCOPE_FIXTURE_ADMISSION_SHA256",
+                "TELESCOPE_FIXTURE_CHROMIUM",
+            ):
                 env.pop(name, None)
             stages.run("lint", "-m", "ruff", "check", ".", env=env)
             stages.run("format", "-m", "ruff", "format", "--check", ".", env=env)
             stages.run("build", "-m", "build", "--outdir", str(output / "dist"), env=env)
             distributions = sorted((output / "dist").iterdir())
-            stages.run("metadata", "-m", "twine", "check", "--strict", *(str(path) for path in distributions), env=env)
-            stages.run("docs", "-m", "sphinx", "-n", "-W", "--keep-going", "-b", "dirhtml",
-                       "docs", str(output / "site"), env=env)
+            stages.run(
+                "metadata",
+                "-m",
+                "twine",
+                "check",
+                "--strict",
+                *(str(path) for path in distributions),
+                env=env,
+            )
+            stages.run(
+                "docs",
+                "-m",
+                "sphinx",
+                "-n",
+                "-W",
+                "--keep-going",
+                "-b",
+                "dirhtml",
+                "docs",
+                str(output / "site"),
+                env=env,
+            )
             wheels = list((output / "dist").glob("*.whl"))
             if len(wheels) != 1:
                 raise RuntimeError("expected exactly one built wheel")
             binding = candidate_binding(root, wheels[0], args.node)
             if binding["source"] != source:
                 raise RuntimeError("candidate changed during build")
-            stages.run("install", "-m", "pip", "install", "--force-reinstall", "--no-deps",
-                       "--no-compile", str(wheels[0]), env=env)
+            stages.run(
+                "install",
+                "-m",
+                "pip",
+                "install",
+                "--force-reinstall",
+                "--no-deps",
+                "--no-compile",
+                str(wheels[0]),
+                env=env,
+            )
             binding_file = output / "candidate-binding.json"
             binding_hash = write_json(binding_file, binding)
             receipt = output / "functional-prerequisites.json"
             ready = output / "functional-admission.json"
             helper = str(root / "scripts/functional_gate.py")
-            arguments = ["--binding", str(binding_file), "--binding-sha256", binding_hash,
-                         "--scratch", str(scratch), "--receipt", str(receipt), "--admission", str(ready)]
+            arguments = [
+                "--binding",
+                str(binding_file),
+                "--binding-sha256",
+                binding_hash,
+                "--scratch",
+                str(scratch),
+                "--receipt",
+                str(receipt),
+                "--admission",
+                str(ready),
+            ]
             stages.run("prepare", "-I", "-B", helper, "prepare", *arguments, timeout=900, env=env)
-            arguments += ["--receipt-sha256", file_identity(receipt, 4 * 1024 * 1024)["sha256"],
-                          "--admission-sha256", file_identity(ready, 4 * 1024 * 1024)["sha256"]]
+            arguments += [
+                "--receipt-sha256",
+                file_identity(receipt, 4 * 1024 * 1024)["sha256"],
+                "--admission-sha256",
+                file_identity(ready, 4 * 1024 * 1024)["sha256"],
+            ]
             stages.run("functional", "-I", "-B", helper, "tests", *arguments, timeout=900, env=env)
             stages.run("harness", "-I", "-B", helper, "harness", *arguments, env=env)
         if source_identity(root) != source:
@@ -73,8 +120,10 @@ def main() -> None:
         error = type(exc).__name__ + ": " + str(exc)[:1024]
         raise
     finally:
-        write_json(output / "gate-result.json", {"source": source, "error": error,
-                                                 "status": "passed" if error is None else "failed"})
+        write_json(
+            output / "gate-result.json",
+            {"source": source, "error": error, "status": "passed" if error is None else "failed"},
+        )
 
 
 if __name__ == "__main__":

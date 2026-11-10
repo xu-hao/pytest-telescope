@@ -31,8 +31,30 @@ NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,127}\Z", re.ASCII)
 COMMAND = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\Z", re.ASCII)
 DIGEST = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 ROOT_FIELDS = {"id", "source", "coverage", "preserve_source", "entries"}
-MANIFEST_FIELDS = {"schema", "roots", "executables", "python", "links", "locks", "commands", "loader"}
-PROTECTED_PARTS = {".git", ".hg", ".svn", ".ssh", ".aws", ".gnupg", ".docker", ".kube", ".netrc", ".codex", ".agents", ".pytest-telescope"}
+MANIFEST_FIELDS = {
+    "schema",
+    "roots",
+    "executables",
+    "python",
+    "links",
+    "locks",
+    "commands",
+    "loader",
+}
+PROTECTED_PARTS = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".docker",
+    ".kube",
+    ".netrc",
+    ".codex",
+    ".agents",
+    ".pytest-telescope",
+}
 
 
 def unsupported(kind, message):
@@ -170,7 +192,9 @@ class Tool:
 
     @property
     def project_inputs(self):
-        return sorted({self.registration["manifest"], *(row["path"] for row in self.document["locks"])})
+        return sorted(
+            {self.registration["manifest"], *(row["path"] for row in self.document["locks"])}
+        )
 
     @property
     def roots(self):
@@ -218,11 +242,35 @@ def _root(value, project):
         or PROTECTED_PARTS.intersection(source.parts)
         or source.name in {"site-packages", "dist-packages"}
         or source == PurePosixPath(Path.home())
-        or (value["coverage"] == "tree" and source in {PurePosixPath(sys.prefix), PurePosixPath(sys.base_prefix)})
+        or (
+            value["coverage"] == "tree"
+            and source in {PurePosixPath(sys.prefix), PurePosixPath(sys.base_prefix)}
+        )
         or source in map(PurePosixPath, ("/home", "/root", "/tmp", "/dev/shm"))
         or (source.is_relative_to("/dev") and not source.is_relative_to("/dev/shm"))
-        or any(source.is_relative_to(prefix) for prefix in ("/proc", "/run", "/sys", "/tools", "/telescope", "/metadata"))
-        or (value["coverage"] == "tree" and source in map(PurePosixPath, ("/usr", "/etc", "/opt", "/var", "/usr/local", "/usr/lib", "/usr/lib64", "/usr/local/lib", "/lib", "/lib64")))
+        or any(
+            source.is_relative_to(prefix)
+            for prefix in ("/proc", "/run", "/sys", "/tools", "/telescope", "/metadata")
+        )
+        or (
+            value["coverage"] == "tree"
+            and source
+            in map(
+                PurePosixPath,
+                (
+                    "/usr",
+                    "/etc",
+                    "/opt",
+                    "/var",
+                    "/usr/local",
+                    "/usr/lib",
+                    "/usr/lib64",
+                    "/usr/local/lib",
+                    "/lib",
+                    "/lib64",
+                ),
+            )
+        )
     ):
         unsupported("layout", "frozen-tool source is not a supported narrow input")
     rows = [_entry(row) for row in items(value["entries"], MAX_ENTRIES)]
@@ -259,7 +307,12 @@ def parse(project, name, registration):
     """Read only declared project JSON and validate its exact supported structure."""
     try:
         raw, _ = regular_bytes(project, registration["manifest"], MAX_MANIFEST_BYTES)
-        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_object, parse_float=_number, parse_constant=_number)
+        document = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_object,
+            parse_float=_number,
+            parse_constant=_number,
+        )
     except (OSError, ValueError, UnicodeError, RecursionError, MemoryError) as exc:
         if isinstance(exc, DeclarationError):
             raise
@@ -278,11 +331,18 @@ def parse(project, name, registration):
             original = str(PurePosixPath(root["source"]) / entry["path"])
             if original == "/etc/ld.so.preload" and (entry["kind"] != "file" or entry["size"] != 0):
                 unsupported("layout", "nonempty or indirect native preload inputs are unsupported")
-            if root["preserve_source"] and original == "/etc/ld.so.cache" and document["loader"] is None:
+            if (
+                root["preserve_source"]
+                and original == "/etc/ld.so.cache"
+                and document["loader"] is None
+            ):
                 unsupported("layout", "loader control aliases require the explicit native profile")
     if sum(len(row["entries"]) for row in roots) > MAX_ENTRIES:
         unsupported("bounds", "too many frozen-tool entries")
-    if sum(entry["size"] for row in roots for entry in row["entries"] if entry["kind"] == "file") > MAX_TOOL_BYTES:
+    if (
+        sum(entry["size"] for row in roots for entry in row["entries"] if entry["kind"] == "file")
+        > MAX_TOOL_BYTES
+    ):
         unsupported("bounds", "frozen-tool declared bytes exceed the tool limit")
     executable_refs = []
     relations = 0
@@ -358,7 +418,12 @@ def parse(project, name, registration):
             invalid()
         if loader["cache"] is not None:
             _reference(loader["cache"], entries)
-    return Tool(name, dict(registration), raw, {**document, "roots": sorted(roots, key=lambda row: row["id"])})
+    return Tool(
+        name,
+        dict(registration),
+        raw,
+        {**document, "roots": sorted(roots, key=lambda row: row["id"])},
+    )
 
 
 def load_selected(project, definitions, names):
@@ -368,9 +433,21 @@ def load_selected(project, definitions, names):
     result = {name: parse(project, name, definitions[name]) for name in sorted(set(names))}
     if sum(len(tool.raw) for tool in result.values()) > MAX_TOTAL_MANIFEST_BYTES:
         unsupported("bounds", "selected frozen-tool manifests exceed their aggregate limit")
-    if sum(len(root["entries"]) for tool in result.values() for root in tool.document["roots"]) > MAX_ENTRIES:
+    if (
+        sum(len(root["entries"]) for tool in result.values() for root in tool.document["roots"])
+        > MAX_ENTRIES
+    ):
         unsupported("bounds", "selected frozen-tool entries exceed their aggregate limit")
-    if sum(entry["size"] for tool in result.values() for root in tool.document["roots"] for entry in root["entries"] if entry["kind"] == "file") > MAX_TOTAL_BYTES:
+    if (
+        sum(
+            entry["size"]
+            for tool in result.values()
+            for root in tool.document["roots"]
+            for entry in root["entries"]
+            if entry["kind"] == "file"
+        )
+        > MAX_TOTAL_BYTES
+    ):
         unsupported("bounds", "selected frozen-tool bytes exceed their aggregate limit")
     return result
 
@@ -390,7 +467,10 @@ def project_links(tools, names):
 
 
 def project_inputs(tools, names):
-    return sorted({entry for name in names for entry in tools[name].project_inputs} | set(project_links(tools, names)))
+    return sorted(
+        {entry for name in names for entry in tools[name].project_inputs}
+        | set(project_links(tools, names))
+    )
 
 
 def linked_input(name, links):
@@ -413,13 +493,20 @@ def validate_project_link(project, row):
     try:
         with parent_fd(project, row["path"]) as (directory, leaf):
             before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
-            if not stat.S_ISLNK(before.st_mode) or os.readlink(leaf, dir_fd=directory) != row["target"]:
+            if (
+                not stat.S_ISLNK(before.st_mode)
+                or os.readlink(leaf, dir_fd=directory) != row["target"]
+            ):
                 raise DeclarationError("frozen-tool project link differs from its declaration")
         target = Path(row["source"]) / row["subpath"]
         # Literal normalization is sufficient here: actual target links are verified
         # against pinned records during capture, never followed as an ambient input.
         for alias in (Path(project), Path("/project")):
-            resolved = os.path.normpath(alias / row["path"] / ".." / row["target"]) if not Path(row["target"]).is_absolute() else os.path.normpath(row["target"])
+            resolved = (
+                os.path.normpath(alias / row["path"] / ".." / row["target"])
+                if not Path(row["target"]).is_absolute()
+                else os.path.normpath(row["target"])
+            )
             if resolved != os.path.normpath(target):
                 unsupported("layout", "project link aliases do not resolve to their pinned target")
     except OSError as exc:
@@ -427,5 +514,9 @@ def validate_project_link(project, row):
 
 
 def validate_environment(names, tools):
-    if tools and any(name in {"PATH", "HOME", "TMPDIR"} or name.startswith(("LD_", "PYTHON")) for name in names):
-        raise DeclarationError("declared environment conflicts with the selected frozen-tool runtime")
+    if tools and any(
+        name in {"PATH", "HOME", "TMPDIR"} or name.startswith(("LD_", "PYTHON")) for name in names
+    ):
+        raise DeclarationError(
+            "declared environment conflicts with the selected frozen-tool runtime"
+        )

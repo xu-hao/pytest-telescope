@@ -357,7 +357,15 @@ def _probe(executable, project):
         valid = (
             type(data) is dict
             and set(data)
-            == {"executable", "prefixes", "path", "identity", "distributions", "references", "startup"}
+            == {
+                "executable",
+                "prefixes",
+                "path",
+                "identity",
+                "distributions",
+                "references",
+                "startup",
+            }
             and type(data["executable"]) is str
             and all(
                 type(data[key]) is list and all(type(entry) is str for entry in data[key])
@@ -750,9 +758,15 @@ def execute(
         if tool_view.names and (
             _inside(project, Path("/tools"))
             or _inside(Path("/tools"), project)
-            or any(_inside(Path(destination), Path("/tools")) or _inside(Path("/tools"), Path(destination)) for _, destination in box.binds)
+            or any(
+                _inside(Path(destination), Path("/tools"))
+                or _inside(Path("/tools"), Path(destination))
+                for _, destination in box.binds
+            )
         ):
-            raise UnsupportedCapability("tool:layout", "frozen-tool namespace overlaps the invoking environment or project")
+            raise UnsupportedCapability(
+                "tool:layout", "frozen-tool namespace overlaps the invoking environment or project"
+            )
         for source, destination in tool_view.bindings:
             if not source.is_relative_to(tool_view.directory) or source.is_symlink():
                 raise InfrastructureError("tool binding is outside its owned frozen material")
@@ -767,7 +781,9 @@ def execute(
             if signature(box) != tool_view.startup_identity:
                 raise InfrastructureError("native startup environment changed after projection")
             destinations = {destination: source for source, destination in tool_view.bindings}
-            if "/etc" not in tool_view.closed or any(name not in destinations for name in tool_view.closed):
+            if "/etc" not in tool_view.closed or any(
+                name not in destinations for name in tool_view.closed
+            ):
                 raise InfrastructureError("native view lacks its closed startup projections")
             for destination in tool_view.closed:
                 if not destinations[destination].is_dir():
@@ -776,7 +792,10 @@ def execute(
         from .tool_context import validate_environment
 
         validate_environment(environment, tool_view.names)
-    argv = [*_base_arguments(box, project, frozen_prefixes=prefixes, native=native), *_project_arguments(box, view, project)]
+    argv = [
+        *_base_arguments(box, project, frozen_prefixes=prefixes, native=native),
+        *_project_arguments(box, view, project),
+    ]
     if tool_view is not None:
         for source, destination in tool_view.bindings:
             argv += ["--ro-bind", str(source), destination]

@@ -17,12 +17,19 @@ from gate import file_identity, read_json, verify_candidate, write_json  # noqa:
 
 def admission(path, expected, directory):
     receipt = read_json(path, expected)
-    if (type(receipt) is not dict or set(receipt) != {"schema", "profiles"}
-            or type(receipt["schema"]) is not int or receipt["schema"] != 1
-            or type(receipt["profiles"]) is not dict
-            or set(receipt["profiles"]) != {"node", "installed"}):
+    if (
+        type(receipt) is not dict
+        or set(receipt) != {"schema", "profiles"}
+        or type(receipt["schema"]) is not int
+        or receipt["schema"] != 1
+        or type(receipt["profiles"]) is not dict
+        or set(receipt["profiles"]) != {"node", "installed"}
+    ):
         raise ValueError("functional readiness requires exactly node and installed profiles")
-    expected_documents = {"node": {"worker", "frontend"}, "installed": {"worker", "unselected-baseline"}}
+    expected_documents = {
+        "node": {"worker", "frontend"},
+        "installed": {"worker", "unselected-baseline"},
+    }
     for name, profile in receipt["profiles"].items():
         if type(profile) is not dict or set(profile) != {"identity", "documents"}:
             raise ValueError("invalid functional profile")
@@ -45,7 +52,9 @@ def admission(path, expected, directory):
             for root in document["roots"]:
                 if root["id"] == "driver":
                     root["source"] = "<owned-driver>"
-        actual = hashlib.sha256(json.dumps(documents, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        actual = hashlib.sha256(
+            json.dumps(documents, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         if actual != profile["identity"]:
             raise ValueError("functional prerequisite declaration identity disagrees")
     return receipt
@@ -63,8 +72,12 @@ def main():
     parser.add_argument("--admission-sha256")
     args = parser.parse_args()
     claimed = os.environ.get("TMPDIR")
-    if (not claimed or not Path(claimed).is_absolute() or not Path(claimed).is_dir()
-            or not args.scratch.resolve().is_relative_to(Path(claimed).resolve())):
+    if (
+        not claimed
+        or not Path(claimed).is_absolute()
+        or not Path(claimed).is_dir()
+        or not args.scratch.resolve().is_relative_to(Path(claimed).resolve())
+    ):
         raise ValueError("functional gate scratch must be below the actual caller TMPDIR")
     binding = read_json(args.binding, args.binding_sha256)
     origin = verify_candidate(binding, first_import=True)
@@ -72,8 +85,17 @@ def main():
 
     if Path(pytest_telescope.__file__) != Path(origin):
         raise ValueError("installed candidate origin changed during import")
-    print(json.dumps({"installed_candidate_origin": origin, "source": binding["source"],
-                      "wheel_sha256": binding["wheel"]["sha256"], "mode": args.mode}), flush=True)
+    print(
+        json.dumps(
+            {
+                "installed_candidate_origin": origin,
+                "source": binding["source"],
+                "wheel_sha256": binding["wheel"]["sha256"],
+                "mode": args.mode,
+            }
+        ),
+        flush=True,
+    )
     os.environ["TELESCOPE_FIXTURE_NODE"] = binding["node"]["path"]
     os.environ.pop("TELESCOPE_FIXTURE_CHROMIUM", None)
     sys.path.insert(0, str(Path(binding["root"]) / "tests"))
@@ -88,18 +110,28 @@ def main():
         receipt_hash = file_identity(args.receipt, 4 * 1024 * 1024)["sha256"]
         admission(args.receipt, receipt_hash, args.scratch)
         verify_candidate(binding)
-        readiness = {"schema": 1, "binding_sha256": args.binding_sha256,
-                     "receipt": str(args.receipt), "receipt_sha256": receipt_hash,
-                     "source": binding["source"], "interpreter": binding["interpreter"],
-                     "wheel_sha256": binding["wheel"]["sha256"]}
+        readiness = {
+            "schema": 1,
+            "binding_sha256": args.binding_sha256,
+            "receipt": str(args.receipt),
+            "receipt_sha256": receipt_hash,
+            "source": binding["source"],
+            "interpreter": binding["interpreter"],
+            "wheel_sha256": binding["wheel"]["sha256"],
+        }
     else:
         if not args.receipt_sha256 or not args.admission_sha256:
             raise ValueError("functional execution requires exact new readiness hashes")
         ready = read_json(args.admission, args.admission_sha256)
-        expected = {"schema": 1, "binding_sha256": args.binding_sha256,
-                    "receipt": str(args.receipt), "receipt_sha256": args.receipt_sha256,
-                    "source": binding["source"], "interpreter": binding["interpreter"],
-                    "wheel_sha256": binding["wheel"]["sha256"]}
+        expected = {
+            "schema": 1,
+            "binding_sha256": args.binding_sha256,
+            "receipt": str(args.receipt),
+            "receipt_sha256": args.receipt_sha256,
+            "source": binding["source"],
+            "interpreter": binding["interpreter"],
+            "wheel_sha256": binding["wheel"]["sha256"],
+        }
         if ready != expected:
             raise ValueError("functional admission belongs to a different candidate")
         admission(args.receipt, args.receipt_sha256, args.scratch)

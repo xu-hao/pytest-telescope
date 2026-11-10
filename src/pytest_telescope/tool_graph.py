@@ -72,7 +72,11 @@ class Graph:
                         layout("unsupported frozen-tool baseline prefix mapping")
                     row = {"kind": "symlink", "target": target, "mapping": mapped}
                 elif stat.S_ISDIR(before.st_mode):
-                    row = {"kind": "directory", "mode": stat.S_IMODE(before.st_mode), "mapping": first}
+                    row = {
+                        "kind": "directory",
+                        "mode": stat.S_IMODE(before.st_mode),
+                        "mapping": first,
+                    }
                 else:
                     layout("unsupported frozen-tool baseline prefix type")
                 after = os.lstat(first)
@@ -84,17 +88,26 @@ class Graph:
             except OSError as exc:
                 raise InfrastructureError("cannot capture frozen-tool baseline prefix") from exc
         row, _ = self.prefixes[first]
-        return row["mapping"] + filename[len(first):]
+        return row["mapping"] + filename[len(first) :]
 
     @staticmethod
     def _signature(info):
-        return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+        )
 
     def verify_prefixes(self):
         for filename, (row, signature) in self.prefixes.items():
             try:
                 current = os.lstat(filename)
-                if self._signature(current) != signature or (row["kind"] == "symlink" and os.readlink(filename) != row["target"]):
+                if self._signature(current) != signature or (
+                    row["kind"] == "symlink" and os.readlink(filename) != row["target"]
+                ):
                     raise InfrastructureError("frozen-tool baseline prefix changed")
             except FileNotFoundError as exc:
                 if row["kind"] != "absent":
@@ -114,7 +127,9 @@ class Graph:
                 prefix = str(Path(*parts[:end]))
                 key = self.mapping.get(prefix)
                 if key is not None and self.nodes[key]["kind"] == "symlink":
-                    filename = posixpath.join(posixpath.dirname(prefix), self.nodes[key]["target"], *parts[end:])
+                    filename = posixpath.join(
+                        posixpath.dirname(prefix), self.nodes[key]["target"], *parts[end:]
+                    )
                     break
             else:
                 return filename
@@ -151,7 +166,9 @@ class Graph:
             layout()
         try:
             with _parent(self.directory / key[0] / key[1]) as (parent, leaf):
-                descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+                descriptor = os.open(
+                    leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent
+                )
             with os.fdopen(descriptor, "rb") as stream:
                 if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
                     raise InfrastructureError("owned frozen-tool runtime changed type")

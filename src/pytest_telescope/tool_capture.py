@@ -16,7 +16,14 @@ CHUNK = 1024 * 1024
 
 
 def _signature(info):
-    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
 
 
 @contextmanager
@@ -75,11 +82,17 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
                 valid = stat.S_IMODE(before.st_mode) == expected_mode
                 if is_file:
                     if before.st_size > declaration.MAX_FILE_BYTES:
-                        declaration.unsupported("bounds", "frozen-tool input exceeds its file limit")
-                    descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                        declaration.unsupported(
+                            "bounds", "frozen-tool input exceeds its file limit"
+                        )
+                    descriptor = os.open(
+                        leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
+                    )
                     with os.fdopen(descriptor, "rb") as source:
                         opened = os.fstat(source.fileno())
-                        if not stat.S_ISREG(opened.st_mode) or _signature(opened) != _signature(before):
+                        if not stat.S_ISREG(opened.st_mode) or _signature(opened) != _signature(
+                            before
+                        ):
                             raise InfrastructureError("frozen-tool input changed before capture")
                         digest = hashlib.sha256()
                         size = 0
@@ -89,7 +102,9 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
                                 budget.tick(size=len(chunk))
                                 size += len(chunk)
                                 if size > declaration.MAX_FILE_BYTES:
-                                    declaration.unsupported("bounds", "frozen-tool input exceeds its file limit")
+                                    declaration.unsupported(
+                                        "bounds", "frozen-tool input exceeds its file limit"
+                                    )
                                 digest.update(chunk)
                                 if sink is not None:
                                     sink.write(chunk)
@@ -98,7 +113,11 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
                                 sink.close()
                         if _signature(os.fstat(source.fileno())) != _signature(opened):
                             raise InfrastructureError("frozen-tool input changed during capture")
-                    valid = valid and size == expected["size"] and digest.hexdigest() == expected["sha256"]
+                    valid = (
+                        valid
+                        and size == expected["size"]
+                        and digest.hexdigest() == expected["sha256"]
+                    )
                     if destination is not None:
                         destination.chmod(expected["mode"] & 0o555)
                 elif destination is not None:
@@ -110,8 +129,12 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
                 raise InfrastructureError("frozen-tool link changed during capture")
             if not valid:
                 if frozen:
-                    raise InfrastructureError("owned frozen-tool material failed integrity verification")
-                declaration.unsupported("identity", "frozen-tool input does not match its declared pin")
+                    raise InfrastructureError(
+                        "owned frozen-tool material failed integrity verification"
+                    )
+                declaration.unsupported(
+                    "identity", "frozen-tool input does not match its declared pin"
+                )
             return _signature(before)
     except FileNotFoundError as exc:
         if frozen:
@@ -124,8 +147,10 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
 def _tree_names(source, budget, open_directory=None, *, owned=False):
     """Complete tree enumeration via owned descriptors; never follow directory links."""
     if open_directory is None:
+
         def open_directory(path, parent, leaf):
             return os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+
     found = {"."}
     with _parent(source) as (parent, leaf):
         info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
@@ -142,14 +167,24 @@ def _tree_names(source, budget, open_directory=None, *, owned=False):
                     for entry in children:
                         budget.tick(visit=True)
                         name = str(Path(prefix) / entry.name)
-                        if len(found) >= (declaration.MAX_VISITS if owned else declaration.MAX_ENTRIES):
+                        if len(found) >= (
+                            declaration.MAX_VISITS if owned else declaration.MAX_ENTRIES
+                        ):
                             if owned:
-                                raise InfrastructureError("owned frozen-tool tree exceeds its entry limit")
-                            declaration.unsupported("bounds", "frozen-tool tree exceeds its entry limit")
+                                raise InfrastructureError(
+                                    "owned frozen-tool tree exceeds its entry limit"
+                                )
+                            declaration.unsupported(
+                                "bounds", "frozen-tool tree exceeds its entry limit"
+                            )
                         if declaration.PROTECTED_PARTS.intersection(Path(name).parts):
                             if owned:
-                                raise InfrastructureError("owned frozen-tool tree contains an unexpected namespace")
-                            declaration.unsupported("layout", "frozen-tool tree contains a protected namespace")
+                                raise InfrastructureError(
+                                    "owned frozen-tool tree contains an unexpected namespace"
+                                )
+                            declaration.unsupported(
+                                "layout", "frozen-tool tree contains a protected namespace"
+                            )
                         found.add(name)
                         item = os.stat(entry.name, dir_fd=current, follow_symlinks=False)
                         if stat.S_ISDIR(item.st_mode):
@@ -157,7 +192,9 @@ def _tree_names(source, budget, open_directory=None, *, owned=False):
                             pending.append((child, name))
                         elif not (stat.S_ISREG(item.st_mode) or stat.S_ISLNK(item.st_mode)):
                             if owned:
-                                raise InfrastructureError("owned frozen-tool tree contains an unsupported type")
+                                raise InfrastructureError(
+                                    "owned frozen-tool tree contains an unsupported type"
+                                )
                             raise DeclarationError("frozen-tool tree contains an unsupported type")
                 if _signature(os.fstat(current)) != before:
                     raise InfrastructureError("frozen-tool tree changed during enumeration")
@@ -187,7 +224,10 @@ class OwnedDirectories:
         try:
             opened = os.fstat(descriptor)
             current = path.lstat()
-            if opened.st_uid != os.getuid() or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+            if opened.st_uid != os.getuid() or (opened.st_dev, opened.st_ino) != (
+                current.st_dev,
+                current.st_ino,
+            ):
                 raise InfrastructureError("owned frozen-tool directory changed before freezing")
             os.fchmod(descriptor, mode)
             if not mode & 0o400:
@@ -205,7 +245,10 @@ class OwnedDirectories:
             return os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
         opened = os.fstat(held)
         current = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
-        if not stat.S_ISDIR(current.st_mode) or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+        if not stat.S_ISDIR(current.st_mode) or (opened.st_dev, opened.st_ino) != (
+            current.st_dev,
+            current.st_ino,
+        ):
             raise InfrastructureError("owned frozen-tool directory moved after freezing")
         # dup shares the directory offset; names() serializes complete scans.
         os.lseek(held, 0, os.SEEK_SET)
@@ -247,7 +290,10 @@ def _remove(directory):
             descriptor = None
             try:
                 opened = os.fstat(anchor)
-                if opened.st_uid != os.getuid() or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                if opened.st_uid != os.getuid() or (opened.st_dev, opened.st_ino) != (
+                    before.st_dev,
+                    before.st_ino,
+                ):
                     raise CleanupError("owned frozen-tool cleanup directory changed")
                 # This proc reference identifies our held owned inode, not a
                 # mutable pathname or a declared-source/symlink target.
@@ -307,7 +353,9 @@ class Capture:
         self.owned_directories = OwnedDirectories()
 
     def _budget(self, deadline=None):
-        return Budget(time.monotonic() + self.timeout if deadline is None else deadline, self.cancellation)
+        return Budget(
+            time.monotonic() + self.timeout if deadline is None else deadline, self.cancellation
+        )
 
     def __enter__(self):
         from .sandbox import CleanupError
@@ -328,7 +376,11 @@ class Capture:
                 self._cleanup()
                 if isinstance(error, OSError):
                     error = InfrastructureError("owned frozen-tool capture operation failed")
-                if not isinstance(error, InfrastructureError) or isinstance(error, CleanupError) or attempt:
+                if (
+                    not isinstance(error, InfrastructureError)
+                    or isinstance(error, CleanupError)
+                    or attempt
+                ):
                     raise error
 
     def __exit__(self, *exc):
@@ -359,20 +411,31 @@ class Capture:
             if path not in self.materialized:
                 addition.add(path)
             if len(self.materialized) + len(addition) > declaration.MAX_VISITS:
-                declaration.unsupported("bounds", "aggregate frozen-tool material exceeds its path limit")
+                declaration.unsupported(
+                    "bounds", "aggregate frozen-tool material exceeds its path limit"
+                )
         self.materialized.update(addition)
 
     def _pins(self, tool):
         for lock in tool.document["locks"]:
             try:
-                raw, _ = declaration.regular_bytes(self.manifest.root, lock["path"], 64 * 1024 * 1024)
+                raw, _ = declaration.regular_bytes(
+                    self.manifest.root, lock["path"], 64 * 1024 * 1024
+                )
             except FileNotFoundError as exc:
                 raise DeclarationError("a declared frozen-tool lock is missing") from exc
             except OSError as exc:
                 raise InfrastructureError("cannot read a declared frozen-tool lock") from exc
-            trees = sorted([key, declaration.digest(tool.roots[key]["entries"])] for key in lock["roots"])
-            if hashlib.sha256(raw).hexdigest() != lock["sha256"] or declaration.digest(trees) != lock["tree_sha256"]:
-                declaration.unsupported("identity", "frozen-tool lock correspondence does not match")
+            trees = sorted(
+                [key, declaration.digest(tool.roots[key]["entries"])] for key in lock["roots"]
+            )
+            if (
+                hashlib.sha256(raw).hexdigest() != lock["sha256"]
+                or declaration.digest(trees) != lock["tree_sha256"]
+            ):
+                declaration.unsupported(
+                    "identity", "frozen-tool lock correspondence does not match"
+                )
         for link in declaration.project_links(self.manifest.tools, [tool.name]).values():
             declaration.validate_project_link(self.manifest.root, link)
 
@@ -389,17 +452,36 @@ class Capture:
             target.mkdir(mode=0o700)
             for root in tool.document["roots"]:
                 source = Path(root["source"])
-                if root["coverage"] == "tree" and any(row["path"] == "pyvenv.cfg" or "site-packages" in Path(row["path"]).parts or "dist-packages" in Path(row["path"]).parts for row in root["entries"]):
-                    declaration.unsupported("layout", "an interpreter environment is not a tool root")
-                if root["coverage"] == "tree" and _tree_names(source, budget) != {row["path"] for row in root["entries"]}:
-                    declaration.unsupported("identity", "frozen-tool tree differs from its complete inventory")
+                if root["coverage"] == "tree" and any(
+                    row["path"] == "pyvenv.cfg"
+                    or "site-packages" in Path(row["path"]).parts
+                    or "dist-packages" in Path(row["path"]).parts
+                    for row in root["entries"]
+                ):
+                    declaration.unsupported(
+                        "layout", "an interpreter environment is not a tool root"
+                    )
+                if root["coverage"] == "tree" and _tree_names(source, budget) != {
+                    row["path"] for row in root["entries"]
+                }:
+                    declaration.unsupported(
+                        "identity", "frozen-tool tree differs from its complete inventory"
+                    )
                 frozen = target / root["id"]
-                ordered = sorted(root["entries"], key=lambda row: (len(Path(row["path"]).parts), row["path"]))
+                ordered = sorted(
+                    root["entries"], key=lambda row: (len(Path(row["path"]).parts), row["path"])
+                )
                 for row in ordered:
                     filename = source / row["path"]
-                    if filename == Path("/etc/ld.so.preload") and (row["kind"] != "file" or row["size"] != 0):
-                        declaration.unsupported("layout", "nonempty or indirect native preload inputs are unsupported")
-                    self.sources[name, root["id"], row["path"]] = _measure(filename, row, budget, frozen / row["path"])
+                    if filename == Path("/etc/ld.so.preload") and (
+                        row["kind"] != "file" or row["size"] != 0
+                    ):
+                        declaration.unsupported(
+                            "layout", "nonempty or indirect native preload inputs are unsupported"
+                        )
+                    self.sources[name, root["id"], row["path"]] = _measure(
+                        filename, row, budget, frozen / row["path"]
+                    )
                 for row in reversed(ordered):
                     if row["kind"] == "directory":
                         self.owned_directories.freeze(frozen / row["path"], row["mode"] & 0o555)
@@ -421,14 +503,24 @@ class Capture:
         for name in names:
             tool = self.manifest.tools[name]
             try:
-                raw, _ = declaration.regular_bytes(self.manifest.root, tool.registration["manifest"], declaration.MAX_MANIFEST_BYTES)
+                raw, _ = declaration.regular_bytes(
+                    self.manifest.root,
+                    tool.registration["manifest"],
+                    declaration.MAX_MANIFEST_BYTES,
+                )
                 if raw != tool.raw:
                     raise InfrastructureError("frozen-tool manifest changed during the invocation")
                 for root in tool.document["roots"]:
-                    if root["coverage"] == "tree" and _tree_names(Path(root["source"]), budget) != {row["path"] for row in root["entries"]}:
+                    if root["coverage"] == "tree" and _tree_names(Path(root["source"]), budget) != {
+                        row["path"] for row in root["entries"]
+                    }:
                         raise InfrastructureError("frozen-tool source tree changed after capture")
-                    if self.owned_directories.names(self.directory / name / root["id"], frozen_budget) != {row["path"] for row in root["entries"]}:
-                        raise InfrastructureError("owned frozen-tool tree failed integrity verification")
+                    if self.owned_directories.names(
+                        self.directory / name / root["id"], frozen_budget
+                    ) != {row["path"] for row in root["entries"]}:
+                        raise InfrastructureError(
+                            "owned frozen-tool tree failed integrity verification"
+                        )
                     for row in root["entries"]:
                         observed = _measure(Path(root["source"]) / row["path"], row, budget)
                         recorded = self.sources[name, root["id"], row["path"]]
@@ -436,11 +528,18 @@ class Capture:
                             observed, recorded = observed[:3], recorded[:3]
                         if observed != recorded:
                             raise InfrastructureError("frozen-tool source changed after capture")
-                        _measure(self.directory / name / root["id"] / row["path"], row, frozen_budget, frozen=True)
+                        _measure(
+                            self.directory / name / root["id"] / row["path"],
+                            row,
+                            frozen_budget,
+                            frozen=True,
+                        )
                 self._pins(tool)
                 self.graphs[name].verify_prefixes()
             except DeclarationError as exc:
-                raise InfrastructureError("frozen-tool source or declaration changed after capture") from exc
+                raise InfrastructureError(
+                    "frozen-tool source or declaration changed after capture"
+                ) from exc
         with self.view_lock:
             for selected, projection in self.views.items():
                 if set(selected) <= set(names):
@@ -474,13 +573,24 @@ class Capture:
                 for prefix, (row, _) in self.graphs[name].prefixes.items():
                     previous = prefixes.get(prefix)
                     if previous is not None and previous != row:
-                        declaration.unsupported("layout", "selected native prefix mappings disagree")
+                        declaration.unsupported(
+                            "layout", "selected native prefix mappings disagree"
+                        )
                     prefixes[prefix] = row
             return ToolView(
-                self.directory, names,
-                tuple((source, destination) for destination, source in sorted(projection.bindings.items(), key=lambda item: (len(Path(item[0]).parts), item[0]))),
-                projection.identity, projection.command_path,
-                tuple(sorted(prefixes.items())), projection.native,
+                self.directory,
+                names,
+                tuple(
+                    (source, destination)
+                    for destination, source in sorted(
+                        projection.bindings.items(),
+                        key=lambda item: (len(Path(item[0]).parts), item[0]),
+                    )
+                ),
+                projection.identity,
+                projection.command_path,
+                tuple(sorted(prefixes.items())),
+                projection.native,
                 tuple(projection.closed),
                 None if projection.startup is None else projection.startup.signature,
             )

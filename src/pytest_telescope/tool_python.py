@@ -34,7 +34,11 @@ def validate(graph, budget):
         metadata = graph.reference(record["metadata"], kind="directory")
         graph.preserve(metadata)
         root = graph.roots[metadata[0]]
-        if root["coverage"] != "tree" or metadata[1] != "." or not Path(root["source"]).name.endswith(".dist-info"):
+        if (
+            root["coverage"] != "tree"
+            or metadata[1] != "."
+            or not Path(root["source"]).name.endswith(".dist-info")
+        ):
             layout("installed metadata requires one complete dist-info tree")
         package_keys = [graph.reference(row, kind="directory") for row in record["packages"]]
         if not package_keys:
@@ -49,14 +53,27 @@ def validate(graph, budget):
         for key in runtime:
             graph.preserve(key)
         worker = graph.resolve(os.path.normpath(sys.executable))
-        if not any(graph.original(worker) == graph.original(key) or (graph.nodes[key]["kind"] == "directory" and Path(graph.original(worker)).is_relative_to(graph.original(key))) for key in runtime):
+        if not any(
+            graph.original(worker) == graph.original(key)
+            or (
+                graph.nodes[key]["kind"] == "directory"
+                and Path(graph.original(worker)).is_relative_to(graph.original(key))
+            )
+            for key in runtime
+        ):
             layout("installed distribution runtime does not pin the invoking interpreter")
         base = graph.original(metadata)
         meta_key = graph.resolve(base + "/METADATA")
         record_key = graph.resolve(base + "/RECORD")
         try:
             message = BytesParser(policy=policy.default).parsebytes(graph.bytes(meta_key))
-            if message.defects or len(message.get_all("Name", [])) != 1 or len(message.get_all("Version", [])) != 1 or canonicalize_name(message["Name"]) != name or Version(message["Version"]) != version:
+            if (
+                message.defects
+                or len(message.get_all("Name", [])) != 1
+                or len(message.get_all("Version", [])) != 1
+                or canonicalize_name(message["Name"]) != name
+                or Version(message["Version"]) != version
+            ):
                 layout("installed metadata disagrees with its distribution record")
             required = set()
             for encoded in message.get_all("Requires-Dist", []):
@@ -66,7 +83,10 @@ def validate(graph, budget):
                 if dependency.marker is not None and not dependency.marker.evaluate({"extra": ""}):
                     continue
                 dependency_name = canonicalize_name(dependency.name)
-                if dependency_name not in declared or Version(declared[dependency_name]["version"]) not in dependency.specifier:
+                if (
+                    dependency_name not in declared
+                    or Version(declared[dependency_name]["version"]) not in dependency.specifier
+                ):
                     layout("installed dependency version does not satisfy metadata")
                 required.add(dependency_name)
             if required != set(record["dependencies"]):
@@ -95,10 +115,17 @@ def validate(graph, budget):
                 if index >= 100_000 or len(row) != 3:
                     layout("installed RECORD exceeds its supported shape or bound")
                 filename, encoded, size = row
-                if not filename or filename.startswith("/") or "\\" in filename or any(ord(char) < 32 for char in filename):
+                if (
+                    not filename
+                    or filename.startswith("/")
+                    or "\\" in filename
+                    or any(ord(char) < 32 for char in filename)
+                ):
                     layout("invalid installed RECORD path")
                 normalized = os.path.normpath(os.path.join(parent, filename))
-                if normalized in seen or not any(Path(normalized).is_relative_to(directory) for directory in allowed):
+                if normalized in seen or not any(
+                    Path(normalized).is_relative_to(directory) for directory in allowed
+                ):
                     layout("installed RECORD escapes its selected distribution roots")
                 seen.add(normalized)
                 key = graph.resolve(normalized)
@@ -115,7 +142,11 @@ def validate(graph, budget):
                         while chunk := stream.read(1024 * 1024):
                             budget.tick(size=len(chunk))
                             actual.update(chunk)
-                    if base64.urlsafe_b64encode(actual.digest()).rstrip(b"=").decode() != expected or not size.isdecimal() or int(size) != graph.nodes[key]["size"]:
+                    if (
+                        base64.urlsafe_b64encode(actual.digest()).rstrip(b"=").decode() != expected
+                        or not size.isdecimal()
+                        or int(size) != graph.nodes[key]["size"]
+                    ):
                         layout("installed RECORD does not match its pinned file")
                 elif key != record_key and not normalized.endswith(".pyc"):
                     layout("installed RECORD lacks a required source or resource hash")
@@ -126,8 +157,10 @@ def validate(graph, budget):
         except (UnicodeError, csv.Error):
             layout("invalid installed RECORD encoding")
         expected = {
-            graph.original(key) for key, row in graph.nodes.items()
-            if row["kind"] == "file" and any(Path(graph.original(key)).is_relative_to(directory) for directory in allowed)
+            graph.original(key)
+            for key, row in graph.nodes.items()
+            if row["kind"] == "file"
+            and any(Path(graph.original(key)).is_relative_to(directory) for directory in allowed)
         }
         # An optional generated cache may not be recorded by installers, but still
         # needs a pinned source/runtime relation. Every other file is in RECORD.
@@ -157,5 +190,8 @@ def bytecode(graph, key):
         layout("unsupported installed bytecode flags")
     if flags & 1 and header[8:16] != importlib.util.source_hash(graph.bytes(source)):
         layout("installed bytecode does not match its pinned source")
-    if flags == 0 and struct.unpack_from("<I", header, 12)[0] != graph.nodes[source]["size"] & 0xffffffff:
+    if (
+        flags == 0
+        and struct.unpack_from("<I", header, 12)[0] != graph.nodes[source]["size"] & 0xFFFFFFFF
+    ):
         layout("installed bytecode source size does not match")

@@ -44,7 +44,9 @@ def file_identity(path, maximum=MAX_MEMBER):
             if count > maximum:
                 raise ValueError("gate input exceeded its bound")
             result.update(chunk)
-        if stable(os.fstat(stream.fileno())) != stable(before) or stable(path.lstat()) != stable(before):
+        if stable(os.fstat(stream.fileno())) != stable(before) or stable(path.lstat()) != stable(
+            before
+        ):
             raise ValueError("gate input changed while reading")
     return {"bytes": count, "sha256": result.hexdigest()}
 
@@ -89,8 +91,13 @@ def wheel_identity(path):
             raise ValueError("wheel has excessive or duplicate members")
         for row in members:
             name = PurePosixPath(row.filename)
-            if (not name.parts or name.is_absolute() or ".." in name.parts or "\\" in row.filename
-                    or name.as_posix() != row.filename.removesuffix("/")):
+            if (
+                not name.parts
+                or name.is_absolute()
+                or ".." in name.parts
+                or "\\" in row.filename
+                or name.as_posix() != row.filename.removesuffix("/")
+            ):
                 raise ValueError("wheel member path is invalid")
             total += row.file_size
             if row.file_size > MAX_MEMBER or total > MAX_PACKAGE:
@@ -111,25 +118,41 @@ def wheel_identity(path):
                     if name.suffix in (".pyc", ".pyo"):
                         raise ValueError("candidate wheel contains producer bytecode")
                     content = archive.read(row)
-                    files[relative] = {"bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+                    files[relative] = {
+                        "bytes": len(content),
+                        "sha256": hashlib.sha256(content).hexdigest(),
+                    }
             elif name.name == "METADATA" and name.parent.name.endswith(".dist-info"):
                 message = BytesParser().parsebytes(archive.read(row))
-                if (message.defects or message.get_all("Name", []) != ["pytest-telescope"]
-                        or len(message.get_all("Version", [])) != 1):
+                if (
+                    message.defects
+                    or message.get_all("Name", []) != ["pytest-telescope"]
+                    or len(message.get_all("Version", [])) != 1
+                ):
                     raise ValueError("candidate wheel metadata disagrees")
                 versions.append(message["Version"])
-    if len(versions) != 1 or "__init__.py" not in files or file_identity(path, MAX_PACKAGE) != identity:
+    if (
+        len(versions) != 1
+        or "__init__.py" not in files
+        or file_identity(path, MAX_PACKAGE) != identity
+    ):
         raise ValueError("candidate wheel is incomplete or changed")
-    return {**identity, "package": {"files": files, "directories": sorted(directories)}, "version": versions[0]}
+    return {
+        **identity,
+        "package": {"files": files, "directories": sorted(directories)},
+        "version": versions[0],
+    }
 
 
 def source_identity(root):
     def git(*args):
-        result = subprocess.run(["git", "-C", str(root), *args], check=True,
-                                capture_output=True, timeout=30)
+        result = subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True, timeout=30
+        )
         if len(result.stdout) > MAX_METADATA or len(result.stderr) > MAX_METADATA:
             raise ValueError("source identity output exceeds its bound")
         return result.stdout.decode().strip()
+
     if git("status", "--porcelain", "--untracked-files=all"):
         raise ValueError("installed gate requires a clean candidate checkout")
     head, tree = git("rev-parse", "HEAD", "HEAD^{tree}").splitlines()
@@ -137,9 +160,13 @@ def source_identity(root):
 
 
 def interpreter_identity():
-    return {"executable": sys.executable, "prefix": sys.prefix, "base_prefix": sys.base_prefix,
-            "hexversion": sys.hexversion,
-            "binary": file_identity(Path(sys.executable).resolve(strict=True), 512 * 1024 * 1024)}
+    return {
+        "executable": sys.executable,
+        "prefix": sys.prefix,
+        "base_prefix": sys.base_prefix,
+        "hexversion": sys.hexversion,
+        "binary": file_identity(Path(sys.executable).resolve(strict=True), 512 * 1024 * 1024),
+    }
 
 
 def node_identity(value):
@@ -149,8 +176,12 @@ def node_identity(value):
     mode = stat.S_IMODE(actual.stat().st_mode)
     if not mode & 0o111 or not os.access(actual, os.R_OK | os.X_OK):
         raise ValueError("selected Node file is not executable")
-    return {"path": str(Path(value)), "actual": str(actual), "mode": mode,
-            "file": file_identity(actual, 512 * 1024 * 1024)}
+    return {
+        "path": str(Path(value)),
+        "actual": str(actual),
+        "mode": mode,
+        "file": file_identity(actual, 512 * 1024 * 1024),
+    }
 
 
 def candidate_binding(root, wheel, node):
@@ -161,36 +192,63 @@ def candidate_binding(root, wheel, node):
     if len(project) > MAX_METADATA:
         raise ValueError("candidate project metadata exceeds its bound")
     version = tomllib.loads(project.decode())["project"]["version"]
-    if identity["version"] != version or package_files(root / "src/pytest_telescope", source=True) != identity["package"]:
+    if (
+        identity["version"] != version
+        or package_files(root / "src/pytest_telescope", source=True) != identity["package"]
+    ):
         raise ValueError("wheel bytes or version differ from the candidate checkout")
-    return {"schema": 1, "root": str(root), "source": source_identity(root),
-            "wheel_path": str(wheel), "wheel": identity,
-            "interpreter": interpreter_identity(), "node": node_identity(node)}
+    return {
+        "schema": 1,
+        "root": str(root),
+        "source": source_identity(root),
+        "wheel_path": str(wheel),
+        "wheel": identity,
+        "interpreter": interpreter_identity(),
+        "node": node_identity(node),
+    }
 
 
 def verify_candidate(binding, *, first_import=False):
-    if (type(binding) is not dict
-            or set(binding) != {"schema", "root", "source", "wheel_path", "wheel", "interpreter", "node"}
-            or type(binding["schema"]) is not int or binding["schema"] != 1):
+    if (
+        type(binding) is not dict
+        or set(binding)
+        != {"schema", "root", "source", "wheel_path", "wheel", "interpreter", "node"}
+        or type(binding["schema"]) is not int
+        or binding["schema"] != 1
+    ):
         raise ValueError("invalid candidate binding")
-    if candidate_binding(binding["root"], binding["wheel_path"], binding["node"]["path"]) != binding:
+    if (
+        candidate_binding(binding["root"], binding["wheel_path"], binding["node"]["path"])
+        != binding
+    ):
         raise ValueError("candidate source, wheel, interpreter or Node changed")
-    if first_import and any(name == "pytest_telescope" or name.startswith("pytest_telescope.") for name in sys.modules):
+    if first_import and any(
+        name == "pytest_telescope" or name.startswith("pytest_telescope.") for name in sys.modules
+    ):
         raise ValueError("candidate producer was imported before its guard")
     spec = importlib.util.find_spec("pytest_telescope")
     if spec is None or spec.origin is None or spec.submodule_search_locations is None:
         raise ValueError("candidate package has no supported installed origin")
     origin = Path(spec.origin)
     locations = [Path(value) for value in spec.submodule_search_locations]
-    allowed = {Path(sysconfig.get_path(name)).resolve() / "pytest_telescope" for name in ("purelib", "platlib")}
+    allowed = {
+        Path(sysconfig.get_path(name)).resolve() / "pytest_telescope"
+        for name in ("purelib", "platlib")
+    }
     package = origin.parent
-    if (origin.name != "__init__.py" or package not in allowed or locations != [package]
-            or not package.resolve().is_relative_to(Path(sys.prefix).resolve())):
+    if (
+        origin.name != "__init__.py"
+        or package not in allowed
+        or locations != [package]
+        or not package.resolve().is_relative_to(Path(sys.prefix).resolve())
+    ):
         raise ValueError("candidate import is not the exact interpreter's installed package")
     distribution = importlib.metadata.distribution("pytest-telescope")
-    if (distribution.version != binding["wheel"]["version"]
-            or Path(distribution.locate_file("pytest_telescope/__init__.py")) != origin
-            or package_files(package) != binding["wheel"]["package"]):
+    if (
+        distribution.version != binding["wheel"]["version"]
+        or Path(distribution.locate_file("pytest_telescope/__init__.py")) != origin
+        or package_files(package) != binding["wheel"]["package"]
+    ):
         raise ValueError("installed candidate membership, bytes or version disagree")
     for name, module in tuple(sys.modules.items()):
         if name == "pytest_telescope" or name.startswith("pytest_telescope."):
@@ -220,12 +278,15 @@ def read_json(path, expected):
                 raise ValueError("duplicate gate evidence field")
             result[key] = value
         return result
+
     with Path(path).open("rb") as stream:
         content = stream.read(MAX_METADATA + 1)
     if len(content) > MAX_METADATA or hashlib.sha256(content).hexdigest() != expected:
         raise ValueError("gate evidence is missing, changed or oversized")
+
     def invalid_constant(value):
         raise ValueError("nonfinite gate evidence value")
+
     return json.loads(content, object_pairs_hook=unique, parse_constant=invalid_constant)
 
 
@@ -242,8 +303,15 @@ class Stages:
         status, eof = None, False
         with (self.output / (label + ".log")).open("xb") as log:
             try:
-                process = subprocess.Popen(command, cwd=self.root, env=env, stdin=subprocess.DEVNULL,
-                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+                process = subprocess.Popen(
+                    command,
+                    cwd=self.root,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
                 with selectors.DefaultSelector() as selector:
                     selector.register(process.stdout, selectors.EVENT_READ)
                     while selector.get_map():
@@ -303,7 +371,14 @@ class Stages:
                     error = "owned stage cleanup failed: " + str(exc)[:1024]
                     raise
                 finally:
-                    write_json(self.output / (label + "-result.json"),
-                               {"argv": command, "exit_status": status, "error": error,
-                                "seconds": time.monotonic() - started, "output_bytes": total,
-                                "output_complete": total <= MAX_OUTPUT and eof})
+                    write_json(
+                        self.output / (label + "-result.json"),
+                        {
+                            "argv": command,
+                            "exit_status": status,
+                            "error": error,
+                            "seconds": time.monotonic() - started,
+                            "output_bytes": total,
+                            "output_complete": total <= MAX_OUTPUT and eof,
+                        },
+                    )

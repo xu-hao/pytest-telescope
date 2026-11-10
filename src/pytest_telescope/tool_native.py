@@ -12,8 +12,12 @@ from .tool_context import MAX_RELATIONS, unsupported
 
 MAX_SECTION = 16 * 1024 * 1024
 DEFAULT_SEARCH = (
-    "/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu",
-    "/lib64", "/usr/lib64", "/lib", "/usr/lib",
+    "/lib/x86_64-linux-gnu",
+    "/usr/lib/x86_64-linux-gnu",
+    "/lib64",
+    "/usr/lib64",
+    "/lib",
+    "/usr/lib",
 )
 
 
@@ -48,6 +52,7 @@ class Elf:
 
 def read_elf(stream, size):
     """Decode only bounded tables, including for a several-hundred-MiB executable."""
+
     def read(offset, length):
         if offset < 0 or length < 0 or length > MAX_SECTION or offset + length > size:
             refuse()
@@ -63,7 +68,14 @@ def read_elf(stream, size):
     if len(header) != 64 or header[4:7] != b"\x02\x01\x01" or header[7] not in (0, 3):
         refuse()
     fields = struct.unpack("<16sHHIQQQIHHHHHH", header)
-    if fields[1] not in (2, 3) or fields[2] != 62 or fields[3] != 1 or fields[8] != 64 or fields[9] != 56 or not 0 < fields[10] <= 512:
+    if (
+        fields[1] not in (2, 3)
+        or fields[2] != 62
+        or fields[3] != 1
+        or fields[8] != 64
+        or fields[9] != 56
+        or not 0 < fields[10] <= 512
+    ):
         refuse()
     segments = list(struct.iter_unpack("<IIQQQQQQ", read(fields[5], fields[9] * fields[10])))
     if any(row[2] + row[5] > size or row[5] > row[6] for row in segments):
@@ -93,9 +105,13 @@ def read_elf(stream, size):
         refuse()
     # Audit/filter/auxiliary objects and altered search/namespace policies need a
     # different native profile. In particular NODEFLIB cannot use our default set.
-    if any(tag in (0x6ffffefb, 0x6ffffefc, 0x7ffffffd, 0x7fffffff, 0x6ffffdfd) for tag, _ in dynamic):
+    if any(
+        tag in (0x6FFFFEFB, 0x6FFFFEFC, 0x7FFFFFFD, 0x7FFFFFFF, 0x6FFFFDFD) for tag, _ in dynamic
+    ):
         refuse()
-    if any(tag == 0x6ffffffb and value & ~(0x1 | 0x8 | 0x80 | 0x08000000) for tag, value in dynamic):
+    if any(
+        tag == 0x6FFFFFFB and value & ~(0x1 | 0x8 | 0x80 | 0x08000000) for tag, value in dynamic
+    ):
         refuse()
     relations = [(tag, value) for tag, value in dynamic if tag in (1, 14, 15, 29)]
     strings = b""
@@ -104,18 +120,33 @@ def read_elf(stream, size):
         sizes = [value for tag, value in dynamic if tag == 10]
         if len(addresses) != 1 or len(sizes) != 1:
             refuse()
-        locations = [row[2] + addresses[0] - row[3] for row in segments if row[0] == 1 and row[3] <= addresses[0] and addresses[0] + sizes[0] <= row[3] + row[5]]
+        locations = [
+            row[2] + addresses[0] - row[3]
+            for row in segments
+            if row[0] == 1 and row[3] <= addresses[0] and addresses[0] + sizes[0] <= row[3] + row[5]
+        ]
         if len(locations) != 1:
             refuse()
         strings = read(locations[0], sizes[0])
     needed = tuple(cstring(strings, value) for tag, value in relations if tag == 1)
-    tags = {tag: tuple(cstring(strings, value) for actual, value in relations if actual == tag)
-            for tag in (14, 15, 29)}
-    if (len(needed) != len(set(needed)) or any(len(values) > 1 for values in tags.values())
-            or (tags[15] and tags[29])):
+    tags = {
+        tag: tuple(cstring(strings, value) for actual, value in relations if actual == tag)
+        for tag in (14, 15, 29)
+    }
+    if (
+        len(needed) != len(set(needed))
+        or any(len(values) > 1 for values in tags.values())
+        or (tags[15] and tags[29])
+    ):
         refuse()
-    return Elf(interpreters[0] if interpreters else None, needed, tags[15], tags[29],
-               tags[14][0] if tags[14] else None, bool(dynamic))
+    return Elf(
+        interpreters[0] if interpreters else None,
+        needed,
+        tags[15],
+        tags[29],
+        tags[14][0] if tags[14] else None,
+        bool(dynamic),
+    )
 
 
 def read_cache(content):
@@ -149,7 +180,9 @@ def search_paths(info, filename):
     result = []
     for encoded in (*info.rpath, *info.runpath):
         for item in encoded.split(":"):
-            value = item.replace("${ORIGIN}", os.path.dirname(filename)).replace("$ORIGIN", os.path.dirname(filename))
+            value = item.replace("${ORIGIN}", os.path.dirname(filename)).replace(
+                "$ORIGIN", os.path.dirname(filename)
+            )
             if not value.startswith("/") or "$" in value or "\\" in value:
                 refuse()
             result.append(os.path.normpath(value))

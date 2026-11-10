@@ -94,7 +94,9 @@ class Lookup:
                 prefix = str(Path(*parts[:end]))
                 pair = self.originals.get(prefix)
                 if pair is not None and pair[0].nodes[pair[1]]["kind"] == "symlink":
-                    filename = posixpath.join(posixpath.dirname(prefix), pair[0].nodes[pair[1]]["target"], *parts[end:])
+                    filename = posixpath.join(
+                        posixpath.dirname(prefix), pair[0].nodes[pair[1]]["target"], *parts[end:]
+                    )
                     break
             else:
                 return self.originals.get(filename)
@@ -102,7 +104,9 @@ class Lookup:
 
     def candidate(self, filename):
         self.limit.step()
-        if not filename.startswith(self.logical_prefix) and not self.runtime.covered(posixpath.dirname(filename)):
+        if not filename.startswith(self.logical_prefix) and not self.runtime.covered(
+            posixpath.dirname(filename)
+        ):
             layout("native search candidate lies outside the declared closed directories")
         pair = self.resolve(filename)
         if pair is not None:
@@ -128,7 +132,9 @@ class Lookup:
             if count > MAX_RELATIONS:
                 layout("native lookup exceeds its candidate bound")
             alternative = self.candidate(filename)
-            if alternative is not None and (direct is None or self.token(alternative) != self.token(direct)):
+            if alternative is not None and (
+                direct is None or self.token(alternative) != self.token(direct)
+            ):
                 layout("native search directory has an unverifiable alternative")
         self.limit.retain()
         self.slots[memo] = direct
@@ -213,7 +219,9 @@ class Lookup:
             destination = self.graph.original(target)
             if destination == original:
                 suffix = ""
-            elif self.graph.nodes[target]["kind"] == "directory" and Path(original).is_relative_to(destination):
+            elif self.graph.nodes[target]["kind"] == "directory" and Path(original).is_relative_to(
+                destination
+            ):
                 suffix = str(Path(original).relative_to(destination))
             else:
                 continue
@@ -279,7 +287,10 @@ class Proof:
                     required = self.required_worker[token]
                     for candidate in runtime.elfs:
                         self.limit.step()
-                        if any(Path(runtime.graph.original(candidate)).is_relative_to(directory) for directory in directories):
+                        if any(
+                            Path(runtime.graph.original(candidate)).is_relative_to(directory)
+                            for directory in directories
+                        ):
                             value = self.token(runtime, candidate)
                             if value not in required:
                                 self.limit.retain()
@@ -349,7 +360,10 @@ class Proof:
                         continue
                     for ancestor, ancestor_key in blocks:
                         other = self.lookups[ancestor]
-                        for block_alias in (ancestor.graph.original(ancestor_key), ancestor.graph.logical(ancestor_key)):
+                        for block_alias in (
+                            ancestor.graph.original(ancestor_key),
+                            ancestor.graph.logical(ancestor_key),
+                        ):
                             self.limit.step()
                             selected = other.own(ancestor.elfs[ancestor_key], name, block_alias)
                             if selected is not None and other.token(selected) != expected:
