@@ -129,18 +129,22 @@ corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test 
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 
-Functional tests use controlled inputs. An owned native tool integration belongs in that
-suite only when its relevant runtime and input closure are explicit and the result does
-not depend on nonportable ambient installations. Actual browser execution is always a
+Functional tests use portable controlled inputs. Naming, copying or pinning an actual
+host installation does not make its compiler, loader, ABI or installed layout a portable
+fixture. Host compiler and derived-library/preload experiments, real installed-command
+guards and qualification against actual checkouts or installed runtimes belong to
+separately selected [compatibility benchmarks](benchmark.md#portable-inputs-and-host-qualification).
+They are not functional prerequisites. Actual browser execution is always a
 separately invoked [benchmark](benchmark.md#browser-execution-benchmarks), including an
 owned page with explicit runtime inputs. It is not a functional readiness requirement.
 Pinning whatever a developer happens to have installed does not make that installation
 a portable fixture.
 Host-dependent runtime compatibility checks run separately under
 [`benchmarks/frozen_runtime`](benchmark.md#installed-runtime-compatibility-benchmarks),
-outside the default functional gate. Controlled Node and installed-plugin execution,
-frozen-input declarations, data views, identity, transport, error handling and cleanup
-remain functional controls. Deterministic doubles must be identified as such; they do
+outside the default functional gate. Portable frozen-input declarations, data views,
+identity, transport, error handling and cleanup remain functional controls. A concrete
+program fixture must meet the same portable-input rule; selecting a familiar program
+or package name does not exempt it. Deterministic doubles must be identified as such; they do
 not establish browser navigation, clicking, layout or rendering coverage.
 
 The earlier unlanded ambient-configuration preservation controls are superseded by the
@@ -167,6 +171,22 @@ model only; it does not establish that CPython starts. Full worker controls must
 the actual invoking interpreter description and explicitly pin its real runtime, loader
 cache and pytest dependencies. Adding a dynamic worker runtime to a static-tool test
 cannot prove that the static tool alone caused the native profile to activate.
+
+### Derived native witnesses
+
+A tiny owned C source does not make a selected host compiler toolchain portable.
+Compiling it against explicit GCC subtools and runtime libraries, then observing an
+owned scratch library in a finite-environment child, is an explicit benchmark witness.
+Keep its exact source, command flags, tool/runtime closure, symbol/value assertion,
+output bounds and cleanup plan together. The child may explicitly name its own derived
+scratch output after startup; captured ambient `LD_*` declarations remain invalid and
+the fixed empty readonly `/etc/ld.so.preload` rule is unchanged. Such a witness measures
+only the actual exercised path, not ABI compatibility or a static proof for future bytes.
+
+An inventory or dry run is planning evidence. An unexecuted compile/load cell remains
+unrun and does not block functional qualification. Preserve historical failures and
+receipts when reclassifying work; do not relabel them as benchmark passes. A benchmark
+campaign requires its own explicit selection and is not started by the default gate.
 
 ## Controlled program qualification
 

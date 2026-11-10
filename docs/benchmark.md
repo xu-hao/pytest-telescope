@@ -118,13 +118,38 @@ closure digests, complete output, resource receipt and observed outcomes with ea
 benchmark. Report compatibility only for the actual closure exercised; these checks do
 not establish arbitrary installed-runtime support or a portable performance result.
 
+### Portable inputs and host qualification
+
+The default functional suite uses portable owned fixtures to test declarations,
+protocols, ownership, environment composition, cache identity and lifecycle behavior.
+Pinning bytes is an execution contract, not a test-portability classification. A fixture
+whose result depends on the selected host compiler, native loader, preload behavior,
+installed command or real checkout/install layout belongs to an explicitly selected
+compatibility benchmark. Complete pins and owned source do not turn that host
+qualification into a functional prerequisite.
+
+Keep a benchmark's real oracle and required dependencies intact, including output and
+cleanup bounds. Metadata or planning probes establish only their observed planning
+facts. A benchmark left unrun supplies no runtime or performance verdict, and moving it
+out of functional discovery does not turn a historical failure into a pass. The default
+gate still runs the benchmark harness's portable correctness tests without dispatching
+the host-qualification campaign.
+
+One planned derived-library witness uses a header-free owned C function, selected
+compiler/subtools with explicit flags and runtime pins, and a finite-environment Python
+child that observes the expected symbol value from owned scratch output. Its compiler,
+loader and derived-load assertions remain benchmark work. It has no compile/load
+qualification result until explicitly executed; a compiler inventory or dry run is not
+that result. See [derived native witnesses](development.md#derived-native-witnesses).
+
 ## Browser execution benchmarks
 
 Actual browser execution belongs to separately invoked benchmarks, even when the page,
 driver and runtime closure are explicit owned inputs. The default functional suite and
-its prerequisite preparation must not launch or require a browser. Node and installed
-Python plugin controls remain functional, as do deterministic frozen-input, transport,
-lifecycle, error and cleanup controls. Such controls do not claim browser UI coverage.
+its prerequisite preparation must not launch or require a browser. Portable frozen-input,
+transport, lifecycle, error and cleanup controls remain functional. Program and installed
+plugin fixtures follow the same portable-input rule above. Such controls do not claim
+browser UI coverage.
 
 The controlled Chromium case retains the real env/Node driver, isolated Python CLI child
 and CDP pipe. Its oracle requires navigation, a real mouse click that updates the DOM,
