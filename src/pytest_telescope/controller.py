@@ -862,7 +862,9 @@ def run(
             row.update(
                 outcome="failed" if result["declaration_error"] else "executed",
                 collected=len(result["items"]),
-                inventory_digest=None if result["declaration_error"] else fingerprint(
+                inventory_digest=None
+                if result["declaration_error"]
+                else fingerprint(
                     sorted([suite.name, item["case_id"], item["file"]] for item in result["items"])
                 ),
             )

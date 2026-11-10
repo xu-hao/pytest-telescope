@@ -17,7 +17,11 @@ def project(root, *, mutate=False, invalid=False, collection_change=False):
         '[tool.pytest_telescope]\ntest_roots = ["tests"]\n', encoding="utf-8"
     )
     marker = "'invalid'" if invalid else "False"
-    change = "    next(request.node.iter_markers('telescope')).kwargs['cache'] = True\n" if mutate else ""
+    change = (
+        "    next(request.node.iter_markers('telescope')).kwargs['cache'] = True\n"
+        if mutate
+        else ""
+    )
     (root / "tests/test_owned.py").write_text(
         "from pathlib import Path\nimport pytest\n"
         f"@pytest.mark.telescope(cache={marker})\n"
@@ -133,7 +137,13 @@ def test_real_ordinary_post_body_declaration_refusal_retains_reports(tmp_path, m
     member = passed_member(frame)
     assert (tmp_path / "owned-body-event").read_text() == "body"
     assert_no_cache(tmp_path)
-    print("W2_ACTUAL", frame["protocol"], frame["declaration_error"], frame["exit_code"], member["case_id"])
+    print(
+        "W2_ACTUAL",
+        frame["protocol"],
+        frame["declaration_error"],
+        frame["exit_code"],
+        member["case_id"],
+    )
     assert type(refusal) is DeclarationError and refusal.accounting is not None
     retained = refusal.accounting.render()
     assert retained["version"] == 1 and retained["state"] == "available"
@@ -144,7 +154,11 @@ def test_real_ordinary_post_body_declaration_refusal_retains_reports(tmp_path, m
     (group,) = observed["groups"]
     assert unit["case_id"] == member["case_id"] == group["case_ids"][0]
     assert unit["group_id"] == group["group_id"]
-    assert unit["result_status"] == "passed" and unit["complete"] and unit["reports"] == member["reports"]
+    assert (
+        unit["result_status"] == "passed"
+        and unit["complete"]
+        and unit["reports"] == member["reports"]
+    )
     assert unit["attempts"] == group["attempts"] == 1 and unit["worker_seconds"] is None
     assert group["profile"] == "ordinary-v2" and group["route"] == "ordinary"
     assert not group["complete"] and not group["cache_eligible"]
