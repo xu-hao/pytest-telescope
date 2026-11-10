@@ -212,7 +212,12 @@ def direct_static_read(box, view, path):
     from pytest_telescope.tool_startup import environment
 
     controlled = replace(box, binds=environment(box, view.closed))
-    argv = sandbox._base_arguments(controlled, frozen_prefixes=view.prefixes, native=view.native)
+    argv = sandbox._base_arguments(
+        controlled,
+        frozen_prefixes=view.prefixes,
+        native=view.native,
+        closed_directories=view.closed,
+    )
     for source, destination in view.bindings:
         argv += ["--ro-bind", str(source), destination]
     argv += [
