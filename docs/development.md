@@ -8,18 +8,18 @@ python -m venv .venv
 python -m pip install '.[dev]'
 mkdir -m 700 /tmp/telescope-check-scratch
 export TMPDIR=/tmp/telescope-check-scratch
-python scripts/check.py --node /absolute/path/to/node --artifacts /tmp/telescope-check
+python scripts/check.py --artifacts /tmp/telescope-check
 ```
 
 The check command runs Ruff lint and formatting checks, builds the sdist and a wheel
 from it, validates package metadata, builds documentation with warnings as errors,
-installs the built wheel without dependencies, verifies that installed candidate, prepares
-its functional prerequisites, and runs the behavioral tests and benchmark-harness unit
+installs the built wheel without dependencies, verifies that installed candidate,
+and runs the behavioral tests and benchmark-harness unit
 checks. It requires a virtual environment and uses its interpreter throughout. The
 artifact directory must not already exist; use a new directory for another run. Build
 dependencies may need network access. No package is uploaded by this command. Each stage
-has a five-minute deadline, except prerequisite preparation and the behavioral suite,
-which each have fifteen minutes. A timeout fails the gate.
+has a five-minute deadline, except the behavioral suite, which has fifteen minutes.
+A timeout fails the gate.
 
 Use new, owned scratch and artifact paths for each attempt. The example above creates
 the scratch directory before the gate starts; remove that directory after the gate has
@@ -30,29 +30,23 @@ of assigning a different location.
 
 ## Installed candidate and functional prerequisites
 
-This is the gate contract for the unreleased frozen-tool candidate. Select an existing
-Node executable with an absolute `--node` path or `TELESCOPE_FIXTURE_NODE`; an explicit
-`--node` takes precedence. Missing, relative or unusable selections refuse. The gate
-does not discover Node through `PATH`, download it, or select a replacement. For example,
-the equivalent environment-based invocation is:
-
-```sh
-mkdir -m 700 /tmp/telescope-check-next-scratch
-export TMPDIR=/tmp/telescope-check-next-scratch
-TELESCOPE_FIXTURE_NODE=/absolute/path/to/node \
-  python scripts/check.py --artifacts /tmp/telescope-check-next
-```
+This is the gate contract for the unreleased candidate. The default gate requires the
+ordinary Python/pytest/Bubblewrap runner and build/documentation dependencies. It does
+not accept `--node`, select a program installation, prepare the `node` or `installed`
+profiles, or dispatch compatibility benchmarks. Those actual program-qualification
+cases are selected and prepared explicitly through the
+[benchmark path](benchmark.md#program-and-installed-distribution-migration-ledger).
 
 The outer job must provide an existing absolute `TMPDIR` and explicit resource limits.
-All preparation copies, subprocess scratch and temporary runtime declarations stay below
+All subprocess scratch and temporary test inputs stay below
 that actual caller-provided directory. The new artifact directory holds the complete
-logs, final result and prerequisite evidence; it is not a substitute scratch location.
+logs, final result and candidate evidence; it is not a substitute scratch location.
 Automated callers must provide these same prerequisites explicitly. A hosted runner's
-temporary directory can supply `TMPDIR` when it exists and belongs to that job; installing
-Node alone does not select its executable for the gate. Missing prerequisites must stop
+temporary directory can supply `TMPDIR` when it exists and belongs to that job.
+Missing runner prerequisites must stop
 before any build, installer or qualification stage. Workflow-entry unit controls load
 the actual workflow invocation and exercise gate preflight with owned interpreter,
-executable and stage doubles. They do not qualify hosted actions or run an installed gate.
+and stage doubles. They do not qualify hosted actions or run an installed gate.
 
 After building and installing the exact candidate wheel with the gate interpreter,
 a standard-library-only guard verifies the candidate before importing it. The guard
@@ -74,37 +68,35 @@ actual installed-candidate gate can provide that evidence.
 Install with `--no-compile`, disable bytecode writes during qualification, and reject
 residual `.pyc` files in the installed producer package. Otherwise cached bytecode could
 bypass verification of its Python source bytes. This guard is specific to the candidate
-`pytest_telescope` package. The installed-plugin fixture still supports its normal
+`pytest_telescope` package. The explicit installed-plugin benchmark still supports its normal
 explicitly pinned bytecode, including its thirteen selected `.pyc` files, and verifies
 those actual bytes under the [installed-Python contract](bubblewrap-api.md#installed-python-distribution-records).
 
-Only after that guard succeeds does the same interpreter perform fresh metadata-only
-preparation for exactly the `node` and `installed` profiles. Preparation records the
-selected inputs without starting declared programs or running plugin hooks or tests. The prerequisite
-receipt retains schema 1 and its existing profiles structure. A separate gate binding
-records the source HEAD and tree, exact wheel hash, interpreter identity, prerequisite
-receipt path and SHA-256. It does not extend or reinterpret the tool manifest or receipt
-schema. Neither a source-snapshot receipt nor an old three-profile receipt qualifies a
-new installed candidate.
+The new candidate binding uses schema 2 with exactly `schema`, `root`, `source`,
+`wheel_path`, `wheel` and `interpreter`. It binds source HEAD/tree, complete wheel
+identity and the exact invoking interpreter. There is no Node field. Old schema 1,
+missing fields and extra fields refuse; there is no compatibility fallback.
+After building and installing the candidate, the gate writes a fresh binding and passes
+its exact SHA-256 and owned scratch to `functional_gate.py` in `tests` and `harness`
+modes. There is no default `prepare` mode, prerequisite receipt or admission argument.
 
-Validate the complete receipt and binding before functional pytest starts. Check source
-identity, installed import origin and bytes, interpreter identity, and receipt integrity
-before and after preparation and functional execution. A changed source, substituted
-import or changed prerequisite invalidates the gate, even when the test process exits
-successfully. A preparation pass alone is not a functional verdict; the
-[controlled program cases](#controlled-program-qualification) still have to pass.
+Validate source, wheel, installed membership/version/import origin and interpreter
+before importing the producer and again after each stage. A changed source or substituted
+installation invalidates the gate even when the test process exits successfully.
+Explicit benchmark preparation retains its existing named profiles and exact hashed
+receipts; those are separate evidence and cannot stand in for the candidate guard.
 
-Preparation and functional pytest each have a 900-second deadline. Capture each stage's
+Functional pytest has a 900-second deadline. Capture each stage's
 complete output once, with an 8 MiB bound; overflow fails rather than silently truncating
 successful evidence. On timeout or failure, stop dependent stages, terminate owned
 processes with a ten-second TERM grace followed by a ten-second KILL/reap bound, and
 clean up only owned scratch. Record one exclusive complete log and result per attempt;
 cleanup failure also prevents a successful verdict. Retrying requires a new artifact
-directory and fresh preparation. There is no silent fallback, prerequisite skip or
+directory and a fresh candidate binding. There is no silent fallback, prerequisite skip or
 installer called from a test.
 
 Actual [browser execution](benchmark.md#browser-execution-benchmarks) remains outside
-this functional gate and its preparation. The separate benchmark-harness unit checks
+this functional gate. The separate benchmark-harness unit checks
 remain required; they do not dispatch the real-browser benchmark. A functional gate
 does not establish browser navigation, clicking, layout or rendering coverage.
 
@@ -129,12 +121,15 @@ corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test 
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 
-Functional tests use portable controlled inputs. Naming, copying or pinning an actual
-host installation does not make its compiler, loader, ABI or installed layout a portable
-fixture. Host compiler and derived-library/preload experiments, real installed-command
-guards and qualification against actual checkouts or installed runtimes belong to
-separately selected [compatibility benchmarks](benchmark.md#portable-inputs-and-host-qualification).
-They are not functional prerequisites. Actual browser execution is always a
+Functional tests use portable controlled inputs. Their ordinary Python, pytest and
+Bubblewrap runner dependencies remain normal test infrastructure; using those programs
+does not itself make a test a compatibility benchmark. Classify a case by its purpose
+and inputs. A case whose purpose is to qualify a selected host compiler/toolchain,
+native loader/ABI, derived preload, installed command or actual checkout/install layout
+belongs to a separately selected
+[compatibility benchmark](benchmark.md#portable-inputs-and-host-qualification).
+Naming, copying or pinning that installation does not establish portability. Such
+qualification is not a functional prerequisite. Actual browser execution is always a
 separately invoked [benchmark](benchmark.md#browser-execution-benchmarks), including an
 owned page with explicit runtime inputs. It is not a functional readiness requirement.
 Pinning whatever a developer happens to have installed does not make that installation
@@ -142,9 +137,10 @@ a portable fixture.
 Host-dependent runtime compatibility checks run separately under
 [`benchmarks/frozen_runtime`](benchmark.md#installed-runtime-compatibility-benchmarks),
 outside the default functional gate. Portable frozen-input declarations, data views,
-identity, transport, error handling and cleanup remain functional controls. A concrete
-program fixture must meet the same portable-input rule; selecting a familiar program
-or package name does not exempt it. Deterministic doubles must be identified as such; they do
+identity, transport, error handling and cleanup remain functional controls. An ordinary
+program dependency is not a blanket exemption or a blanket ban: assess the actual
+case's purpose and whether its asserted behavior has portable owned inputs. Deterministic
+doubles must be identified as such; they do
 not establish browser navigation, clicking, layout or rendering coverage.
 
 The earlier unlanded ambient-configuration preservation controls are superseded by the
@@ -167,9 +163,10 @@ runtime, nor does a source-snapshot check qualify an installed wheel or ambient 
 Static trigger coverage is separate from full worker compatibility. A tiny owned static
 ELF can exercise actual runtime classification and a direct-program filesystem view.
 A synthetic standard prefix description used by such a test qualifies the startup path
-model only; it does not establish that CPython starts. Full worker controls must use
-the actual invoking interpreter description and explicitly pin its real runtime, loader
-cache and pytest dependencies. Adding a dynamic worker runtime to a static-tool test
+model only; it does not establish that CPython starts. A claim about startup of a selected
+native worker requires its actual invoking interpreter description and explicitly pinned
+runtime, loader cache and pytest dependencies. That qualification claim cannot be
+replaced by a double. Adding a dynamic worker runtime to a static-tool test
 cannot prove that the static tool alone caused the native profile to activate.
 
 ### Derived native witnesses
@@ -190,16 +187,20 @@ campaign requires its own explicit selection and is not started by the default g
 
 ## Controlled program qualification
 
-The functional Node and installed-plugin controls use the actual invoking worker runtime
+The explicitly selected Node and installed-plugin benchmarks use the actual invoking worker runtime
 alongside explicitly selected program files. Preparation records every selected
 file's hash, type and mode in a bounded private receipt. A check compares its initial
 declarations against that exact receipt before starting the controller. A missing or
 changed prerequisite fails preparation or the check; it does not skip the control,
 download a replacement, or widen the filesystem view.
-Functional preparation selects only Node and installed-plugin profiles. It does not
-require a browser executable, browser resources or a successful browser benchmark.
-Browser preparation is requested explicitly for a separate benchmark and has its own
-receipt and verdict.
+The two-profile preparation path selects Node and installed-plugin profiles. It does not
+select a browser executable or browser resources. Browser preparation is requested
+explicitly for a separate benchmark and has its own receipt and verdict. A profile's
+name and a matching receipt do not classify its cases as functional. All five Node/program
+nodes and nine installed-distribution nodes listed in the
+[migration ledger](benchmark.md#program-and-installed-distribution-migration-ledger)
+remain explicit compatibility benchmarks. Preserve their real assertions and dependencies
+when selecting them separately; their execution is not required by the default gate.
 
 The Node driver keeps its `#!/usr/bin/env node` shebang. Its checks exercise the pinned
 command directory, argument boundaries, exit status and signal propagation through an
