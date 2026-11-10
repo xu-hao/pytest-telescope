@@ -22,6 +22,8 @@
   recording the exact real fixture-guard positives excluded from that profile.
   Verify final membership after collection callbacks finish and refuse late changes
   before test bodies or a success receipt.
+  Preserve the complete core partition across exclusion callbacks and reject additional
+  callback deselections before bodies.
 
 This candidate remains unreleased. New performance is unmeasured. Frozen-checkout/history
 capture and its proposed selector are deferred and are not implemented by this candidate.
