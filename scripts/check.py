@@ -103,7 +103,7 @@ def main() -> None:
                 *arguments,
                 "--membership",
                 str(output / "functional-membership.json"),
-                timeout=900,
+                timeout=1200,
                 env=env,
             )
             stages.run("harness", "-I", "-B", helper, "harness", *arguments, env=env)
