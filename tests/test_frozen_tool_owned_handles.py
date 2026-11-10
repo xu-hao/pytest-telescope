@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from frozen_tool_owned_handles_fixture import DirectoryReads, inode, mode, moved, owned_capture, remember
-from frozen_tool_permission_fixture import identity
+from frozen_tool_permission_fixture import errors, identity
 
 from pytest_telescope import sandbox
 from pytest_telescope.model import InfrastructureError
@@ -39,32 +39,65 @@ def test_frozen_copy_replacement_refuses_without_reading_replacement(tmp_path, r
         reads = DirectoryReads(capture.directory)
         with reads.observe():
             with capture:
-                copied = capture.directory / "owned/install/inner"
+                copied = capture.directory / "owned/install"
+                expected = identity(copied)
+                held = capture.owned_directories.handles[copied]
+                assert inode(os.fstat(held)) == tuple(expected[:2])
+                assert mode(copied) == mode(copied / "inner") == 0o111
                 target, before = decoy(tmp_path, owned.records)
-                displaced = owned.stage / "displaced"
-                copied.parent.chmod(0o755)
-                copied.rename(displaced)
-                moved(owned.records, copied, displaced)
-                if replacement == "directory":
-                    copied.mkdir(mode=0o111)
-                    copied.chmod(0o111)
-                else:
-                    copied.symlink_to(target, target_is_directory=True)
-                remember(owned.records, copied)
-                copied.parent.chmod(0o111)
-                forbidden = {inode(target.lstat()), inode(copied.lstat())}
-                original = os.scandir
-                scanned = []
+                displaced = copied.with_name("displaced")
+                parent_identity, parent_mode = identity(copied.parent), mode(copied.parent)
+                assert parent_mode == 0o555
+                original_open, original_scan = capture.owned_directories.open, os.scandir
+                swapped, scanned = [], []
+
+                def opened(path, parent, leaf):
+                    assert Path(path) == copied and not swapped
+                    assert identity(copied) == expected and mode(copied) == 0o111
+                    # Fault construction changes only this owned container, then
+                    # restores its frozen mode before real verification resumes.
+                    os.chmod(copied.parent, parent_mode | 0o200, follow_symlinks=False)
+                    try:
+                        copied.rename(displaced)  # Same parent: no '..' update.
+                        moved(owned.records, copied, displaced)
+                        if replacement == "directory":
+                            copied.mkdir(mode=0o111)
+                            copied.chmod(0o111)
+                        else:
+                            copied.symlink_to(target, target_is_directory=True)
+                        remember(owned.records, copied)
+                    finally:
+                        assert identity(copied.parent) == parent_identity
+                        os.chmod(copied.parent, parent_mode, follow_symlinks=False)
+                    assert identity(displaced) == expected and mode(displaced) == 0o111
+                    assert mode(displaced / "inner") == 0o111
+                    assert inode(os.fstat(held)) == tuple(expected[:2])
+                    assert inode(copied.lstat()) != tuple(expected[:2])
+                    if replacement == "directory":
+                        assert mode(copied) == 0o111
+                    else:
+                        assert copied.is_symlink()
+                    assert mode(copied.parent) == parent_mode
+                    assert owned.fixture.state() == owned.fixture.before
+                    assert mode(owned.fixture.source) == 0o111
+                    swapped.append(inode(copied.lstat()))
+                    return original_open(path, parent, leaf)
 
                 def scandir(path):
                     current = os.fstat(path) if isinstance(path, int) else Path(path).lstat()
-                    assert inode(current) not in forbidden, "replacement directory was enumerated"
+                    assert inode(current) not in {inode(target.lstat()), inode(copied.lstat())}, "replacement directory was enumerated"
                     scanned.append(inode(current))
-                    return original(path)
+                    return original_scan(path)
 
-                with patch.object(os, "scandir", scandir), pytest.raises(InfrastructureError):
-                    capture.verify(["owned"])
-                assert scanned
+                with patch.object(capture.owned_directories, "open", opened), patch.object(os, "scandir", scandir):
+                    with pytest.raises(InfrastructureError, match="^owned frozen-tool directory moved after freezing$") as caught:
+                        try:
+                            capture.verify(["owned"])
+                        except BaseException as error:
+                            print("owned replacement cause chain:", errors(error))
+                            raise
+                assert errors(caught.value) == [["InfrastructureError", None]]
+                assert len(swapped) == 1 and not scanned
                 assert_decoy(target, before)
             reads.assert_closed()
         assert_decoy(target, before)
@@ -109,21 +142,39 @@ def test_cleanup_anchor_swap_restores_only_held_owned_inode_and_refuses(tmp_path
             copied = capture.directory / "owned/install/inner"
             expected = inode(copied.lstat())
             target, before = decoy(tmp_path, owned.records)
-            displaced = owned.stage / "displaced"
-            original_chmod, original_scan = os.chmod, os.scandir
-            swapped = []
+            displaced = copied.with_name("displaced")
+            original_open, original_chmod, original_scan = os.open, os.chmod, os.scandir
+            anchors, swapped = [], []
+
+            def opened(path, flags, *args, **kwargs):
+                descriptor = original_open(path, flags, *args, **kwargs)
+                if flags & os.O_PATH and inode(os.fstat(descriptor)) == expected:
+                    try:
+                        assert flags & os.O_DIRECTORY and flags & os.O_NOFOLLOW
+                        assert not anchors and mode(copied) == 0o111
+                        anchors.append(descriptor)
+                    except BaseException:
+                        os.close(descriptor)
+                        raise
+                return descriptor
 
             def chmod(path, permissions, *args, **kwargs):
                 if isinstance(path, str) and path.startswith("/proc/self/fd/"):
                     descriptor = int(path.rsplit("/", 1)[1])
                     if inode(os.fstat(descriptor)) == expected:
-                        assert not swapped
-                        # Only this fixture-owned parent changes during terminal cleanup.
-                        original_chmod(copied.parent, 0o755, follow_symlinks=False)
+                        assert anchors == [descriptor] and not swapped
+                        assert permissions == 0o711 and mode(copied) == 0o111
+                        assert mode(copied.parent) == 0o711
+                        assert mode(owned.fixture.source) == 0o111
+                        assert owned.fixture.state() == owned.fixture.before
                         copied.rename(displaced)
                         moved(owned.records, copied, displaced)
                         copied.symlink_to(target, target_is_directory=True)
                         remember(owned.records, copied)
+                        assert inode(displaced.lstat()) == expected and mode(displaced) == 0o111
+                        assert inode(os.fstat(descriptor)) == expected and copied.is_symlink()
+                        assert inode(copied.lstat()) != expected
+                        assert_decoy(target, before)
                         swapped.append(descriptor)
                 return original_chmod(path, permissions, *args, **kwargs)
 
@@ -132,12 +183,23 @@ def test_cleanup_anchor_swap_restores_only_held_owned_inode_and_refuses(tmp_path
                 assert inode(current) != inode(target.lstat()), "cleanup followed replacement target"
                 return original_scan(path)
 
-            with patch.object(os, "chmod", chmod), patch.object(os, "scandir", scandir):
-                with pytest.raises(sandbox.CleanupError, match="moved"):
-                    capture.__exit__(None, None, None)
+            with patch.object(os, "open", opened), patch.object(os, "chmod", chmod), patch.object(os, "scandir", scandir):
+                with pytest.raises(sandbox.CleanupError, match="^owned frozen-tool cleanup directory moved$") as caught:
+                    try:
+                        capture.__exit__(None, None, None)
+                    except BaseException as error:
+                        print("owned cleanup cause chain:", errors(error))
+                        raise
+            assert errors(caught.value) == [["CleanupError", None]]
+            assert anchors == swapped
             assert len(swapped) == 1 and inode(displaced.lstat()) == expected
             assert mode(displaced) == 0o711 and copied.is_symlink()
             assert not (displaced / "value").exists()
+            with pytest.raises(OSError) as closed:
+                os.fstat(anchors[0])
+            assert closed.value.errno == errno.EBADF
+            assert mode(owned.fixture.source) == 0o111
+            assert owned.fixture.state() == owned.fixture.before
             assert_decoy(target, before)
             reads.assert_closed()
 
