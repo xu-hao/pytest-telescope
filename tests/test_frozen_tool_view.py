@@ -22,14 +22,24 @@ def project(tmp_path):
     return ToolProject(tmp_path / "project", tmp_path / "installed")
 
 
-@pytest.mark.parametrize("source_mode", [
-    pytest.param(0o755, id="source0755-to0555"),
-    pytest.param(0o750, id="source0750-to0550"),
-])
-def test_sparse_original_symlink_uses_closed_owned_parent_with_no_live_siblings(project, source_mode, monkeypatch):
-    source = project.add_tree("frontend", preserve=True, files={
-        "bin/real.txt": "pinned", "bin/unselected.txt": "live sibling",
-    })
+@pytest.mark.parametrize(
+    "source_mode",
+    [
+        pytest.param(0o755, id="source0755-to0555"),
+        pytest.param(0o750, id="source0750-to0550"),
+    ],
+)
+def test_sparse_original_symlink_uses_closed_owned_parent_with_no_live_siblings(
+    project, source_mode, monkeypatch
+):
+    source = project.add_tree(
+        "frontend",
+        preserve=True,
+        files={
+            "bin/real.txt": "pinned",
+            "bin/unselected.txt": "live sibling",
+        },
+    )
     (source / "bin").chmod(source_mode)
     (source / "bin/alias.txt").symlink_to("real.txt")
     project.refresh("frontend")
@@ -46,17 +56,21 @@ def test_sparse_original_symlink_uses_closed_owned_parent_with_no_live_siblings(
             bindings = {destination: frozen for frozen, destination in result.bindings}
             logical = bindings["/tools/frontend/install"] / "bin"
             original = bindings[str(source / "bin")]
-            observed_modes.append((stat.S_IMODE(logical.stat().st_mode), stat.S_IMODE(original.stat().st_mode)))
+            observed_modes.append(
+                (stat.S_IMODE(logical.stat().st_mode), stat.S_IMODE(original.stat().st_mode))
+            )
         return result
 
     monkeypatch.setattr(tool_capture.Capture, "view", view)
-    project.module("test_sparse_links.py", f"""import os
+    project.module(
+        "test_sparse_links.py",
+        f"""import os
 import stat
 from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['frontend'])
 def test_links():
-    for directory in (Path('/tools/frontend/install/bin'), Path({str(source / 'bin')!r})):
+    for directory in (Path('/tools/frontend/install/bin'), Path({str(source / "bin")!r})):
         assert sorted(path.name for path in directory.iterdir()) == ['alias.txt', 'real.txt']
         link = directory / 'alias.txt'
         assert stat.S_ISLNK(link.lstat().st_mode)
@@ -65,11 +79,14 @@ def test_links():
         assert stat.S_IMODE(directory.stat().st_mode) == {source_mode & 0o555}
         with pytest.raises(OSError):
             (directory / 'new.txt').write_text('not writable')
-""")
+""",
+    )
     report = project.run()
     expected_modes = (source_mode & 0o555, source_mode & 0o555)
     assert observed_modes and all(row == expected_modes for row in observed_modes), {
-        "source_mode": source_mode, "expected": expected_modes, "observed": observed_modes,
+        "source_mode": source_mode,
+        "expected": expected_modes,
+        "observed": observed_modes,
     }
     assert_counts(report, executed=1)
     assert (source / "bin/unselected.txt").read_text() == "live sibling"
@@ -85,22 +102,30 @@ def test_link_resolves_to_another_explicit_root_in_same_tool(project, absolute):
     target = put(shared, "data.txt", "shared-one")
     text = str(target) if absolute else "../shared/data.txt"
     (source / "shared.txt").symlink_to(text)
-    project.documents["frontend"]["roots"].append({
-        "id": "shared", "source": str(shared), "coverage": "tree",
-        "preserve_source": True, "entries": entries(shared),
-    })
+    project.documents["frontend"]["roots"].append(
+        {
+            "id": "shared",
+            "source": str(shared),
+            "coverage": "tree",
+            "preserve_source": True,
+            "entries": entries(shared),
+        }
+    )
     project.refresh("frontend")
-    project.module("test_shared.py", f"""import os
+    project.module(
+        "test_shared.py",
+        f"""import os
 from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['frontend'])
 def test_shared():
-    for link in (Path('/tools/frontend/install/shared.txt'), Path({str(source / 'shared.txt')!r})):
+    for link in (Path('/tools/frontend/install/shared.txt'), Path({str(source / "shared.txt")!r})):
         assert link.is_symlink()
         assert os.readlink(link) == {text!r}
         assert link.read_text().startswith('shared-')
     assert Path('/tools/frontend/shared/data.txt').read_text().startswith('shared-')
-""")
+""",
+    )
     assert_counts(project.run(), executed=1)
     assert_counts(project.run(), reused=1)
     target.write_text("shared-two")
@@ -119,32 +144,48 @@ def test_cross_root_link_never_discovers_target_or_invents_logical_bridge(projec
     put(shared, "data.txt", "present on source only")
     (source / "shared.txt").symlink_to("../shared/data.txt")
     if layout == "wrong_logical_root":
-        project.documents["frontend"]["roots"].append({
-            "id": "different", "source": str(shared), "coverage": "tree",
-            "preserve_source": True, "entries": entries(shared),
-        })
+        project.documents["frontend"]["roots"].append(
+            {
+                "id": "different",
+                "source": str(shared),
+                "coverage": "tree",
+                "preserve_source": True,
+                "entries": entries(shared),
+            }
+        )
     project.refresh("frontend")
-    project.module("test_refused_link.py", """import pytest
+    project.module(
+        "test_refused_link.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(tools=['frontend'])
 raise RuntimeError('project import must not run for an unresolved frozen link')
 def test_link(): pass
-""")
+""",
+    )
     report = project.run()
     assert report["status"] in {"unsupported", "declaration_error"}, report
     assert not cache_bytes(project.root)
 
 
 def test_real_view_preserves_project_link_text_and_readonly_frozen_target(project):
-    source = project.add_tree("frontend", preserve=True, files={
-        "value.txt": "frontend", ".hidden": "included", "nested/data.txt": "nested",
-    })
+    source = project.add_tree(
+        "frontend",
+        preserve=True,
+        files={
+            "value.txt": "frontend",
+            ".hidden": "included",
+            "nested/data.txt": "nested",
+        },
+    )
     (source / "alias.txt").symlink_to("value.txt")
     project.refresh("frontend")
     project.bind_link("frontend")
     project.pin_lock("frontend")
     live_inode = (source / "value.txt").stat().st_ino
     put(project.external, "not-declared.txt", "unrelated external data")
-    project.module("test_link.py", f"""import errno
+    project.module(
+        "test_link.py",
+        f"""import errno
 import os
 import stat
 from pathlib import Path
@@ -172,8 +213,9 @@ def test_link():
             with pytest.raises(OSError) as refusal:
                 target.write_text('attempted change')
             assert refusal.value.errno in (errno.EROFS, errno.EACCES)
-    assert not Path({str(project.external / 'not-declared.txt')!r}).exists()
-""")
+    assert not Path({str(project.external / "not-declared.txt")!r}).exists()
+""",
+    )
     assert_counts(project.run(), executed=1)
     assert (source / "value.txt").read_text() == "frontend"
     assert (source / "value.txt").stat().st_ino == live_inode
@@ -184,17 +226,20 @@ def test_link():
 
 def test_nonconsumer_has_no_new_tool_namespace_or_external_alias(project):
     source = project.add_tree("first", preserve=True)
-    project.module("test_views.py", f"""from pathlib import Path
+    project.module(
+        "test_views.py",
+        f"""from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=[])
 @pytest.mark.telescope(tools=['first'])
 def test_consumer():
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
-    assert Path({str(source / 'value.txt')!r}).read_text() == 'first'
+    assert Path({str(source / "value.txt")!r}).read_text() == 'first'
 def test_nonconsumer():
     assert not Path('/tools/first').exists()
     assert not Path({str(source)!r}).exists()
-""")
+""",
+    )
     assert_counts(project.run(), executed=2)
     assert_counts(project.run(), reused=2)
 
@@ -202,10 +247,13 @@ def test_nonconsumer():
 def test_omitting_selected_tool_does_not_relax_external_project_link(project):
     project.add_tree("first", preserve=True)
     project.bind_link("first")
-    project.module("test_missing.py", """import pytest
+    project.module(
+        "test_missing.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(inputs=['node_modules/value.txt'])
 def test_missing(): pass
-""")
+""",
+    )
     report = project.run()
     assert report["status"] in {"declaration_error", "unsupported"}, report
     assert not cache_bytes(project.root)
@@ -214,7 +262,9 @@ def test_missing(): pass
 def test_only_changed_tool_consumer_executes_after_collection_union_refresh(project):
     first = project.add_tree("first", files={"value.txt": "1"})
     project.add_tree("second", files={"value.txt": "2"})
-    project.module("test_consumers.py", """from pathlib import Path
+    project.module(
+        "test_consumers.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=[])
 @pytest.mark.telescope(tools=['first'])
@@ -228,7 +278,8 @@ def test_second():
 def test_unrelated():
     assert not Path('/tools/first').exists()
     assert not Path('/tools/second').exists()
-""")
+""",
+    )
     assert_counts(project.run(), executed=3)
     assert_counts(project.run(), reused=3)
     put(first, "value.txt", "3")
@@ -248,12 +299,15 @@ def test_stale_tree_records_never_reuse_success(project, mutation):
     source = project.add_tree("first", files={"value.txt": "first", "other.txt": "other"})
     (source / "alias.txt").symlink_to("value.txt")
     project.refresh("first")
-    project.module("test_tree.py", """from pathlib import Path
+    project.module(
+        "test_tree.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 def test_tree():
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
-""")
+""",
+    )
     assert_counts(project.run(), executed=1)
     previous = cache_bytes(project.root)
     if mutation == "file":
@@ -280,13 +334,16 @@ def test_tree():
 def test_lock_bytes_and_complete_tree_pin_both_bind_the_consumer(project):
     source = project.add_tree("first", files={"value.txt": "1"})
     project.pin_lock("first")
-    project.module("test_lock.py", """from pathlib import Path
+    project.module(
+        "test_lock.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 def test_lock():
     assert int(Path('/tools/first/install/value.txt').read_text()) > 0
     assert Path('package-lock.json').read_text().startswith('fixture-lock')
-""")
+""",
+    )
     assert_counts(project.run(), executed=1)
     put(project.root, "package-lock.json", "fixture-lock-v2\n")
     report = project.run()
@@ -311,7 +368,9 @@ bundles = ['base']
 [tool.pytest_telescope.bundles.base]
 tools = ['base']
 """)
-    project.module("test_inheritance.py", """from pathlib import Path
+    project.module(
+        "test_inheritance.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['module'], bundles=['shared'])
 class TestTools:
@@ -325,7 +384,8 @@ class TestTools:
         for tool in ('default', 'module', 'class', 'function', 'bundle', 'base', name):
             assert Path('/tools', tool, 'install/value.txt').read_text() == tool
         assert not Path('/tools', 'second' if name == 'first' else 'first').exists()
-""")
+""",
+    )
     assert_counts(project.run(), executed=2)
     assert_counts(project.run(), reused=2)
 
@@ -333,11 +393,14 @@ class TestTools:
 def test_real_worker_refuses_mutated_tool_declarations(project):
     project.add_tree("first")
     project.add_tree("second")
-    project.module("test_mutated.py", """import pytest
+    project.module(
+        "test_mutated.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 pytestmark.kwargs['tools'].append('second')
 def test_mutated(): pass
-""")
+""",
+    )
     report = project.run()
     assert report["status"] == "declaration_error", report
     assert not cache_bytes(project.root)
@@ -346,9 +409,15 @@ def test_mutated(): pass
 def test_batch_groups_require_exact_tool_sets_and_preserve_selected_order(project):
     project.add_tree("first")
     project.add_tree("second")
-    put(project.root, "tests/conftest.py", "def pytest_collection_modifyitems(items):\n    items.reverse()\n")
+    put(
+        project.root,
+        "tests/conftest.py",
+        "def pytest_collection_modifyitems(items):\n    items.reverse()\n",
+    )
     project.configure('[tool.pytest_telescope.defaults]\ninputs = ["tests/conftest.py"]\n')
-    project.module("test_groups.py", """from pathlib import Path
+    project.module(
+        "test_groups.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=[])
 @pytest.mark.telescope(tools=['first'])
@@ -357,25 +426,37 @@ def test_a(): assert Path('/tools/first/install/value.txt').read_text() == 'firs
 def test_b(): assert not Path('/tools/second').exists()
 @pytest.mark.telescope(tools=['second'])
 def test_c(): assert not Path('/tools/first').exists()
-""")
+""",
+    )
     report = project.run(execution_mode="batch")
     assert_counts(report, executed=3)
     assert len(report["groups"]) == 2
+
     def case(name):
         return digest(canonical(["default", f"tests/test_groups.py::test_{name}"]))
 
-    assert [group["case_ids"] for group in report["groups"]] == [[case("c")], [case("b"), case("a")]]
+    assert [group["case_ids"] for group in report["groups"]] == [
+        [case("c")],
+        [case("b"), case("a")],
+    ]
     units = {row["case_id"]: row for row in report["units"]}
-    assert all(units[case]["group_id"] == group["group_id"]
-               for group in report["groups"] for case in group["case_ids"])
+    assert all(
+        units[case]["group_id"] == group["group_id"]
+        for group in report["groups"]
+        for case in group["case_ids"]
+    )
     repeated = project.run(execution_mode="batch")
     assert_counts(repeated, reused=3)
-    assert [group["case_ids"] for group in repeated["groups"]] == [group["case_ids"] for group in report["groups"]]
+    assert [group["case_ids"] for group in repeated["groups"]] == [
+        group["case_ids"] for group in report["groups"]
+    ]
 
 
 def test_tool_batch_with_shared_teardown_failure_never_reuses_member_passes(project):
     project.add_tree("first")
-    project.module("test_teardown.py", """import pytest
+    project.module(
+        "test_teardown.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 @pytest.fixture(scope='module')
 def shared():
@@ -383,7 +464,8 @@ def shared():
     raise RuntimeError('owned synthetic teardown failure')
 def test_a(shared): pass
 def test_b(shared): pass
-""")
+""",
+    )
     for _ in range(2):
         report = project.run(execution_mode="batch")
         assert report["status"] == "failed", report
@@ -393,13 +475,16 @@ def test_b(shared): pass
 
 def test_tool_cache_false_stays_scoped_and_fresh(project):
     project.add_tree("first")
-    project.module("test_uncached.py", """from pathlib import Path
+    project.module(
+        "test_uncached.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'], cache=False)
 def test_value():
     assert Path.cwd() == Path('/project')
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
-""")
+""",
+    )
     for _ in range(2):
         report = project.run()
         assert_counts(report, executed=1)
@@ -410,7 +495,10 @@ def test_value():
 
 def test_tool_refusal_never_exposes_external_path_or_contents(project):
     source = project.add_tree("first", files={"value.txt": "innocuous-private-content-marker"})
-    project.module("test_refusal.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_value(): pass\n")
+    project.module(
+        "test_refusal.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_value(): pass\n",
+    )
     put(source, "value.txt", "changed-innocuous-private-marker")
     report = project.run()
     assert report["status"] == "unsupported", report
@@ -424,7 +512,10 @@ def test_unpinned_escaping_or_cyclic_tool_links_refuse(project, link_target):
     source = project.add_tree("first")
     (source / "cycle").symlink_to(link_target)
     project.refresh("first")
-    project.module("test_bad_link.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_value(): pass\n")
+    project.module(
+        "test_bad_link.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_value(): pass\n",
+    )
     report = project.run()
     assert report["status"] in {"declaration_error", "unsupported"}, report
     assert not cache_bytes(project.root)

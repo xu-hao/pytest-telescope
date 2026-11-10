@@ -20,18 +20,34 @@ def project_with_policy(tmp_path, *, mutate=True, scoped=False):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
     counter = tmp_path / "body-once"
     marker = "inputs=[], cache=False" if scoped else "cache=False"
-    body = ("    request.config.owned_calls = getattr(request.config, 'owned_calls', 0) + 1\n"
-            "    assert request.config.owned_calls == 1\n") if scoped else (
-        f"    p = Path({str(counter)!r})\n    assert not p.exists()\n    p.write_text('x')\n")
-    mutation = "    next(request.node.iter_markers('telescope')).kwargs['cache'] = True\n" if mutate else ""
-    project.module("test_policy.py", "from pathlib import Path\nimport pytest\n"
-                   f"@pytest.mark.telescope({marker})\ndef test_body(request):\n" + body + mutation)
+    body = (
+        (
+            "    request.config.owned_calls = getattr(request.config, 'owned_calls', 0) + 1\n"
+            "    assert request.config.owned_calls == 1\n"
+        )
+        if scoped
+        else (f"    p = Path({str(counter)!r})\n    assert not p.exists()\n    p.write_text('x')\n")
+    )
+    mutation = (
+        "    next(request.node.iter_markers('telescope')).kwargs['cache'] = True\n"
+        if mutate
+        else ""
+    )
+    project.module(
+        "test_policy.py",
+        "from pathlib import Path\nimport pytest\n"
+        f"@pytest.mark.telescope({marker})\ndef test_body(request):\n" + body + mutation,
+    )
     return project, counter
 
 
 @contextmanager
 def observe_ordinary(observed):
-    original_capture, original_session, original_popen = ordinary.capture, ordinary.session, sandbox.subprocess.Popen
+    original_capture, original_session, original_popen = (
+        ordinary.capture,
+        ordinary.session,
+        sandbox.subprocess.Popen,
+    )
 
     def popen(*args, **kwargs):
         process = original_popen(*args, **kwargs)
@@ -45,8 +61,11 @@ def observe_ordinary(observed):
         result = original_capture(argv, *args, **kwargs)
         code, output = result
         assert len(output) <= 1024 * 1024
-        frames = [json.loads(line.removeprefix(b"TELESCOPE_RESULT ")) for line in output.splitlines()
-                  if line.startswith(b"TELESCOPE_RESULT ")]
+        frames = [
+            json.loads(line.removeprefix(b"TELESCOPE_RESULT "))
+            for line in output.splitlines()
+            if line.startswith(b"TELESCOPE_RESULT ")
+        ]
         assert len(frames) == 1
         frame = frames[0]
         assert validate_ordinary(frame, request["nonce"], context_id=request["context_id"])
@@ -62,8 +81,12 @@ def observe_ordinary(observed):
     def no_prepare(*args, **kwargs):
         raise AssertionError("policy-only ordinary route prepared a sandbox")
 
-    with patch.object(sandbox.subprocess, "Popen", popen), patch.object(ordinary, "capture", capture), \
-            patch.object(ordinary, "session", session), patch.object(sandbox, "prepare", no_prepare):
+    with (
+        patch.object(sandbox.subprocess, "Popen", popen),
+        patch.object(ordinary, "capture", capture),
+        patch.object(ordinary, "session", session),
+        patch.object(sandbox, "prepare", no_prepare),
+    ):
         yield
 
 
@@ -86,7 +109,10 @@ def member(frame):
     (row,) = frame["case_results"]
     assert row["outcome"] == "passed" and row["complete"]
     assert [(entry["phase"], entry["outcome"]) for entry in row["reports"]] == [
-        ("setup", "passed"), ("call", "passed"), ("teardown", "passed")]
+        ("setup", "passed"),
+        ("call", "passed"),
+        ("teardown", "passed"),
+    ]
     return row
 
 
@@ -154,8 +180,16 @@ def test_ordinary_real_policy_mark_preserves_body_observations(tmp_path, mutate)
             with pytest.raises(DeclarationError) as caught:
                 controller.run(project.root, timeout=10)
             frame = prerequisites(observed, counter)
-            print(json.dumps({"protocol": frame["protocol"], "declaration_error": frame["declaration_error"],
-                              "phases": member(frame)["reports"], "worker_seconds": frame["worker_seconds"]}))
+            print(
+                json.dumps(
+                    {
+                        "protocol": frame["protocol"],
+                        "declaration_error": frame["declaration_error"],
+                        "phases": member(frame)["reports"],
+                        "worker_seconds": frame["worker_seconds"],
+                    }
+                )
+            )
             retained(controller.error_result(caught.value), frame, ordinary_route=True)
         else:
             report = controller.run(project.root, timeout=10)
@@ -167,11 +201,16 @@ def test_ordinary_real_policy_mark_preserves_body_observations(tmp_path, mutate)
 
 def test_invalid_literal_policy_refuses_before_any_worker_start(tmp_path):
     project, counter = project_with_policy(tmp_path)
-    project.module("test_policy.py", "import pytest\n@pytest.mark.telescope(cache='invalid')\ndef test_body(): pass\n")
+    project.module(
+        "test_policy.py",
+        "import pytest\n@pytest.mark.telescope(cache='invalid')\ndef test_body(): pass\n",
+    )
     observed = {"frames": [], "returned": [], "processes": []}
     with observe_ordinary(observed), pytest.raises(DeclarationError) as caught:
         controller.run(project.root, timeout=10)
-    assert caught.value.accounting is None and "accounting" not in controller.error_result(caught.value)
+    assert caught.value.accounting is None and "accounting" not in controller.error_result(
+        caught.value
+    )
     assert not any(observed.values()) and not counter.exists() and not cache_bytes(project.root)
 
 
@@ -179,9 +218,12 @@ def cli_observed(evidence):
     observed = {"frames": [], "returned": [], "processes": []}
     with observe_ordinary(observed):
         code = controller.main(["run", "--timeout", "10"])
-    value = {"frames": observed["frames"], "returned": observed["returned"],
-             "started": len(observed["processes"]),
-             "exited": all(process.poll() is not None for process in observed["processes"])}
+    value = {
+        "frames": observed["frames"],
+        "returned": observed["returned"],
+        "started": len(observed["processes"]),
+        "exited": all(process.poll() is not None for process in observed["processes"]),
+    }
     encoded = json.dumps(value).encode()
     assert len(encoded) <= 1024 * 1024
     with evidence.open("xb") as stream:
@@ -194,11 +236,18 @@ def test_cli_late_ordinary_refusal_preserves_actual_worker_evidence(tmp_path):
     assert not model.load(project.root).scope_possible
     evidence = tmp_path / "worker-observation.json"
     paths = [str(Path(pytest_telescope.__file__).parent.parent), str(Path(__file__).parent)]
-    code = ("import sys; from pathlib import Path; sys.path[:0]=" + repr(paths) + "; "
-            "from test_late_policy_refusal_observations import cli_observed; "
-            "raise SystemExit(cli_observed(Path(sys.argv[1])))")
-    status, output = sandbox.capture([sys.executable, "-I", "-B", "-c", code, str(evidence)], 10,
-                                     env=dict(os.environ), cwd=project.root, limit=1024 * 1024)
+    code = (
+        "import sys; from pathlib import Path; sys.path[:0]=" + repr(paths) + "; "
+        "from test_late_policy_refusal_observations import cli_observed; "
+        "raise SystemExit(cli_observed(Path(sys.argv[1])))"
+    )
+    status, output = sandbox.capture(
+        [sys.executable, "-I", "-B", "-c", code, str(evidence)],
+        10,
+        env=dict(os.environ),
+        cwd=project.root,
+        limit=1024 * 1024,
+    )
     assert status == 4 and counter.read_text() == "x"
     assert evidence.stat().st_size <= 1024 * 1024
     actual = json.loads(evidence.read_bytes())
@@ -218,9 +267,14 @@ def test_cli_late_ordinary_refusal_preserves_actual_worker_evidence(tmp_path):
 def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkeypatch, mode):
     project, counter = project_with_policy(tmp_path, scoped=True)
     prefix = Path(sys.prefix)
-    box = sandbox.Sandbox("/usr/bin/bwrap", sys.executable, ((str(prefix), str(prefix)),),
-                          str(prefix / "bin") + ":/usr/bin:/bin",
-                          fingerprint(["owned-default-worker", sys.executable, str(prefix)]), {})
+    box = sandbox.Sandbox(
+        "/usr/bin/bwrap",
+        sys.executable,
+        ((str(prefix), str(prefix)),),
+        str(prefix / "bin") + ":/usr/bin:/bin",
+        fingerprint(["owned-default-worker", sys.executable, str(prefix)]),
+        {},
+    )
     monkeypatch.setattr(sandbox, "prepare", lambda root: box)
     original = sandbox.execute
     returned, started = [], []
@@ -273,9 +327,20 @@ def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkey
     assert empty_ordinary["complete"] is True and empty_ordinary["inventory_complete"] is True
     assert empty_ordinary["dispatch_started"] is True
     assert empty_ordinary["case_ids"] == empty_ordinary["case_results"] == []
-    assert empty_ordinary["collected"] == empty_ordinary["passed"] == empty_ordinary["failed"] == empty_ordinary["skipped"] == 0
+    assert (
+        empty_ordinary["collected"]
+        == empty_ordinary["passed"]
+        == empty_ordinary["failed"]
+        == empty_ordinary["skipped"]
+        == 0
+    )
     (observed_item,) = empty_ordinary["items"]
     assert observed_item["selected"] is True and observed_item["case_id"] == frame["case_ids"][0]
-    retained(controller.error_result(caught.value), frame, ordinary_route=False, empty_ordinary=empty_ordinary)
+    retained(
+        controller.error_result(caught.value),
+        frame,
+        ordinary_route=False,
+        empty_ordinary=empty_ordinary,
+    )
     assert not cache_bytes(project.root)
     assert not list((project.root / ".pytest-telescope/scratch").iterdir())

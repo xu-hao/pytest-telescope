@@ -33,13 +33,20 @@ def owned_command(command, directory, label, *, timeout=120, accepted=(0,)):
     scratch.mkdir(exist_ok=True)
     environment = {
         "PATH": str(Path(sys.executable).parent) + ":/usr/bin:/bin",
-        "HOME": str(scratch), "TMPDIR": str(scratch), "LC_ALL": "C",
-        "PYTHONDONTWRITEBYTECODE": "1", "PIP_CONFIG_FILE": os.devnull,
+        "HOME": str(scratch),
+        "TMPDIR": str(scratch),
+        "LC_ALL": "C",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PIP_CONFIG_FILE": os.devnull,
     }
     log_path = directory / (label + ".log")
     process = subprocess.Popen(
-        command, cwd=directory, env=environment, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, start_new_session=True,
+        command,
+        cwd=directory,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
     output = bytearray()
     deadline = time.monotonic() + timeout
@@ -83,7 +90,9 @@ def owned_command(command, directory, label, *, timeout=120, accepted=(0,)):
         with log_path.open("xb") as log:
             log.write(output)
     if failure is not None or process.returncode not in accepted:
-        pytest.fail(f"owned fixture {label} failed ({failure or process.returncode}); log {log_path.name}")
+        pytest.fail(
+            f"owned fixture {label} failed ({failure or process.returncode}); log {log_path.name}"
+        )
     return bytes(output)
 
 
@@ -95,25 +104,51 @@ def native_install(directory, *, alternate=False):
         (install / name).mkdir(parents=True)
     for name in ("native.c", "library.c"):
         shutil.copyfile(PAYLOADS / name, install / "source" / name)
-    owned_command([
-        "/usr/bin/cc", "-fPIC", "-shared", "-Wl,-soname,libownedprobe.so",
-        "-o", str(install / "lib/libownedprobe.so"), str(install / "source/library.c"),
-    ], directory, "compile-library")
+    owned_command(
+        [
+            "/usr/bin/cc",
+            "-fPIC",
+            "-shared",
+            "-Wl,-soname,libownedprobe.so",
+            "-o",
+            str(install / "lib/libownedprobe.so"),
+            str(install / "source/library.c"),
+        ],
+        directory,
+        "compile-library",
+    )
     runpath = "$ORIGIN/../lib"
     if alternate:
         alternative = directory / "unselected-library"
         alternative.mkdir()
         put(alternative, "library.c", 'const char *owned_answer(void) { return "unselected"; }\n')
-        owned_command([
-            "/usr/bin/cc", "-fPIC", "-shared", "-Wl,-soname,libownedprobe.so",
-            "-o", str(alternative / "libownedprobe.so"), str(alternative / "library.c"),
-        ], directory, "compile-alternative")
+        owned_command(
+            [
+                "/usr/bin/cc",
+                "-fPIC",
+                "-shared",
+                "-Wl,-soname,libownedprobe.so",
+                "-o",
+                str(alternative / "libownedprobe.so"),
+                str(alternative / "library.c"),
+            ],
+            directory,
+            "compile-alternative",
+        )
         runpath += ":" + str(alternative)
-    owned_command([
-        "/usr/bin/cc", "-o", str(install / "bin/owned-probe"),
-        str(install / "source/native.c"), "-L" + str(install / "lib"),
-        "-lownedprobe", "-Wl,-rpath," + runpath,
-    ], directory, "compile-program")
+    owned_command(
+        [
+            "/usr/bin/cc",
+            "-o",
+            str(install / "bin/owned-probe"),
+            str(install / "source/native.c"),
+            "-L" + str(install / "lib"),
+            "-lownedprobe",
+            "-Wl,-rpath," + runpath,
+        ],
+        directory,
+        "compile-program",
+    )
     return install
 
 
@@ -123,8 +158,10 @@ def plugin_wheel(directory):
     files = {
         "owned_plugin/__init__.py": b"VALUE = 7\n",
         "owned_plugin/message.txt": b"ready\n",
-        metadata + "/METADATA": b"Metadata-Version: 2.1\nName: owned-plugin\nVersion: 1.0.0\nRequires-Python: >=3.11\n",
-        metadata + "/WHEEL": b"Wheel-Version: 1.0\nGenerator: owned-fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        metadata
+        + "/METADATA": b"Metadata-Version: 2.1\nName: owned-plugin\nVersion: 1.0.0\nRequires-Python: >=3.11\n",
+        metadata
+        + "/WHEEL": b"Wheel-Version: 1.0\nGenerator: owned-fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
         metadata + "/entry_points.txt": b"[owned.tools]\nvalue = owned_plugin:VALUE\n",
     }
     encoded = io.StringIO(newline="")
@@ -147,17 +184,45 @@ def installed_plugin(directory):
     """Install the local wheel into a fixture venv, preserving real RECORD metadata."""
     directory.mkdir()
     environment = directory / "environment"
-    owned_command([sys.executable, "-m", "venv", "--without-pip", str(environment)],
-                  directory, "create-environment")
+    owned_command(
+        [sys.executable, "-m", "venv", "--without-pip", str(environment)],
+        directory,
+        "create-environment",
+    )
     interpreter = environment / "bin/python"
-    purelib = Path(owned_command([
-        str(interpreter), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
-    ], directory, "locate-site-packages", timeout=30).decode().strip())
+    purelib = Path(
+        owned_command(
+            [
+                str(interpreter),
+                "-I",
+                "-c",
+                "import sysconfig; print(sysconfig.get_path('purelib'))",
+            ],
+            directory,
+            "locate-site-packages",
+            timeout=30,
+        )
+        .decode()
+        .strip()
+    )
     wheel = plugin_wheel(directory)
-    owned_command([
-        sys.executable, "-m", "pip", "--isolated", "--python", str(interpreter),
-        "install", "--no-index", "--no-deps", "--no-compile", str(wheel),
-    ], directory, "install-owned-wheel")
+    owned_command(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "--isolated",
+            "--python",
+            str(interpreter),
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--no-compile",
+            str(wheel),
+        ],
+        directory,
+        "install-owned-wheel",
+    )
     shared = {
         str(Path(pytest.__file__).parent.parent),
         str(Path(pytest_telescope.__file__).parent.parent),

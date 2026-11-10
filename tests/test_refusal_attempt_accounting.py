@@ -11,13 +11,16 @@ from pytest_telescope.model import DeclarationError
 
 
 def scoped(project, name, *, refuse=False, inputs=()):
-    project.module(name, f'''import pytest
-pytestmark = pytest.mark.telescope(inputs={['conftest.py', *inputs]!r})
+    project.module(
+        name,
+        f"""import pytest
+pytestmark = pytest.mark.telescope(inputs={["conftest.py", *inputs]!r})
 def test_body(request):
     request.config.owned_body_count = getattr(request.config, 'owned_body_count', 0) + 1
     assert request.config.owned_body_count == 1
     request.config.owned_refusal = {refuse!r}
-''')
+""",
+    )
 
 
 @pytest.mark.parametrize("mode", ["case", "batch"])
@@ -26,11 +29,15 @@ def test_valid_exit_four_fails_group_without_cancelling_siblings(
     tmp_path, monkeypatch, workers, mode
 ):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
-    put(project.root, "conftest.py", """def pytest_sessionfinish(session):
+    put(
+        project.root,
+        "conftest.py",
+        """def pytest_sessionfinish(session):
     if getattr(session.config, 'owned_refusal', False):
         assert session.config.owned_body_count == 1
         session.exitstatus = 4
-""")
+""",
+    )
     put(project.root, "prior-input.txt", "first pinned input\n")
     scoped(project, "test_00_prior.py", inputs=("prior-input.txt",))
     assert_counts(project.run(execution_mode=mode), executed=1)
@@ -43,11 +50,14 @@ def test_valid_exit_four_fails_group_without_cancelling_siblings(
     scoped(project, "test_20_refusal.py", refuse=True)
     scoped(project, "test_30_later.py")
     counter = tmp_path / "ordinary-once"
-    project.module("test_ordinary.py", f'''from pathlib import Path
+    project.module(
+        "test_ordinary.py",
+        f"""from pathlib import Path
 def test_ordinary():
     p = Path({str(counter)!r})
     p.write_text(p.read_text() + 'x' if p.exists() else 'x')
-''')
+""",
+    )
     original_execute, original_stage = sandbox.execute, controller.PendingRecords.stage
     ready, refused = threading.Event(), threading.Event()
     calls, returned, staged = [], {}, []
@@ -124,11 +134,15 @@ def test_typed_boundary_drains_started_siblings_and_discards_pending(
     tmp_path, monkeypatch, workers
 ):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
-    put(project.root, "conftest.py", """def pytest_sessionfinish(session):
+    put(
+        project.root,
+        "conftest.py",
+        """def pytest_sessionfinish(session):
     if getattr(session.config, 'owned_refusal', False):
         assert session.config.owned_body_count == 1
         session.exitstatus = 4
-""")
+""",
+    )
     put(project.root, "prior-input.txt", "first pinned input\n")
     scoped(project, "test_00_prior.py", inputs=("prior-input.txt",))
     assert_counts(project.run(), executed=1)
@@ -142,11 +156,14 @@ def test_typed_boundary_drains_started_siblings_and_discards_pending(
     if workers == 1:
         scoped(project, "test_30_never.py")
     counter = tmp_path / "ordinary-once"
-    project.module("test_ordinary.py", f'''from pathlib import Path
+    project.module(
+        "test_ordinary.py",
+        f"""from pathlib import Path
 def test_ordinary():
     p = Path({str(counter)!r})
     p.write_text(p.read_text() + 'x' if p.exists() else 'x')
-''')
+""",
+    )
     original_execute, original_stage = sandbox.execute, controller.PendingRecords.stage
     ready, refused = threading.Event(), threading.Event()
     calls, returned, staged = [], {}, []
@@ -200,7 +217,9 @@ def test_ordinary():
         if filename == "tests/test_20_refusal.py":
             assert row["attempts"] == 1 and row["result_status"] is None, row
             assert row["reports"] == [] and not row["complete"]
-            group = next(group for group in observed["groups"] if group["group_id"] == row["group_id"])
+            group = next(
+                group for group in observed["groups"] if group["group_id"] == row["group_id"]
+            )
             assert group["attempts"] == group["unresolved"] == 1 and group["not_run"] == 0
             assert not group["cache_eligible"]
             continue
@@ -218,7 +237,9 @@ def test_ordinary():
     assert not list((project.root / ".pytest-telescope/scratch").iterdir())
 
 
-def test_attempted_worker_without_returned_observations_is_unresolved_not_unrun(tmp_path, monkeypatch):
+def test_attempted_worker_without_returned_observations_is_unresolved_not_unrun(
+    tmp_path, monkeypatch
+):
     project, counter = mixed_project(tmp_path)
     original = sandbox.execute
     observed_attempts = []

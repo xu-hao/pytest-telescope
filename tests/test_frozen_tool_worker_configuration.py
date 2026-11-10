@@ -51,12 +51,18 @@ def observe_worker_capture(monkeypatch, directory):
         if len(encoded_argv) <= 65536:
             row["argv"] = argv
         else:
-            row.update(argv_bytes=len(encoded_argv), argv_sha256=hashlib.sha256(encoded_argv).hexdigest())
+            row.update(
+                argv_bytes=len(encoded_argv), argv_sha256=hashlib.sha256(encoded_argv).hexdigest()
+            )
         if error is not None:
             row["exception_type"] = type(error).__module__ + "." + type(error).__qualname__
         else:
             code, output = result
-            row.update(returncode=code, output_bytes=len(output), output_sha256=hashlib.sha256(output).hexdigest())
+            row.update(
+                returncode=code,
+                output_bytes=len(output),
+                output_sha256=hashlib.sha256(output).hexdigest(),
+            )
             if len(output) <= 1024 * 1024:
                 row["output_base64"] = base64.b64encode(output).decode("ascii")
             else:
@@ -64,8 +70,16 @@ def observe_worker_capture(monkeypatch, directory):
         encoded = json.dumps(row, ensure_ascii=True, separators=(",", ":")).encode() + b"\n"
         if oversized or state["bytes"] + len(encoded) > maximum - 1024:
             state["overflow"] = True
-            encoded = json.dumps({"diagnostic_bound_exceeded": True, "call": state["calls"],
-                                  "complete_output_recorded": False}).encode() + b"\n"
+            encoded = (
+                json.dumps(
+                    {
+                        "diagnostic_bound_exceeded": True,
+                        "call": state["calls"],
+                        "complete_output_recorded": False,
+                    }
+                ).encode()
+                + b"\n"
+            )
         with destination.open("ab") as stream:
             stream.write(encoded)
         state["bytes"] += len(encoded)
@@ -114,7 +128,9 @@ def observe_worker_capture(monkeypatch, directory):
 def test_actual_dynamic_worker_reads_only_declared_configuration_and_reuses(worker, monkeypatch):
     expected_cache = (worker.config / "ld.so.cache").read_bytes()
     digest = hashlib.sha256(expected_cache).hexdigest()
-    worker.project.module("test_configuration.py", f"""import hashlib
+    worker.project.module(
+        "test_configuration.py",
+        f"""import hashlib
 import os
 import stat
 from pathlib import Path
@@ -135,19 +151,25 @@ def test_configuration():
     for path in (Path('/etc/selected.txt'), Path('/etc/new-file')):
         with pytest.raises(OSError): path.write_bytes(b'forbidden')
     assert os.getpid() == 1 and os.readlink('/proc/self') == '1'
-""")
+""",
+    )
     finish_diagnostics = observe_worker_capture(monkeypatch, worker.project.external)
     observed = observe_native(monkeypatch)
     try:
         assert_counts(worker.project.run(timeout=60), executed=1)
-        assert observed and all(native and dynamic and projected and "/etc" in closed for native, dynamic, projected, closed in observed)
+        assert observed and all(
+            native and dynamic and projected and "/etc" in closed
+            for native, dynamic, projected, closed in observed
+        )
         assert_counts(worker.project.run(timeout=60), reused=1)
         assert (worker.config / "selected.txt").read_bytes() == b"worker configuration\n"
     finally:
         finish_diagnostics()
 
 
-def test_actual_isolated_python_child_keeps_configuration_and_has_no_source_descriptors(worker, monkeypatch):
+def test_actual_isolated_python_child_keeps_configuration_and_has_no_source_descriptors(
+    worker, monkeypatch
+):
     original = sandbox.capture
     commands = []
 
@@ -157,7 +179,10 @@ def test_actual_isolated_python_child_keeps_configuration_and_has_no_source_desc
         return original(argv, *args, **kwargs)
 
     monkeypatch.setattr(sandbox, "capture", capture)
-    tokens = [(path.stat().st_dev, path.stat().st_ino) for path in (worker.config / "selected.txt", worker.config / "ld.so.cache")]
+    tokens = [
+        (path.stat().st_dev, path.stat().st_ino)
+        for path in (worker.config / "selected.txt", worker.config / "ld.so.cache")
+    ]
     child = f"""import errno, os
 from pathlib import Path
 assert Path('/etc/selected.txt').read_bytes() == b'worker configuration\\n'
@@ -171,25 +196,32 @@ for fd in os.listdir('/proc/self/fd'):
         assert (info.st_dev, info.st_ino) not in {tokens!r}
 print('DECLARED_CHILD_OK')
 """
-    worker.project.module("test_child.py", f"""import subprocess
+    worker.project.module(
+        "test_child.py",
+        f"""import subprocess
 import sys
 import pytest
 pytestmark = pytest.mark.telescope(tools=['worker'])
 def test_child():
     result = subprocess.run([sys.executable, '-I', '-c', {child!r}], capture_output=True, timeout=10)
     assert (result.returncode, result.stdout, result.stderr) == (0, b'DECLARED_CHILD_OK\\n', b'')
-""")
+""",
+    )
     assert_counts(worker.project.run(timeout=60), executed=1)
     assert commands
     for command in commands:
         assert not any(argument.startswith("/proc/") and "/fd/" in argument for argument in command)
-        assert not any(argument in {"--ro-bind-data", "--bind-data", "--file"} for argument in command)
+        assert not any(
+            argument in {"--ro-bind-data", "--bind-data", "--file"} for argument in command
+        )
     # No descriptor is deliberately kept or passed to the child for this control.
 
 
 def test_config_change_invalidates_only_consumer_and_unselected_sibling_does_not(worker):
     worker.project.add_tree("unrelated", files={"value.txt": "unrelated"})
-    worker.project.module("test_consumers.py", """from pathlib import Path
+    worker.project.module(
+        "test_consumers.py",
+        """from pathlib import Path
 import pytest
 @pytest.mark.telescope(tools=['worker'])
 def test_native():
@@ -198,7 +230,8 @@ def test_native():
 def test_unrelated():
     assert Path('/tools/unrelated/install/value.txt').read_text() == 'unrelated'
     assert not Path('/tools/worker').exists()
-""")
+""",
+    )
     assert_counts(worker.project.run(timeout=60), executed=2)
     assert_counts(worker.project.run(timeout=60), reused=2)
     put(worker.config, "unselected.txt", "changed outside selection\n")
@@ -209,11 +242,14 @@ def test_unrelated():
 
 
 def test_stale_configuration_pin_does_not_reuse_or_publish(worker):
-    worker.project.module("test_stale.py", """from pathlib import Path
+    worker.project.module(
+        "test_stale.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['worker'])
 def test_value(): assert Path('/etc/selected.txt').read_bytes() == b'worker configuration\\n'
-""")
+""",
+    )
     assert_counts(worker.project.run(timeout=60), executed=1)
     previous = cache_bytes(worker.project.root)
     put(worker.config, "selected.txt", "stale pin\n", 0o640)
@@ -225,17 +261,23 @@ def test_value(): assert Path('/etc/selected.txt').read_bytes() == b'worker conf
 
 
 def test_native_cleanup_failure_suppresses_new_publication(worker, monkeypatch):
-    worker.project.module("test_initial.py", """import pytest
+    worker.project.module(
+        "test_initial.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(tools=['worker'])
 def test_initial(): pass
-""")
+""",
+    )
     assert_counts(worker.project.run(timeout=60), executed=1)
     previous = cache_bytes(worker.project.root)
-    worker.project.module("test_new.py", """from pathlib import Path
+    worker.project.module(
+        "test_new.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['worker'])
 def test_new(): assert Path('/etc/selected.txt').read_bytes() == b'worker configuration\\n'
-""")
+""",
+    )
     original = tool_capture._remove
     execute = sandbox.execute
     attempted = []

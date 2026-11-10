@@ -21,12 +21,17 @@ def two_tools(tmp_path):
     first = project.add_tree("first")
     second = project.add_tree("second")
     for name in ("first", "second"):
-        project.module(f"test_{name}.py", f"import pytest\npytestmark=pytest.mark.telescope(tools=['{name}'])\ndef test_{name}(): pass\n")
+        project.module(
+            f"test_{name}.py",
+            f"import pytest\npytestmark=pytest.mark.telescope(tools=['{name}'])\ndef test_{name}(): pass\n",
+        )
     return project, first, second
 
 
 @pytest.mark.parametrize("selector", ["keyword", "node"])
-def test_stale_structural_tool_refuses_selected_unrelated_case_without_erasing_cache(tmp_path, selector):
+def test_stale_structural_tool_refuses_selected_unrelated_case_without_erasing_cache(
+    tmp_path, selector
+):
     project, _, second = two_tools(tmp_path)
     assert_counts(project.run(), executed=2)
     full_boundary = cache_bytes(project.root)
@@ -54,14 +59,17 @@ def mixed_project(tmp_path):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
     project.add_tree("first")
     counter = tmp_path / "ordinary-counter"
-    project.module("test_mixed.py", f'''from pathlib import Path
+    project.module(
+        "test_mixed.py",
+        f"""from pathlib import Path
 import pytest
 def test_ordinary():
     p = Path({str(counter)!r})
     p.write_text(p.read_text() + 'x' if p.exists() else 'x')
 @pytest.mark.telescope(tools=['first'])
 def test_scoped(): pass
-''')
+""",
+    )
     return project, counter
 
 
@@ -93,7 +101,9 @@ def test_deferred_typed_view_refusal_retains_available_ordinary_accounting(tmp_p
 def test_declared_loader_env_conflict_refuses_before_ordinary_side_effect(tmp_path):
     project, counter = mixed_project(tmp_path)
     module = project.root / "tests/test_mixed.py"
-    module.write_text(module.read_text().replace("tools=['first']", "tools=['first'], env=['LD_PRELOAD']"))
+    module.write_text(
+        module.read_text().replace("tools=['first']", "tools=['first'], env=['LD_PRELOAD']")
+    )
     report = project.run()
     assert report["status"] == "declaration_error", report
     assert not counter.exists(), "knowable conflict ran ordinary project code before refusal"
@@ -108,7 +118,7 @@ def test_hard_killed_owned_controller_recovers_capture_and_keeps_old_cache(tmp_p
     ready = tmp_path / "controller-ready.json"
     scratch = project.root / ".pytest-telescope/scratch"
     assert not list(scratch.iterdir())
-    code = '''import json, os, signal, sys, time
+    code = """import json, os, signal, sys, time
 signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
 signal.setitimer(signal.ITIMER_REAL, 10)
 expected_parent = int(sys.argv[4])
@@ -133,11 +143,22 @@ def held(self):
         result.__exit__(None, None, None)
 tool_capture.Capture.__enter__ = held
 controller.run(Path(sys.argv[2]), timeout=10)
-'''
+"""
     process = subprocess.Popen(
-        [sys.executable, "-I", "-B", "-c", code,
-         str(Path(pytest_telescope.__file__).parent.parent), str(project.root), str(ready), str(os.getpid())],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            code,
+            str(Path(pytest_telescope.__file__).parent.parent),
+            str(project.root),
+            str(ready),
+            str(os.getpid()),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
     directory = None

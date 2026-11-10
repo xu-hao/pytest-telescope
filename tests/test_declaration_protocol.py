@@ -17,18 +17,22 @@ def put(root, name, content):
 
 def project(root, *, code=0, collection=False, changed=False):
     put(root, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots=["tests"]\n')
-    hook = f'''def pytest_sessionfinish(session):
+    hook = f"""def pytest_sessionfinish(session):
     if bool(session.config.option.collectonly) == {collection!r}:
         session.exitstatus = {code}
-'''
+"""
     if changed:
-        hook += '''import pytest
+        hook += """import pytest
 def pytest_collection_modifyitems(items):
     for item in items:
         item.add_marker(pytest.mark.telescope(inputs=['unexpected.txt']))
-'''
+"""
     put(root, "conftest.py", hook)
-    put(root, "tests/test_case.py", "import pytest\npytestmark=pytest.mark.telescope(inputs=['conftest.py'])\ndef test_case(): assert 6 * 7 == 42\n")
+    put(
+        root,
+        "tests/test_case.py",
+        "import pytest\npytestmark=pytest.mark.telescope(inputs=['conftest.py'])\ndef test_case(): assert 6 * 7 == 42\n",
+    )
 
 
 def observed_run(root, monkeypatch, *, mode="case"):
@@ -62,8 +66,12 @@ def validate(request, record):
     if request["mode"] == "collection":
         return result.validate_collection(record, context_id=request["context_id"])
     if request["mode"] == "batch":
-        return result.validate_batch(record, group_id=request["group_id"], case_ids=request["case_ids"])
-    return result.validate_result(record, case_id=request["case_id"], context_id=request["context_id"])
+        return result.validate_batch(
+            record, group_id=request["group_id"], case_ids=request["case_ids"]
+        )
+    return result.validate_result(
+        record, case_id=request["case_id"], context_id=request["context_id"]
+    )
 
 
 def test_actual_worker_records_have_strict_declaration_boolean_and_versions(actual_records):
@@ -74,7 +82,10 @@ def test_actual_worker_records_have_strict_declaration_boolean_and_versions(actu
         assert validate(request, record)
 
 
-@pytest.mark.parametrize("mutation", ["missing", "integer", "string", "true-zero", "true-three", "true-complete", "unknown"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "integer", "string", "true-zero", "true-three", "true-complete", "unknown"],
+)
 def test_invalid_declaration_flags_reject_actual_record_derivatives(actual_records, mutation):
     _, records = actual_records
     for request, original in records:
@@ -88,7 +99,10 @@ def test_invalid_declaration_flags_reject_actual_record_derivatives(actual_recor
         elif mutation == "unknown":
             record["unknown_declaration"] = False
         else:
-            record.update(declaration_error=True, exit_code={"true-zero": 0, "true-three": 3, "true-complete": 4}[mutation])
+            record.update(
+                declaration_error=True,
+                exit_code={"true-zero": 0, "true-three": 3, "true-complete": 4}[mutation],
+            )
             if mutation != "true-complete":
                 record["complete"] = False
         assert not validate(request, record)
@@ -103,18 +117,34 @@ def test_old_scoped_protocols_and_old_cache_envelopes_are_ineligible(actual_reco
         assert not validate(request, old)
         key = request["context_id"]
         path = tmp_path / (key + ".json")
-        arguments = {"kind": "collection"} if request["mode"] == "collection" else (
-            {"kind": "batch", "group_id": request["group_id"], "case_ids": request["case_ids"]}
-            if mode == "batch" else {"case_id": request["case_id"]}
+        arguments = (
+            {"kind": "collection"}
+            if request["mode"] == "collection"
+            else (
+                {"kind": "batch", "group_id": request["group_id"], "case_ids": request["case_ids"]}
+                if mode == "batch"
+                else {"case_id": request["case_id"]}
+            )
         )
         for schema, accepted in ((7, True), (6, False)):
-            path.write_text(json.dumps({"schema": schema, "key": key, "result": original, "checksum": fingerprint(original)}))
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema": schema,
+                        "key": key,
+                        "result": original,
+                        "checksum": fingerprint(original),
+                    }
+                )
+            )
             assert (controller.read_record(path, key, **arguments) is not None) is accepted
 
 
 @pytest.mark.parametrize("code", [3, 4])
 @pytest.mark.parametrize("mode", ["case", "batch"])
-def test_valid_nonzero_session_preserves_actual_passes_without_declaration_refusal(tmp_path, monkeypatch, code, mode):
+def test_valid_nonzero_session_preserves_actual_passes_without_declaration_refusal(
+    tmp_path, monkeypatch, code, mode
+):
     project(tmp_path, code=code)
     report, records = observed_run(tmp_path, monkeypatch, mode=mode)
     request, actual = records[-1]
@@ -168,4 +198,6 @@ def test_ordinary_protocol_two_keeps_its_field_and_strict_coherence(tmp_path, mo
     del missing["declaration_error"]
     assert not result.validate_ordinary(missing)
     assert not result.validate_ordinary({**actual, "declaration_error": True, "exit_code": 4})
-    assert not result.validate_ordinary({**actual, "declaration_error": True, "exit_code": 4, "complete": False})
+    assert not result.validate_ordinary(
+        {**actual, "declaration_error": True, "exit_code": 4, "complete": False}
+    )
