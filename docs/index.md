@@ -7,7 +7,10 @@
 Contributors qualify host-specific tool installations with the separately invoked
 [installed-runtime benchmarks](benchmark.md#installed-runtime-compatibility-benchmarks).
 All [actual browser execution](benchmark.md#browser-execution-benchmarks) is benchmark
-work, outside functional readiness; controlled Node and plugin checks remain functional.
+work outside functional readiness, as are the 14 actual Node and installed-distribution
+qualification nodes in the [migration ledger](benchmark.md#program-and-installed-distribution-migration-ledger).
+Ordinary Python/pytest/Bubblewrap correctness and portable integration tests remain
+functional.
 
 pytest-telescope caches pytest results so repeated checks spend less time running tests
 whose inputs haven't changed. If coding agents are adding changes to a merge queue,
@@ -196,9 +199,9 @@ for its precise supported states and limits.
 ## Opt into frozen external tools (development contract)
 
 Contributor [program qualification](development.md#controlled-program-qualification)
-uses explicit runtime prerequisites for Node and installed-plugin functional controls.
+uses explicit runtime prerequisites for separately selected Node and installed-plugin benchmarks.
 The [installed gate](development.md#installed-candidate-and-functional-prerequisites)
-verifies the exact candidate wheel before preparing those inputs with its interpreter.
+verifies the exact candidate wheel without preparing those program profiles.
 Full-browser execution is a separately invoked benchmark. These development interfaces
 are not part of the published release.
 
