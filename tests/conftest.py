@@ -12,6 +12,7 @@ import pytest
 from pytest_telescope import sandbox
 from pytest_telescope.markers import discover
 from pytest_telescope.model import fingerprint
+from pytest_telescope.result import owner_identity
 
 MODULE_SCOPE = "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\n"
 
@@ -30,6 +31,10 @@ def scoped_module(root, filename, functions):
                 case_id=case,
                 file=filename,
                 origins=origins,
+                owners=sorted(
+                    [owner_identity(filename, []), owner_identity(filename, [f"test_{name}"])]
+                ),
+                parameters=[],
                 selected=True,
                 order=None,
                 aliases=sorted([case, hashlib.sha256(filename.encode()).hexdigest()]),

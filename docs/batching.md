@@ -43,6 +43,14 @@ scopes stay in separate batches; pytest-telescope does not combine their inputs.
 `cache=False` cases form separate, uncached groups. Their grouping must still be
 reproducible.
 
+Declared Python helpers and their exact frozen guard registry follow this same readable
+scope. Importing a marked helper authenticates its literal calls without inheriting its
+own declarations, selecting its tests or combining unequal case scopes. Helper fixtures
+share a session only within an actual equal-scope group, as other fixtures do. A helper
+change invalidates the groups that declare it; unrelated narrow groups remain reusable.
+The helper's own `env` names do not add to the members' effective environment, and
+changing those host values alone does not invalidate a group that does not declare them.
+
 Each group keeps pytest's selected execution order after collection hooks and selection.
 The result records that order as opaque case digests. Sorting digests or raw parameter
 strings would give a different order. Collection accounts for all cases in the configured

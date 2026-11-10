@@ -20,6 +20,7 @@ import uuid
 from pathlib import Path
 
 from . import sandbox
+from .frozen_registry import FrozenRegistry
 from .model import (
     DeclarationError,
     InfrastructureError,
@@ -33,7 +34,7 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 6
+SCHEMA = 7
 RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
@@ -319,27 +320,14 @@ def selected_arguments(arguments, unit, all_tests):
 
 
 def inventory_matches_manifest(result, manifest):
+    from .result import ownership_matches
+
     files = set(manifest.inventory)
     if any(skip["file"] not in files for skip in result["collection_skips"]):
         return False
-    registry = manifest.registry_by_id
-    required = {}
-    for row in manifest.registry:
-        if row["kind"] in {"scope", "decorator"}:
-            owner = "::".join([row["file"], *row["owner"]])
-            required.setdefault(hashlib.sha256(owner.encode()).hexdigest(), set()).add(row["id"])
     for item in result["items"]:
-        if item["file"] not in files:
+        if item["file"] not in files or not ownership_matches(item, manifest.ownership_index):
             return False
-        origins = set(item["origins"])
-        if any(
-            origin not in registry or registry[origin]["file"] != item["file"] for origin in origins
-        ):
-            return False
-        aliases = set(item["aliases"])
-        for alias in aliases:
-            if not required.get(alias, set()).issubset(origins):
-                return False
     return True
 
 
@@ -394,7 +382,7 @@ def _file_digest(inventory, filename):
     return fingerprint(
         sorted(
             (
-                {"case_id": entry["case_id"], "origins": entry["origins"]}
+                {key: entry[key] for key in ("case_id", "origins", "owners", "parameters")}
                 for entry in inventory
                 if entry["file"] == filename
             ),
@@ -788,6 +776,7 @@ def run(
                 with sandbox.invocation(manifest.root) as pool_directory:
                     pool = pool_directory / "project"
                     records = snapshot(manifest, manifest.pool, pool)
+                    frozen_registry = FrozenRegistry(pool, records)
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
@@ -804,11 +793,7 @@ def run(
                             continue
                         row = observation(suite, "scoped")
                         effective, options, selectors, disabled = invocations[suite.name]
-                        registry = [
-                            entry
-                            for entry in manifest.registry
-                            if entry["file"] in collection_unit.tests
-                        ]
+                        registry = frozen_registry.for_view(collection_unit)
                         collection_environment = unit_environment(collection_unit)
                         inventory_key = fingerprint(
                             {
@@ -849,6 +834,10 @@ def run(
                                         collection_unit.distributions,
                                         metadata,
                                     )
+                                    if frozen_registry.for_view(collection_unit) != registry:
+                                        raise InfrastructureError(
+                                            "frozen collection registry changed"
+                                        )
                                     collected = sandbox.execute(
                                         box,
                                         frozen,
@@ -961,6 +950,7 @@ def run(
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
+                                        "registry": frozen_registry.for_view(unit),
                                         "environment": fingerprint(unit_environment(unit)),
                                     }
                                 ),
@@ -989,11 +979,7 @@ def run(
                                 environment=unit_environment(unit),
                                 suite=suite,
                                 options=options,
-                                registry=[
-                                    entry
-                                    for entry in manifest.registry
-                                    if entry["file"] == item["file"]
-                                ],
+                                registry=frozen_registry.for_view(unit),
                                 digest=digest,
                                 scope=scope_key,
                                 enabled=unit.cache and not no_cache,
@@ -1064,6 +1050,8 @@ def run(
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
                                     )
+                                    if frozen_registry.for_view(unit) != job["registry"]:
+                                        raise InfrastructureError("frozen case registry changed")
                                     request = dict(
                                         mode="batch" if mode == "batch" else "execution",
                                         registry=job["registry"],

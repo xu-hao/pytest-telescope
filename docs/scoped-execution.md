@@ -115,8 +115,11 @@ Explicit suites cannot be combined with top-level `test_roots`.
 All configured paths, declarations, selectors, include/exclude patterns and summary files
 remain relative to one outer project directory. `test_roots` accepts directories or
 explicit Python test files. File patterns use project-relative glob semantics.
-The file list is refreshed before reuse. Excluded modules are neither parsed nor
-imported, and cannot be selected with `-k`, `-m`, or node selectors. A file may occur in
+The file list is refreshed before reuse. Excluded modules are omitted from structural
+test parsing and pytest's collection targets, and cannot be selected with `-k`, `-m`,
+or node selectors. A scoped case may still explicitly declare an excluded Python file
+as a readable helper: its frozen literal calls are validated and the consumer can import
+it, without collecting its tests or inheriting its declarations. A file may occur in
 multiple suites; the pair of suite name and canonical project-relative pytest node ID
 identifies each case. You do not need to maintain a separate list of cases.
 
@@ -142,7 +145,8 @@ case results.
 
 Python callers can pass `controller.run(root, structural_files={"core":
 ["tests/core/test_small.py"]})` to narrow configured structural membership for this
-invocation before marker AST parsing or collection imports. This is separate
+invocation before case-declaration AST parsing or selection of pytest collection
+targets. This is separate
 from `arguments=["tests/core/test_small.py"]`: ordinary selectors retain collection of
 the entire configured structural inventory before selecting cases.
 
@@ -158,6 +162,9 @@ unknown or unselected suite keys, and nonfiles refuse before any session starts.
 
 This option only removes files from the invocation. It leaves cwd, rootdir, routes,
 input declarations and capabilities unchanged.
+An omitted file explicitly declared as a helper remains readable in that consumer's
+scoped view, with its literal calls authenticated against the frozen source. This does
+not put the helper's tests back into the inventory or grant its own declarations.
 `plan.make_plan(root, suites=None, structural_files=None)` supports the same static
 validation and effective file preview without importing tests or starting a sandbox.
 It cannot establish the real parametrized inventory.

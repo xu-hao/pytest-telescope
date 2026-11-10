@@ -77,10 +77,93 @@ class TestVariants:
 The parameter receives all four names plus its defaults, bundles and global names.
 Another case does not receive `PARAM_FEATURE` unless it declares or inherits it.
 
+Inheritance follows the actual collected case's module, applicable class ancestry and
+defining test function. A normally inherited method can therefore inherit declarations
+from its defining base class and other applicable classes in the method resolution
+order; its source owner need not be a prefix of the collected subclass's name.
+These declarations must still belong to the case's containing test source.
+
+A marker inside a literal `pytest.param` belongs only to that alternative in its
+enclosing parametrization dimension. Class-level and function-level dimensions compose,
+including stacked dimensions and dimensions with several argument names. Equal values,
+duplicate or explicit parameter IDs, and the enclosing class/function name do not make
+two alternatives interchangeable. A marks list does not change which alternative owns
+its Telescope declaration. An unmarked alternative receives no declaration from its
+marked sibling.
+
+Authenticating a literal call does not authorize moving its resulting Mark to another
+case. For example, if `test_left` declares `left.txt` and sibling `test_right` declares
+`right.txt`, appending `test_left.pytestmark` to `test_right.pytestmark` is unsupported,
+even when the Mark is unchanged and both functions occupy the same source file.
+Put shared declarations on their legitimate module/class ancestor or repeat a direct
+literal declaration on each consumer instead. The development contract requires a
+declaration refusal before an unrelated declaration changes the consumer's route,
+inputs, metadata, environment, absence assertions or cache policy.
+
+Every applicable declaration remains required, including explicit empty scope lists
+and inherited `cache=False`. Missing required declarations and invalid extra
+declarations both refuse; ignoring the extra marker is not a supported recovery.
+The [collection agreement](execution-contract.md#static-discovery-and-real-pytest-agreement)
+defines ownership validation and collection-profile limits.
+
 Keep shared import-time and parametrization dependencies in each consumer's scope.
 Collection of wholly scoped modules runs with the union of their potential scopes; an
 individual execution never borrows another case's inputs. Each execution must collect
 the same containing-file case inventory as discovery before running its selected case.
+
+## Imported helpers with declarations
+
+Support for literal markers in readable imported helpers is unreleased development;
+published 0.1.0a6 does not provide it.
+
+An imported Python helper may contain its own supported literal Telescope markers.
+Declare the helper and its import-time dependencies explicitly, just as for an unmarked
+helper. For example, a helper can declare an input for its own tests:
+
+```python
+# helpers/support.py
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.telescope(inputs=["data/helper-only.txt"], env=["HELPER_OPTION"])
+
+
+def answer():
+    return Path("data/answer.txt").read_text().strip()
+```
+
+Its consumer declares the files that the consumer actually reads:
+
+```python
+# tests/test_consumer.py
+import pytest
+
+pytestmark = pytest.mark.telescope(
+    inputs=["helpers/__init__.py", "helpers/support.py", "data/answer.txt"]
+)
+
+from helpers.support import answer
+
+
+def test_answer():
+    assert answer() == "42"
+```
+
+The helper's marker call is authenticated against its exact frozen Python source.
+Importing it neither collects the helper's tests nor grants `data/helper-only.txt` or
+`HELPER_OPTION` from that marker to the consumer. The helper's own environment values
+are not forwarded or keyed merely by import. Only declarations inherited by the actual
+consumer case add to its scope and policy. A consumer that reads `HELPER_OPTION` declares
+or inherits it independently. A foreign helper marker cannot be attached to that case
+as another grant.
+
+Package initializers, nested helpers and resources read during import remain explicit
+dependencies. The controller does not follow imports to add them automatically. The
+same [literal syntax and source budgets](execution-contract.md#static-discovery-and-real-pytest-agreement)
+apply to readable helpers; computed, dynamically created and modified inherited markers
+remain unsupported. Relative leaf links retain the existing requirement to declare
+their exact destination.
 
 ## Project configuration
 
