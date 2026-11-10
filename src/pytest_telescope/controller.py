@@ -1203,6 +1203,7 @@ def run(
                                             suite_cwd=suite.cwd,
                                             suite=suite.name,
                                             metadata_directory=metadata,
+                                            tool_view=tools.view(unit.tools),
                                             request=request,
                                         )
                                 except (InfrastructureError, OSError) as exc:
