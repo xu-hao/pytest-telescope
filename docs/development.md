@@ -129,12 +129,15 @@ corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test 
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 
-Functional tests use portable controlled inputs. Naming, copying or pinning an actual
-host installation does not make its compiler, loader, ABI or installed layout a portable
-fixture. Host compiler and derived-library/preload experiments, real installed-command
-guards and qualification against actual checkouts or installed runtimes belong to
-separately selected [compatibility benchmarks](benchmark.md#portable-inputs-and-host-qualification).
-They are not functional prerequisites. Actual browser execution is always a
+Functional tests use portable controlled inputs. Their ordinary Python, pytest and
+Bubblewrap runner dependencies remain normal test infrastructure; using those programs
+does not itself make a test a compatibility benchmark. Classify a case by its purpose
+and inputs. A case whose purpose is to qualify a selected host compiler/toolchain,
+native loader/ABI, derived preload, installed command or actual checkout/install layout
+belongs to a separately selected
+[compatibility benchmark](benchmark.md#portable-inputs-and-host-qualification).
+Naming, copying or pinning that installation does not establish portability. Such
+qualification is not a functional prerequisite. Actual browser execution is always a
 separately invoked [benchmark](benchmark.md#browser-execution-benchmarks), including an
 owned page with explicit runtime inputs. It is not a functional readiness requirement.
 Pinning whatever a developer happens to have installed does not make that installation
@@ -142,9 +145,10 @@ a portable fixture.
 Host-dependent runtime compatibility checks run separately under
 [`benchmarks/frozen_runtime`](benchmark.md#installed-runtime-compatibility-benchmarks),
 outside the default functional gate. Portable frozen-input declarations, data views,
-identity, transport, error handling and cleanup remain functional controls. A concrete
-program fixture must meet the same portable-input rule; selecting a familiar program
-or package name does not exempt it. Deterministic doubles must be identified as such; they do
+identity, transport, error handling and cleanup remain functional controls. An ordinary
+program dependency is not a blanket exemption or a blanket ban: assess the actual
+case's purpose and whether its asserted behavior has portable owned inputs. Deterministic
+doubles must be identified as such; they do
 not establish browser navigation, clicking, layout or rendering coverage.
 
 The earlier unlanded ambient-configuration preservation controls are superseded by the
@@ -167,9 +171,10 @@ runtime, nor does a source-snapshot check qualify an installed wheel or ambient 
 Static trigger coverage is separate from full worker compatibility. A tiny owned static
 ELF can exercise actual runtime classification and a direct-program filesystem view.
 A synthetic standard prefix description used by such a test qualifies the startup path
-model only; it does not establish that CPython starts. Full worker controls must use
-the actual invoking interpreter description and explicitly pin its real runtime, loader
-cache and pytest dependencies. Adding a dynamic worker runtime to a static-tool test
+model only; it does not establish that CPython starts. A claim about startup of a selected
+native worker requires its actual invoking interpreter description and explicitly pinned
+runtime, loader cache and pytest dependencies. That qualification claim cannot be
+replaced by a double. Adding a dynamic worker runtime to a static-tool test
 cannot prove that the static tool alone caused the native profile to activate.
 
 ### Derived native witnesses
@@ -190,16 +195,18 @@ campaign requires its own explicit selection and is not started by the default g
 
 ## Controlled program qualification
 
-The functional Node and installed-plugin controls use the actual invoking worker runtime
+The existing Node and installed-plugin controls use the actual invoking worker runtime
 alongside explicitly selected program files. Preparation records every selected
 file's hash, type and mode in a bounded private receipt. A check compares its initial
 declarations against that exact receipt before starting the controller. A missing or
 changed prerequisite fails preparation or the check; it does not skip the control,
 download a replacement, or widen the filesystem view.
-Functional preparation selects only Node and installed-plugin profiles. It does not
-require a browser executable, browser resources or a successful browser benchmark.
-Browser preparation is requested explicitly for a separate benchmark and has its own
-receipt and verdict.
+The two-profile preparation path selects Node and installed-plugin profiles. It does not
+select a browser executable or browser resources. Browser preparation is requested
+explicitly for a separate benchmark and has its own receipt and verdict. A profile's
+name and a matching receipt do not classify its cases as functional: cases whose purpose
+is installed-runtime or ABI qualification remain explicit benchmarks under the rule
+above. Preserve their real assertions and dependencies when selecting them separately.
 
 The Node driver keeps its `#!/usr/bin/env node` shebang. Its checks exercise the pinned
 command directory, argument boundaries, exit status and signal propagation through an

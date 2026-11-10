@@ -122,11 +122,13 @@ not establish arbitrary installed-runtime support or a portable performance resu
 
 The default functional suite uses portable owned fixtures to test declarations,
 protocols, ownership, environment composition, cache identity and lifecycle behavior.
-Pinning bytes is an execution contract, not a test-portability classification. A fixture
-whose result depends on the selected host compiler, native loader, preload behavior,
-installed command or real checkout/install layout belongs to an explicitly selected
-compatibility benchmark. Complete pins and owned source do not turn that host
-qualification into a functional prerequisite.
+Pinning bytes is an execution contract, not a test-portability classification. Classify
+the actual case's purpose and inputs. A case intended to qualify a selected host
+compiler/toolchain, native loader/ABI, derived preload, installed command or real
+checkout/install layout belongs to an explicitly selected compatibility benchmark.
+Complete pins and owned source do not turn that host qualification into a functional
+prerequisite. Ordinary Python/pytest runner dependencies and portable program-backed
+integration tests are not reclassified merely because they execute a program.
 
 Keep a benchmark's real oracle and required dependencies intact, including output and
 cleanup bounds. Metadata or planning probes establish only their observed planning
