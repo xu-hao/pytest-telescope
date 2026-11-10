@@ -1,8 +1,8 @@
 # pytest-telescope
 
 > Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
-> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
+> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
+> and is not implemented by this version.
 
 Contributors qualify host-specific tool installations with the separately invoked
 [installed-runtime benchmarks](benchmark.md#installed-runtime-compatibility-benchmarks).
@@ -114,7 +114,7 @@ installed environment and system directories. Undeclared project files are absen
 Writes belong in private scratch, for example through pytest's `tmp_path` fixture.
 In published 0.1.0a6, tests without an `inputs`, `bundles` or `distributions` declaration remain ordinary,
 including other tests in the same file.
-The unreleased 0.1.0a7 candidate also supports the `env` and `tools` scope fields
+Version 0.1.0 also supports the `env` and `tools` scope fields
 described in the development references below.
 
 ### 4. Run the test twice
