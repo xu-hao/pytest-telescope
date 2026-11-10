@@ -63,6 +63,7 @@ def test_b():
     )
 
 
+@pytest.mark.requires_fixture_guard
 def test_e83_02_shared_fixture_refusal_has_no_guarded_body_dispatch(tmp_path, monkeypatch):
     distinct_groups(
         tmp_path, fixture='@pytest.fixture(scope="module")\ndef shared(): return object()'
@@ -87,6 +88,7 @@ def test_e83_02_shared_fixture_refusal_has_no_guarded_body_dispatch(tmp_path, mo
     # this seam. It is not inferred from error_result or a collection side-effect claim.
 
 
+@pytest.mark.requires_fixture_guard
 def test_e83_04_real_capture_inspection_bind_nonce_context_and_members(tmp_path, monkeypatch):
     distinct_groups(tmp_path)
     observed = []
@@ -142,6 +144,7 @@ def test_e83_04_real_capture_inspection_bind_nonce_context_and_members(tmp_path,
                 )
 
 
+@pytest.mark.requires_fixture_guard
 def test_e83_04_late_graph_drift_retains_first_result_and_publishes_nothing(tmp_path, monkeypatch):
     distinct_groups(tmp_path)
     events = []
@@ -176,6 +179,7 @@ def test_e83_04_late_graph_drift_retains_first_result_and_publishes_nothing(tmp_
     assert fresh["status"] == "passed" and fresh["counts"]["reused"] == 0
 
 
+@pytest.mark.requires_fixture_guard
 def test_pre_admission_infrastructure_run_preserves_unavailable_observations(tmp_path, monkeypatch):
     distinct_groups(tmp_path)
     original = sandbox.execute
@@ -201,6 +205,7 @@ def test_pre_admission_infrastructure_run_preserves_unavailable_observations(tmp
     assert "guard-batch" not in observed
 
 
+@pytest.mark.requires_fixture_guard
 def test_framework_mutable_state_is_group_local(tmp_path):
     distinct_groups(
         tmp_path,

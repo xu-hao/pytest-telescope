@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import sys
+from itertools import product
 from pathlib import Path
 
 import pytest
@@ -14,37 +15,65 @@ from test_functional_gate import write
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github/workflows"
 
 
-def invocation(name, runner):
-    """Read command and inherited environment, without running setup/action steps."""
+def workflow_roles(name, runner):
+    """Expand real workflow commands/matrix, without executing setup or action steps."""
     document = yaml.safe_load((WORKFLOWS / name).read_text())
     found = []
     for job in document["jobs"].values():
-        for step in job.get("steps", []):
-            for line in step.get("run", "").splitlines():
-                tokens = shlex.split(line)
-                if len(tokens) > 1 and tokens[1] == "scripts/check.py":
-                    environment = {"RUNNER_TEMP": str(runner)}
-                    for source in (document, job, step):
-                        environment.update(source.get("env", {}))
+        matrix = job.get("strategy", {}).get("matrix", {})
+        axes = {key: values for key, values in matrix.items() if key != "include"}
+        rows = [dict(zip(axes, values)) for values in product(*axes.values())]
+        for included in matrix.get("include", []):
+            matched = [
+                row for row in rows
+                if all(row[key] == value for key, value in included.items() if key in axes)
+            ]
+            assert matched, "workflow fixture does not silently manufacture matrix jobs"
+            for row in matched:
+                row.update(included)
+        for row in rows:
+            installs = []
+            python_version = None
+            for step in job.get("steps", []):
+                environment = {"RUNNER_TEMP": str(runner)}
+                for source in (document, job, step):
+                    environment.update(source.get("env", {}))
 
-                    def expand(value):
-                        value = re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", str(runner), value)
-                        for key, content in environment.items():
-                            value = value.replace("${" + key + "}", content)
-                            value = value.replace("$" + key, content)
-                        if "$" in value:
-                            raise AssertionError("unsupported workflow expression in gate input")
-                        return value
+                def expand(value):
+                    value = re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", str(runner), value)
+                    value = re.sub(
+                        r"\$\{\{\s*matrix\.(\w+)\s*\}\}",
+                        lambda match: row[match[1]], value,
+                    )
+                    for key, content in environment.items():
+                        value = value.replace("${" + key + "}", content)
+                        value = value.replace("$" + key, content)
+                    if "$" in value:
+                        raise AssertionError("unsupported workflow expression in gate input")
+                    return value
 
+                if step.get("uses", "").startswith("actions/setup-python@"):
+                    python_version = expand(step["with"]["python-version"])
+                for line in step.get("run", "").splitlines():
+                    tokens = shlex.split(line)
+                    if len(tokens) > 3 and tokens[1:4] == ["-m", "pip", "install"]:
+                        installs.append([expand(token) for token in tokens])
+                    if len(tokens) <= 1 or tokens[1] != "scripts/check.py":
+                        continue
                     found.append(
-                        (
-                            tokens[0],
-                            [expand(token) for token in tokens[1:]],
-                            {key: expand(value) for key, value in environment.items()},
+                        dict(
+                            matrix=dict(row), python=python_version, installs=list(installs),
+                            executable=tokens[0],
+                            arguments=[expand(token) for token in tokens[1:]],
+                            environment={key: expand(value) for key, value in environment.items()},
                         )
                     )
-    assert len(found) == 1, "one gate entry is required per workflow"
-    return found[0]
+    return found
+
+
+def invocation(name, runner):
+    role = workflow_roles(name, runner)[0]
+    return role["executable"], role["arguments"], role["environment"]
 
 
 class StageReached(Exception):

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from threading import Event
 
+import pytest
+
 from pytest_telescope import controller, sandbox
 from pytest_telescope.model import InfrastructureError
 from pytest_telescope.result import validate_guarded_batch
@@ -143,6 +145,7 @@ def names(events, kind):
     return [name for event, name, _ in events if event == kind]
 
 
+@pytest.mark.requires_fixture_guard
 def test_h3_positive_uncancelled_real_workers_and_reuse(tmp_path, monkeypatch):
     report, events, cancellation = run_case(tmp_path, monkeypatch, "positive")
     assert report["status"] == "passed" and report["fixture_guard"]["state"] == "admitted"
@@ -181,6 +184,7 @@ def assert_common(report, events, cancellation, root):
     assert names(events, "released").count("b") == 1
 
 
+@pytest.mark.requires_fixture_guard
 def test_h3_submitted_b_cancelled_before_first_session_is_known_unrun(tmp_path, monkeypatch):
     report, events, cancellation = run_case(tmp_path, monkeypatch, "pre-first")
     assert_common(report, events, cancellation, tmp_path)
@@ -200,6 +204,7 @@ def test_h3_submitted_b_cancelled_before_first_session_is_known_unrun(tmp_path, 
     assert not member["complete"]
 
 
+@pytest.mark.requires_fixture_guard
 def test_h3_cancelled_between_attempts_keeps_one_unresolved_session(tmp_path, monkeypatch):
     report, events, cancellation = run_case(tmp_path, monkeypatch, "between")
     assert_common(report, events, cancellation, tmp_path)

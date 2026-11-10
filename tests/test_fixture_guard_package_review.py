@@ -66,6 +66,7 @@ def test_item():
         )
 
 
+@pytest.mark.requires_fixture_guard
 def test_package_collector_evidence_gates_split_owner_refusal(tmp_path, monkeypatch):
     package_project(tmp_path)
     environment = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTHONDONTWRITEBYTECODE="1")

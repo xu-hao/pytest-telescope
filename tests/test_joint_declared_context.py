@@ -92,6 +92,7 @@ def guarded_run(project):
     return {row["case_id"]: row for row in result["units"]}
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_revalidates_exact_tool_helper_and_environment_scopes(joint_project, monkeypatch):
     baseline = controller.run(joint_project.root, timeout=20)
     assert baseline["schema"] == 4 and baseline["status"] == "passed", baseline
@@ -107,6 +108,7 @@ def test_guard_revalidates_exact_tool_helper_and_environment_scopes(joint_projec
     assert changed[identity("test_right")]["outcome"] == "reused"
 
 
+@pytest.mark.requires_fixture_guard
 def test_authenticated_helper_marker_cannot_be_borrowed_by_a_guarded_case(
     joint_project, monkeypatch
 ):
@@ -126,6 +128,7 @@ def test_authenticated_helper_marker_cannot_be_borrowed_by_a_guarded_case(
     assert all(mode not in modes for mode in ("batch", "guard-batch", "execution"))
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_reverifies_frozen_helper_before_inspection_or_cache_reuse(
     joint_project, monkeypatch
 ):

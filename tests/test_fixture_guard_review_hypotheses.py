@@ -120,6 +120,7 @@ def valid_record(root, group, events):
     return path
 
 
+@pytest.mark.requires_fixture_guard
 def test_review_h1_recovery_publishes_and_warm_reuses(tmp_path, monkeypatch):
     configure(tmp_path, ("a", "b"))
     assert not (tmp_path / ".pytest-telescope/cache").exists()
@@ -151,6 +152,7 @@ def test_review_h1_recovery_publishes_and_warm_reuses(tmp_path, monkeypatch):
     assert sum(event[0] == "worker" for event in events) == worker_count
 
 
+@pytest.mark.requires_fixture_guard
 def test_review_h1_exhaustion_discards_all_new_staged_successes(tmp_path, monkeypatch):
     configure(tmp_path, ("a", "b", "c"))
     assert not (tmp_path / ".pytest-telescope/cache").exists()
@@ -214,6 +216,7 @@ def empty_boundary(root):
     assert not manifest.scope_possible and not manifest.scoped_files["default"]
 
 
+@pytest.mark.requires_fixture_guard
 def test_review_h2_empty_without_conditions_is_no_tests(tmp_path, monkeypatch):
     condition_project(tmp_path)
     empty_boundary(tmp_path)
@@ -232,6 +235,7 @@ def test_review_h2_empty_without_conditions_is_no_tests(tmp_path, monkeypatch):
     assert not (tmp_path / ".pytest-telescope/cache").exists()
 
 
+@pytest.mark.requires_fixture_guard
 def test_review_h2_empty_condition_rejects_unselected_case(tmp_path, monkeypatch):
     condition_project(tmp_path)
     empty_boundary(tmp_path)
@@ -249,6 +253,7 @@ def test_review_h2_empty_condition_rejects_unselected_case(tmp_path, monkeypatch
     assert not calls and not (tmp_path / ".pytest-telescope/cache").exists()
 
 
+@pytest.mark.requires_fixture_guard
 def test_review_h2_selected_and_invalid_conditions(tmp_path, monkeypatch):
     condition_project(tmp_path)
     monkeypatch.setenv("REVIEW_CONDITION", "synthetic-present")

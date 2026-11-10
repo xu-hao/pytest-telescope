@@ -29,6 +29,7 @@ def case_id(node):
     return hashlib.sha256(json.dumps(["default", node], separators=(",", ":")).encode()).hexdigest()
 
 
+@pytest.mark.requires_fixture_guard
 def test_inherited_and_overridden_fixture_chain_runs_and_tears_down(tmp_path):
     configure(tmp_path)
     put(
@@ -62,6 +63,7 @@ def test_item(shared): shared.append("body")
     assert controller.run(tmp_path, fixture_guard="available-v1")["counts"]["reused"] == 1
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize("selector", [["-m", "chosen"], ["tests/test_select.py::test_chosen"]])
 def test_marker_and_node_selectors_bind_exact_guarded_membership(tmp_path, selector):
     configure(tmp_path)
@@ -81,6 +83,7 @@ def test_other(): pass
     assert sum(row["selected"] for row in report["units"]) == 1
 
 
+@pytest.mark.requires_fixture_guard
 def test_captured_condition_and_worker_environment_survive_ambient_change(tmp_path, monkeypatch):
     configure(tmp_path)
     monkeypatch.setenv("GUARD_SNAPSHOT", "before")

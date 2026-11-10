@@ -69,6 +69,7 @@ def recommit(data, mode):
         )
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize(
     "mode,fault",
     [

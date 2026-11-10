@@ -50,6 +50,7 @@ def different(value):
     return ("1" if value[0] == "0" else "0") + value[1:]
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize(
     "fault",
     [
@@ -138,6 +139,7 @@ def test_real_fixture_refusal_corruption_fails_closed(tmp_path, monkeypatch, fau
     assert not any(group["cache_eligible"] for group in report["groups"])
 
 
+@pytest.mark.requires_fixture_guard
 def test_real_descendant_during_refusal_is_infrastructure_failure(tmp_path, monkeypatch):
     narrow_project(tmp_path, leaked=True)
     original = sandbox.execute

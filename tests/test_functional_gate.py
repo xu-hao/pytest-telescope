@@ -337,8 +337,26 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
     for name in profile_names:
         monkeypatch.setenv(name, "owned profile value that must not dispatch")
 
-    def dispatch(arguments):
+    def collect(plugins):
+        # Explicit collection lifecycle double: no pytest test body is executed.
+        (selection,) = plugins
+        items = [
+            types.SimpleNamespace(
+                nodeid="tests/test_owned.py::test_owned", get_closest_marker=lambda name: None
+            )
+        ]
+        config = types.SimpleNamespace(
+            hook=types.SimpleNamespace(pytest_deselected=lambda **kwargs: None)
+        )
+        hook = selection.pytest_collection_modifyitems(config, items)
+        next(hook)
+        with pytest.raises(StopIteration):
+            next(hook)
+        selection.pytest_collection_finish(types.SimpleNamespace(items=items))
+
+    def dispatch(arguments, *, plugins):
         assert all(name not in os.environ for name in profile_names)
+        collect(plugins)
         calls.append(("tests", arguments))
         return 0
 
@@ -367,9 +385,11 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "frozen_tool_prepare_programs", preparation)
 
     def arguments(mode):
-        return [
+        result = [
             "functional_gate.py",
             mode,
+            "--functional-profile",
+            "core",
             "--binding",
             str(binding_file),
             "--binding-sha256",
@@ -377,6 +397,9 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
             "--scratch",
             str(scratch),
         ]
+        if mode == "tests":
+            result += ["--membership", str(tmp_path / "membership.json")]
+        return result
 
     return types.SimpleNamespace(
         candidate=candidate,
@@ -386,6 +409,7 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
         binding_file=binding_file,
         calls=calls,
         arguments=arguments,
+        collect=collect,
     )
 
 
@@ -405,9 +429,9 @@ def test_exact_candidate_dispatches_without_program_profiles(invocation, monkeyp
     monkeypatch.setattr(sys, "argv", value.arguments(mode))
     assert value.functional.main() == 0
     assert len(value.calls) == 1 and value.calls[0][0] == mode
-    assert sorted(path.name for path in value.binding_file.parent.glob("*.json")) == [
-        "binding.json"
-    ]
+    assert sorted(path.name for path in value.binding_file.parent.glob("*.json")) == (
+        ["binding.json", "membership.json"] if mode == "tests" else ["binding.json"]
+    )
 
 
 @pytest.mark.parametrize("fault", ["producer", "binding", "source", "wheel", "interpreter"])
@@ -420,7 +444,8 @@ def test_successful_dispatch_cannot_hide_postcondition_mutation(invocation, monk
         "wheel": value.candidate.wheel,
     }
 
-    def mutate(arguments):
+    def mutate(arguments, *, plugins):
+        value.collect(plugins)
         value.calls.append(("tests", arguments))
         if fault == "interpreter":
             monkeypatch.setattr(
@@ -442,7 +467,8 @@ def test_successful_dispatch_cannot_hide_postcondition_mutation(invocation, monk
 def test_valid_nonzero_test_verdict_is_retained_after_postconditions(invocation, monkeypatch, code):
     value = invocation
 
-    def verdict(arguments):
+    def verdict(arguments, *, plugins):
+        value.collect(plugins)
         value.calls.append(("tests", arguments))
         return code
 

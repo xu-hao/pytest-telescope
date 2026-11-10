@@ -70,6 +70,7 @@ def observe_real_workers(monkeypatch):
     return events
 
 
+@pytest.mark.requires_fixture_guard
 def test_same_package_lifecycle_with_one_group_runs_and_tears_down(tmp_path, monkeypatch):
     configure(tmp_path)
     put(tmp_path, "tests/pkg/__init__.py", package_init("both"))
@@ -99,6 +100,7 @@ def test_second():
     assert report["groups"][0]["complete"] and report["groups"][0]["cache_eligible"]
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize("kind", ["setup", "teardown"])
 def test_setup_only_or_teardown_only_same_package_refuses_before_body(tmp_path, monkeypatch, kind):
     configure(tmp_path)
@@ -126,6 +128,7 @@ def test_item(): os.write(1, b"PACKAGE_BODY_OBSERVED\\n")
     assert not any(event["mode"] == "guard-batch" for event in events)
 
 
+@pytest.mark.requires_fixture_guard
 def test_distinct_package_lifetimes_are_admitted(tmp_path, monkeypatch):
     configure(tmp_path)
     for name in ("a", "b"):
@@ -151,6 +154,7 @@ def test_item():
     assert all((event["setup"], event["body"], event["teardown"]) == (1, 1, 1) for event in batches)
 
 
+@pytest.mark.requires_fixture_guard
 def test_same_package_without_collector_lifecycle_is_admitted(tmp_path):
     configure(tmp_path)
     put(tmp_path, "tests/pkg/__init__.py", "state = []\n")
@@ -171,6 +175,7 @@ def test_item():
     assert len(report["groups"]) == 2 and report["counts"]["executed"] == 2
 
 
+@pytest.mark.requires_fixture_guard
 def test_nested_package_shared_ancestor_is_detected_when_pytest_collects_it(tmp_path, monkeypatch):
     configure(tmp_path)
     put(

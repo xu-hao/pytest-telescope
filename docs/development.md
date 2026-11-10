@@ -36,6 +36,14 @@ It never skips or marks those cases as expected failures, and its result cannot 
 in for a full verdict. The CI matrix selects `core` for pytest 8 and pins pytest 9.2.0
 with `all`; the publishing workflow also requires `all`.
 
+Apply that marker to the smallest case or parameter that actually needs a supported
+invoking adapter. This includes real capture/inspection refusal controls and accounting
+checks whose fixture first runs an admitted guarded project. Keep pure protocol,
+converter and callback controls, invalid declarations rejected before adapter admission,
+ordinary/default behavior and unsupported-version refusal tests in `core`. A combined
+tool-link test marks only its guarded parameter; its ordinary parameters remain core.
+Collection receipts, rather than a static function count, establish the exact partition.
+
 Both `functional_gate.py` modes require the same explicit `--functional-profile`
 argument. The `tests` mode additionally requires `--membership` naming a new owned
 artifact file; `harness` mode does not accept that artifact argument. Before any test
