@@ -24,7 +24,7 @@ def changing_project(root, *, extra=False):
         "    if not config.option.collectonly and os.getenv('GUARD_DECL_CHANGE'):\n"
         "        for item in items:\n"
         "            if item.nodeid.startswith('tests/test_b.py::'):\n"
-        "                item.add_marker(pytest.mark.telescope(inputs=[]))\n",
+        "                next(item.iter_markers('telescope')).kwargs['inputs'] = []\n",
     )
     put(
         root,

@@ -17,7 +17,7 @@ from pytest_telescope.fixture_guard import (
     validate_capture,
     validate_inspection,
 )
-from pytest_telescope.model import InfrastructureError, UnsupportedCapability
+from pytest_telescope.model import DeclarationError, InfrastructureError, UnsupportedCapability
 
 
 def put(root, name, contents):
@@ -159,15 +159,18 @@ def test_e83_04_late_graph_drift_retains_first_result_and_publishes_nothing(tmp_
         return original(*args, request=request, **kwargs)
 
     monkeypatch.setattr(sandbox, "execute", drift)
-    report = controller.run(tmp_path, fixture_guard="available-v1", workers=1)
+    with pytest.raises(DeclarationError) as caught:
+        controller.run(tmp_path, fixture_guard="available-v1", workers=1)
     assert events == ["dispatch", "dispatch"]
-    assert report["schema"] == 5 and report["status"] == "infrastructure_error"
+    report = controller.error_result(caught.value, fixture_guard="available-v1")
+    assert report["schema"] == 5 and report["status"] == "declaration_error"
     assert report["fixture_guard"]["state"] == "admitted"
-    units = {unit["case_id"]: unit for unit in report["units"]}
+    observations = report["accounting"]["observations"]
+    units = {unit["case_id"]: unit for unit in observations["units"]}
     first = units[case_id("tests/test_groups.py::test_a")]
     assert first["outcome"] == "executed" and first["result_status"] == "passed"
     assert first["attempts"] >= 1
-    assert not any(group["cache_eligible"] for group in report["groups"])
+    assert not any(group["cache_eligible"] for group in observations["groups"])
     monkeypatch.setattr(sandbox, "execute", original)
     fresh = controller.run(tmp_path, fixture_guard="available-v1", workers=1)
     assert fresh["status"] == "passed" and fresh["counts"]["reused"] == 0

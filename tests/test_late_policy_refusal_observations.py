@@ -12,7 +12,7 @@ from frozen_tool_fixtures import ToolProject, cache_bytes
 
 import pytest_telescope
 from pytest_telescope import controller, model, ordinary, sandbox
-from pytest_telescope.model import DeclarationError, fingerprint
+from pytest_telescope.model import DeclarationError
 from pytest_telescope.result import validate_batch, validate_ordinary, validate_result
 
 
@@ -266,16 +266,6 @@ def test_cli_late_ordinary_refusal_preserves_actual_worker_evidence(tmp_path):
 @pytest.mark.parametrize("mode", ["case", "batch"])
 def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkeypatch, mode):
     project, counter = project_with_policy(tmp_path, scoped=True)
-    prefix = Path(sys.prefix)
-    box = sandbox.Sandbox(
-        "/usr/bin/bwrap",
-        sys.executable,
-        ((str(prefix), str(prefix)),),
-        str(prefix / "bin") + ":/usr/bin:/bin",
-        fingerprint(["owned-default-worker", sys.executable, str(prefix)]),
-        {},
-    )
-    monkeypatch.setattr(sandbox, "prepare", lambda root: box)
     original = sandbox.execute
     returned, started = [], []
     original_session, original_popen = ordinary.session, sandbox.subprocess.Popen
