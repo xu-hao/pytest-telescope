@@ -65,7 +65,9 @@ def assert_actual_pass(root, starts, sessions, frames):
     (member,) = result["case_results"]
     assert member["outcome"] == "passed" and member["complete"]
     assert [(row["phase"], row["outcome"]) for row in member["reports"]] == [
-        ("setup", "passed"), ("call", "passed"), ("teardown", "passed")
+        ("setup", "passed"),
+        ("call", "passed"),
+        ("teardown", "passed"),
     ]
     assert (root / "owned-body-events.txt").read_text() == "body\n"
     assert not (root / ".pytest-telescope").exists()
@@ -99,7 +101,15 @@ def test_ordinary_unmatched_node_retains_completed_session_observations(tmp_path
     except DeclarationError as exc:
         error = exc
     result, actual = assert_actual_pass(tmp_path, starts, sessions, frames)
-    print("H5_ACTUAL_ORDINARY", len(starts), result["protocol"], result["passed"], actual["case_id"], "typed", type(error).__name__ if error else None)
+    print(
+        "H5_ACTUAL_ORDINARY",
+        len(starts),
+        result["protocol"],
+        result["passed"],
+        actual["case_id"],
+        "typed",
+        type(error).__name__ if error else None,
+    )
     assert returned is None and type(error) is DeclarationError
     assert error.accounting is not None, "late real ordinary session lost retained accounting"
     retained = error.accounting.render()
@@ -121,7 +131,10 @@ def test_ordinary_unmatched_node_retains_completed_session_observations(tmp_path
     assert refusal["status"] == "declaration_error" and refusal["accounting"] == retained
     assert refusal["inventory_complete"] == observations["inventory_complete"]
     assert refusal["inventory_digest"] == observations["inventory_digest"]
-    assert len(starts) == len(sessions) == 1 and (tmp_path / "owned-body-events.txt").read_text() == "body\n"
+    assert (
+        len(starts) == len(sessions) == 1
+        and (tmp_path / "owned-body-events.txt").read_text() == "body\n"
+    )
 
 
 def test_ordinary_unknown_file_is_rejected_before_session(tmp_path, monkeypatch):
