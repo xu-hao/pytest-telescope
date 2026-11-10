@@ -37,7 +37,10 @@ Version `0.1.0a6` uses ordinary pytest and Bubblewrap filesystem views.
 Before each release:
 
 1. Verify the MIT license text, package metadata, README rendering, source, wheel,
-   sdist, and qualification results.
+   sdist, and qualification results. Full qualification uses the default
+   `--functional-profile all`, including supported fixture-guard positives and complete
+   selected/deselected membership evidence. An explicit `core` compatibility result is
+   never a full, release or guarded-landing verdict; the publishing workflow requires `all`.
 2. Retain the GitHub `pypi` environment's release-tag restrictions. This project's
    release policy has no required-reviewer gate. Publication still follows the
    maintainer's applicable delivery authorization; a build or merge is not that

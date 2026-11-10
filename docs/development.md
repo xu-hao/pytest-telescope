@@ -5,7 +5,7 @@ Use a dedicated Python 3.11+ virtual environment. From the repository root:
 ```sh
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install '.[dev]'
+python -m pip install '.[dev]' 'pytest==9.2.0'
 mkdir -m 700 /tmp/telescope-check-scratch
 export TMPDIR=/tmp/telescope-check-scratch
 python scripts/check.py --artifacts /tmp/telescope-check
@@ -20,6 +20,36 @@ artifact directory must not already exist; use a new directory for another run. 
 dependencies may need network access. No package is uploaded by this command. Each stage
 has a five-minute deadline, except the behavioral suite, which has fifteen minutes.
 A timeout fails the gate.
+
+### Full qualification and core compatibility
+
+`check.py --functional-profile all` is the default and the only full qualification,
+release or guarded-landing verdict. It runs every functional test, including the real
+fixture-guard positives. Those positives require an actual supported adapter: pytest
+9.1.1 or 9.2.0. An unsupported actual version refuses this profile before test bodies;
+the gate does not silently choose a smaller suite.
+
+`check.py --functional-profile core` is an explicit compatibility or diagnostic run.
+It retains all core tests, version-independent guard checks and actual unsupported-adapter
+refusal controls. It deselects only real positive cases marked `requires_fixture_guard`.
+It never skips or marks those cases as expected failures, and its result cannot stand
+in for a full verdict. The CI matrix selects `core` for pytest 8 and pins pytest 9.2.0
+with `all`; the publishing workflow also requires `all`.
+
+Both `functional_gate.py` modes require the same explicit `--functional-profile`
+argument. The `tests` mode additionally requires `--membership` naming a new owned
+artifact file; `harness` mode does not accept that artifact argument. Before any test
+body, the actual pytest collection records a bounded, exclusively created schema 1
+membership object with exactly `schema`, `profile`, `pytest_version`, `selected` and
+`deselected`. The last two fields contain complete node-ID lists, not only counts.
+The `all` profile admits no deselections. The `core` profile admits exactly its marked
+positive cases as deselected; an ambient selector or other unexplained deselection
+refuses before execution rather than being credited to the profile.
+
+The final gate result records `functional_profile` and `verdict_kind`: `full` for
+`all`, `compatibility` for `core`. A successful `core` result remains compatibility
+evidence. The candidate binding remains schema 2 with its existing exact fields;
+profile selection is invocation and stage evidence, not a new product or binding field.
 
 Use new, owned scratch and artifact paths for each attempt. The example above creates
 the scratch directory before the gate starts; remove that directory after the gate has
@@ -71,6 +101,10 @@ bypass verification of its Python source bytes. This guard is specific to the ca
 `pytest_telescope` package. The explicit installed-plugin benchmark still supports its normal
 explicitly pinned bytecode, including its thirteen selected `.pyc` files, and verifies
 those actual bytes under the [installed-Python contract](bubblewrap-api.md#installed-python-distribution-records).
+Isolated Python child commands that can import the candidate must pass `-B` explicitly:
+`-I` ignores the inherited `PYTHONDONTWRITEBYTECODE` environment setting. These controls
+preserve strict installed-package verification; deleting or ignoring generated producer
+bytecode after a test is not a successful qualification.
 
 The new candidate binding uses schema 2 with exactly `schema`, `root`, `source`,
 `wheel_path`, `wheel` and `interpreter`. It binds source HEAD/tree, complete wheel
@@ -268,8 +302,11 @@ Check the quickstart, sidebar links, search, source links, and mobile navigation
 real browser after layout changes. Stop the local server when finished. Edit navigation
 in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples first.
 
-The CI matrix covers supported host Python/pytest versions on Linux runners with
-Bubblewrap installed. Keep build and documentation tools in development dependencies.
+The CI matrix covers core compatibility on pytest 8 and complete functional
+qualification on the pinned supported pytest 9 adapter, with Python 3.11/3.13 Linux
+runners and Bubblewrap installed. Core compatibility is labelled separately and cannot
+be reused as the full release or guarded-landing verdict. Keep build and documentation
+tools in development dependencies.
 Use the [benchmark](benchmark.md) to compare fresh execution with plain pytest and
 Bubblewrap on the same workload.
 
