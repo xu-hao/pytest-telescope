@@ -140,4 +140,4 @@ def test_package_graph_corruption_fails_closed_before_body(tmp_path, monkeypatch
     assert mode in events and "guard-batch" not in events
     assert not any(group["cache_eligible"] for group in report["groups"])
     for path in (tmp_path / ".pytest-telescope/cache").glob("*.json"):
-        assert json.loads(path.read_text())["schema"] != 7
+        assert json.loads(path.read_text())["schema"] != 8

@@ -76,7 +76,7 @@ def validate(request, record):
 
 def test_actual_worker_records_have_strict_declaration_boolean_and_versions(actual_records):
     mode, records = actual_records
-    assert [record["protocol"] for _, record in records] == [10, 8 if mode == "case" else 9]
+    assert [record["protocol"] for _, record in records] == [11, 9 if mode == "case" else 10]
     for request, record in records:
         assert record["declaration_error"] is False
         assert validate(request, record)
@@ -111,10 +111,10 @@ def test_invalid_declaration_flags_reject_actual_record_derivatives(actual_recor
 def test_old_scoped_protocols_and_old_cache_envelopes_are_ineligible(actual_records, tmp_path):
     mode, records = actual_records
     for request, original in records:
-        old = copy.deepcopy(original)
-        old["protocol"] = 7 if request["mode"] == "collection" else 5 if mode == "case" else 6
-        old.pop("declaration_error")
-        assert not validate(request, old)
+        for protocol in range(original["protocol"]):
+            old = copy.deepcopy(original)
+            old["protocol"] = protocol
+            assert not validate(request, old)
         key = request["context_id"]
         path = tmp_path / (key + ".json")
         arguments = (
@@ -126,7 +126,7 @@ def test_old_scoped_protocols_and_old_cache_envelopes_are_ineligible(actual_reco
                 else {"case_id": request["case_id"]}
             )
         )
-        for schema, accepted in ((7, True), (6, False)):
+        for schema, accepted in [(8, True), *((old, False) for old in range(8))]:
             path.write_text(
                 json.dumps(
                     {
@@ -176,7 +176,7 @@ def test_actual_changed_declaration_sets_true_and_keeps_typed_refusal(tmp_path, 
     assert report["kind"] == "refusal" and report["status"] == "declaration_error", report
 
 
-def test_ordinary_protocol_two_keeps_its_field_and_strict_coherence(tmp_path, monkeypatch):
+def test_ordinary_protocol_keeps_its_field_and_strict_coherence(tmp_path, monkeypatch):
     put(tmp_path, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots=["tests"]\n')
     put(tmp_path, "tests/test_case.py", "def test_case(): pass\n")
     original, records = ordinary.session, []
@@ -189,8 +189,10 @@ def test_ordinary_protocol_two_keeps_its_field_and_strict_coherence(tmp_path, mo
     monkeypatch.setattr(ordinary, "session", session)
     assert controller.run(tmp_path, timeout=20)["status"] == "passed"
     (actual,) = records
-    assert actual["protocol"] == 2 and actual["declaration_error"] is False
+    assert actual["protocol"] == 4 and actual["declaration_error"] is False
     assert result.validate_ordinary(actual)
+    for protocol in (0, 1, 2, 3, 5, True):
+        assert not result.validate_ordinary({**actual, "protocol": protocol})
     for flag in (0, "false", None):
         invalid = {**actual, "declaration_error": flag}
         assert not result.validate_ordinary(invalid)

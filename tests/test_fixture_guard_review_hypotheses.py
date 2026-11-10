@@ -103,7 +103,7 @@ def valid_record(root, group, events):
     path = root / ".pytest-telescope/cache" / (key + ".json")
     record = json.loads(path.read_text())
     assert set(record) == {"schema", "key", "result", "checksum"}
-    assert record["schema"] == 7 and record["key"] == key
+    assert record["schema"] == 8 and record["key"] == key
     result = record["result"]
     assert (
         controller.read_record(
@@ -280,4 +280,4 @@ def test_review_h2_default_unguarded_schema_and_cache(tmp_path):
         json.loads(path.read_text())
         for path in (tmp_path / ".pytest-telescope/cache").glob("*.json")
     ]
-    assert records and all(record["schema"] == 7 for record in records)
+    assert records and all(record["schema"] == 8 for record in records)

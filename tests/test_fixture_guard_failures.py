@@ -58,7 +58,7 @@ def broken():
             phase["phase"] == failure_phase and phase["outcome"] == "failed"
             for phase in report["units"][0]["reports"]
         )
-    assert not any(record["schema"] == 7 for record in records(tmp_path))
+    assert not any(record["schema"] == 8 for record in records(tmp_path))
 
 
 def test_retry_then_success_and_exhaustion_are_bounded(tmp_path, monkeypatch):
@@ -124,7 +124,7 @@ def test_cancellation_drains_and_does_not_dispatch_next_group(tmp_path, monkeypa
     assert report["fixture_guard"]["state"] == "admitted"
     assert sum(group["attempts"] for group in report["groups"]) == 1
     assert not any(group["cache_eligible"] for group in report["groups"])
-    assert not any(record["schema"] == 7 for record in records(tmp_path))
+    assert not any(record["schema"] == 8 for record in records(tmp_path))
 
 
 def test_outer_cleanup_failure_preserves_observed_pass_without_publication(tmp_path, monkeypatch):
@@ -156,7 +156,7 @@ def test_outer_cleanup_failure_preserves_observed_pass_without_publication(tmp_p
     assert report["counts"]["executed"] == 1
     assert report["units"][0]["result_status"] == "passed"
     assert not report["groups"][0]["cache_eligible"]
-    assert not any(record["schema"] == 7 for record in records(tmp_path))
+    assert not any(record["schema"] == 8 for record in records(tmp_path))
     monkeypatch.setattr(sandbox, "invocation", original)
     resumed = controller.run(tmp_path, fixture_guard="available-v1")
     assert resumed["status"] == "passed" and resumed["counts"]["executed"] == 1
@@ -178,6 +178,6 @@ def test_item(): subprocess.Popen(["sleep", "20"])
     assert report["fixture_guard"]["state"] == "admitted"
     assert report["groups"][0]["attempts"] == 2
     assert not report["groups"][0]["cache_eligible"]
-    assert not any(record["schema"] == 7 for record in records(tmp_path))
+    assert not any(record["schema"] == 8 for record in records(tmp_path))
     scratch = tmp_path / ".pytest-telescope/scratch"
     assert not list(scratch.iterdir())

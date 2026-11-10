@@ -75,7 +75,7 @@ def observe(monkeypatch, *, synchronize=False, started=None):
         if request["mode"] == "guard-batch":
             assert len(request["case_ids"]) == 1 and request["case_ids"][0] in ids
             name = ids[request["case_ids"][0]]
-            assert value["protocol"] == 9 and len(value["nonce"]) == 64
+            assert value["protocol"] == 10 and len(value["nonce"]) == 64
             assert validate_guarded_batch(
                 value,
                 group_id=request["group_id"],
@@ -267,7 +267,9 @@ def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path,
             graph_id=request["graph_id"],
         )
 
-    assert value["declaration_error"] is False and value["protocol"] == 9 and valid(value)
+    assert value["declaration_error"] is False and value["protocol"] == 10 and valid(value)
+    for protocol in range(10):
+        assert not valid({**value, "protocol": protocol})
     for mutation in (
         "missing",
         "integer",
@@ -303,7 +305,7 @@ def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path,
         registry_id=request["registry_id"],
         graph_id=request["graph_id"],
     )
-    for schema, allowed in ((7, True), (6, False)):
+    for schema, allowed in [(8, True), *((old, False) for old in range(8))]:
         path.write_text(
             json.dumps(
                 {"schema": schema, "key": key, "result": value, "checksum": fingerprint(value)}
