@@ -8,9 +8,7 @@ from test_gate_profiles import profile_session as profile_session
 
 
 @pytest.mark.parametrize("action", ["observe", "notify-remove", "silent-remove", "notify-only"])
-def test_core_callback_conserves_partition_and_authenticates_notifications(
-    profile_session, action
-):
+def test_core_callback_conserves_partition_and_authenticates_notifications(profile_session, action):
     value = profile_session
     with (value.root / "tests/test_profile.py").open("a") as stream:
         stream.write("def test_core_extra(): Path('extra-ran').touch()\n")
@@ -40,11 +38,15 @@ def test_core_callback_conserves_partition_and_authenticates_notifications(
         "action": action,
         "status": status,
         "callback": json.loads(callback.read_text()) if callback.exists() else None,
-        "bodies": {name: (value.root / (name + "-ran")).exists() for name in ("core", "extra", "guard")},
+        "bodies": {
+            name: (value.root / (name + "-ran")).exists() for name in ("core", "extra", "guard")
+        },
         "receipt": receipt,
     }
     print("CORE_CALLBACK_OBSERVATION " + json.dumps(observed, sort_keys=True))
-    core, extra, guard = ["tests/test_profile.py::test_" + name for name in ("core", "core_extra", "guard")]
+    core, extra, guard = [
+        "tests/test_profile.py::test_" + name for name in ("core", "core_extra", "guard")
+    ]
     assert observed["callback"] is not None, observed
     assert observed["callback"]["before"] == [core, extra], observed
     assert observed["callback"]["after"] == (
