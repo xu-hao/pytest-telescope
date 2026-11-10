@@ -60,9 +60,14 @@ def selection_plugin(pytest, profile, membership, version):
                     self.own_deselection = False
             self.selected = [item.nodeid for item in items]
 
-        def pytest_collection_finish(self, session):
-            if self.collection_failed or self.selected is None:
+        @pytest.hookimpl(hookwrapper=True, tryfirst=True)
+        def pytest_runtestloop(self, session):
+            # Every collection callback has returned before this execution boundary.
+            if self.collection_failed:
+                yield
                 return
+            if self.selected is None:
+                raise pytest.UsageError("functional profile did not observe collection")
             selected = [item.nodeid for item in session.items]
             if (
                 self.external_deselection
@@ -78,6 +83,7 @@ def selection_plugin(pytest, profile, membership, version):
                 "deselected": self.deselected,
             }
             self.digest = write_json(membership, self.record)
+            yield
 
     return Selection()
 
