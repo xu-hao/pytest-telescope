@@ -256,6 +256,13 @@ original aliases must resolve only to pinned entries of the same closure. A sele
 project-link binding admits traversal only through that exact link/target. Omission
 keeps the existing directory-link refusal and adds no external view.
 
+A declared closed directory is supported even when its logical path is absent on the
+host or its frozen projection is empty. Private readonly mountpoint scaffolding preserves
+already admitted baseline siblings outside that closed tree, including their literal
+symlinks; it does not write the host, follow new targets, add captured host inputs or
+broaden the selected runtime closure. The closed tree still contains only its verified
+selected entries.
+
 Narrow original aliases may live below `/tmp` or `/dev/shm`; their undeclared live parent
 contents are never exposed and the scratch roots remain private. Controller, project,
 device and protocol paths stay protected. Conflicting selected mappings refuse instead
