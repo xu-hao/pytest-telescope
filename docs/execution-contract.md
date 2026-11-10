@@ -1,7 +1,8 @@
 # Declarations, inventory and reuse
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
+> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
+> not provide them.
 
 This page explains how pytest-telescope reads declarations, discovers cases and decides
 whether to reuse their results. The [execution contract](bubblewrap.md) describes which
@@ -37,7 +38,8 @@ def test_variant(value): ...
 ```
 
 Module/class/function/parameter declarations are additive. A literal `inputs`,
-`bundles`, `distributions` or `env` field makes a case scoped, including an empty list. Its
+`bundles`, `distributions`, `env` or `tools` field makes a case scoped, including an empty list.
+The development declaration `git="frozen-checkout-v1"` also scopes its case. Its
 effective scope is the union of those inherited declarations, project defaults,
 containing test source and configuration source. A policy-only `cache=False` marker or
 absence assertion does not make a case scoped. Any inherited `cache=False` disables
@@ -50,8 +52,9 @@ undeclared project files for it.
 Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
 state (`.pytest-telescope` and an explicitly selected in-project cache directory),
 pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environments
-(`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks,
-special files and unsupported paths are rejected.
+(`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks
+require an exact selected frozen-tool binding; all other directory symlinks, special
+files and unsupported paths are rejected.
 
 Put test roots and environment settings in `[tool.pytest_telescope]`, shared settings in
 `[tool.pytest_telescope.defaults]`, and reusable declarations in
@@ -73,7 +76,8 @@ without importing or evaluating project Python, within the
 [parsing limits below](#bounds-and-performance). Use `pytest.mark.telescope(...)`
 directly in function or class decorators, module or class `pytestmark`, or
 `pytest.param(..., marks=...)` inside literal parametrization declarations. Values must
-be literal string lists and booleans. Use bundles to share declarations.
+be literal string lists, booleans, or the supported literal Git version string. Use
+bundles to share declarations.
 
 Expressions, computed keyword arguments, marker factories, aliases and generated
 telescope markers are unsupported. Pytest collection still supplies ordinary parameter
@@ -162,6 +166,15 @@ Each scoped execution begins a new sandbox with only that case's effective scope
 
 Inventory and execution have distinct strict result schemas. A successful sandboxed collection reports collected nodes and declaration assignments, never executed passes. It becomes reusable only after the sandbox exits cleanly with validated bounded records. Ordinary session inventories are never reused.
 
+The strict worker `declaration_error` boolean distinguishes a validated failed pytest
+session from an actual declaration refusal. A plugin setting exit 4 after a passing body
+fails the group and run while preserving its observed reports; it does not trigger a
+declaration refusal or cancellation of unrelated work. A true declaration error requires
+exit 4 and incomplete evidence. The controller retains available evidence before the
+typed refusal, drains owned work and publishes no pending successes. Missing or invalid
+flags are refused without inference from exit codes. See the
+[protocol and cache versions](result-schema.md#internal-protocol-and-cache-versions).
+
 The scoped inventory key covers the exact frozen collection view, current test-file membership, static declaration registry and readable helper guard registry, pytest configuration, relevant environment, full effective arguments/selectors, the sandbox identity (policy, interpreter, installed distributions and the environment's references into the project) and runner implementation/version. Every invocation re-freezes current declared inputs before accepting an inventory hit. File addition/deletion, declared-resource changes or changed dynamic-collection inputs invalidate it. `--force` and `--no-cache` refresh inventory. Any statically present scoped cache=False policy conservatively disables inventory reuse; unrelated cacheable case results may still be reused after fresh collection.
 
 Result keys cover each scoped case's actual node identity, effective literal declarations, exact executed snapshot, validated containing-file inventory/declaration digest, full options/selectors and the sandbox, environment and runner identities. They do not include an unrelated case's resource bytes or environment values merely because collection saw them. Thus changing one declared resource refreshes collection but preserves unrelated case result hits. Failures, interrupted/invalid records and incomplete cleanup never become hits.
@@ -186,6 +199,159 @@ the file; retain actual collection skip evidence without inventing a selected ca
 explicit `file::node` selector must match a genuinely collected alias: coverage of its file
 alone does not satisfy it. This applies to ordinary and scoped collection and to reused
 scoped inventory.
+
+### Frozen Git identity (development contract)
+
+The explicit `git="frozen-checkout-v1"` declaration adds the verified frozen Git
+context and its executable/runtime identity to only consuming case and group keys.
+It adds the supported tracked tree to that scope; other cases retain their existing
+inputs. Collection uses the union needed by its potential consumers, but execution
+uses each case's own scope. A collection refresh caused by Git cannot by itself
+invalidate a nonconsumer's result. Equal-scope batching includes Git context in equality;
+Git and non-Git scopes cannot share a group. `cache=False` continues to disable reuse.
+
+Freeze once per invocation and validate the relevant source and frozen snapshot before
+accepting a hit, before execution and before publication. Changed HEAD, local refs, reachable history, tracked source,
+link text or target content, executable or its relevant runtime changes the consuming
+identity. Bounded capture, integrity and cleanup failures refuse or end in infrastructure
+failure after bounded retries; they never create reusable success or trigger ordinary
+fallback. Pending records become eligible only after owned cleanup succeeds; a terminal
+cleanup failure suppresses all new pending records while preserving prior valid records.
+See the [view and state limits](bubblewrap.md#frozen-git-checkout-development-contract).
+
+## Frozen tool capture and reuse
+
+Literal `tools` names compose through the same inheritance, default and bundle rules as
+other scope inputs. Registration/defaults alone do not change an ordinary route. Only
+tools needed by structurally possible consumers have their manifests and external
+closure prepared. The [versioned manifest](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+lists exact supported bytes, types, source modes, link text and runtime relations.
+
+Scoped discovery may receive the union of potential tools for its files, including a
+compatible union of command maps, closed library trees and declared configuration.
+If any selected runtime requires the native profile, discovery receives its closed
+`/etc` view. No case body executes there.
+Each case or identical-scope batch receives only its complete effective closure, before
+imports and recollection. Missing execution dependencies cannot be borrowed from another
+case. Tool names and identities participate in [batch equality](batching.md#exact-scope-and-deterministic-membership).
+Conflicting aliases, configuration entries, loader mappings or command names refuse
+the union; there is no arbitrary winner or relaxed execution view.
+
+Consumer identity includes selected manifest bytes, automatically included lock files
+and project-link relations, coverage mode, source/logical mappings, normalized entry
+records, actual content/modes/link texts, executable and Python runtime relations,
+loader/cache/search trees, closed configuration selection and command lookup. Exact
+configuration bytes, modes, links, mappings and the fixed empty `0444` preload control
+are consumer inputs; undeclared ambient `/etc` membership and metadata are not.
+The collection identity uses its required union; case/group keys do not inherit unrelated
+external bytes from that union. Updating
+a valid manifest and its matching installation refreshes the affected consumer. A stale
+pin refuses. An unrelated narrow case remains reusable when only another tool's external
+contents or manifest changes; editing project configuration retains its existing broader
+invalidation. A source mutation during an invocation is never accepted as a new context.
+
+For example, structurally included files contain separate consumers of tools A and B.
+Updating B's installation and matching manifest leaves A's case record reusable, while
+refreshing collection and B's context. Changing B's bytes without updating its pins
+instead refuses the required collection union, even with `-k` or a node selector that
+selects only A. Those selectors do not remove B's file from structural discovery.
+Previously valid A records survive that refusal; no new result is published. An API
+`structural_files` boundary excluding B's separate file removes B from the required
+union and permits A alone. Record reusability and admission of an invocation are
+distinct: a mid-invocation source change also prevents pending publication.
+
+Capture runs under the invocation's stable cache lock and owned staging. It performs
+bounded no-follow entry reads, before/after source checks, a complete final source-record
+pass and independent staged-content verification. It never hard-links mutable source
+files. Immutable owned material may be shared between its views. Recheck relevant source,
+manifest, lock and frozen records before accepting inventory/result hits, before execution,
+and before new record publication. Corrupt or partial owned material is infrastructure
+failure, not a valid snapshot. Old valid cache records survive unsuccessful new work.
+
+| Frozen-tool bound | Maximum |
+| --- | --- |
+| Registered/referenced tools | 64 |
+| Source anchors per tool | 32 |
+| Entries / traversal visits across selected tools | 100,000 / 200,000 |
+| Aggregate materialized owned paths, including every view | 200,000 |
+| Normal owned-tool cleanup / abandoned recovery | 60 seconds each |
+| Path components / UTF-8 path or link bytes / link hops | 64 / 4,096 / 32 |
+| Individual file / bytes per tool / aggregate tool bytes | 512 MiB / 2 GiB / 4 GiB |
+| Manifest encoding per tool / aggregate manifest bytes | 16 MiB / 32 MiB |
+| Executable, library, resource and subprocess relations per tool | 4,096 |
+| Declared installed Python distributions | 64 |
+| Command names per tool / selected scope | 256 / 1,024 |
+| Native loader search-directory declarations per tool | 64 |
+| Retained native ordering proof state | 65,536 context/object/dependency/name/alias tuples |
+| Native invoking-interpreter observed search paths / site paths | 64 / 64 |
+| Selected native invoking-interpreter `pyvenv.cfg` | 64 KiB |
+
+These tool-file bounds are separate from the project snapshot's source-file bound.
+Native lookup also follows the [bounded process-context proof](bubblewrap-api.md#verified-native-library-ordering).
+Its expansions and comparisons share the existing traversal, deadline and cancellation
+budgets. Resource associations, search-tag order, effective targets and context name
+mappings bind identity. Collection unions reprove these identities, including combined
+resources of the same executable; shadowed files cannot change the winning dependency.
+Hash/copy uses bounded chunks; a large admitted executable is not read into one buffer.
+Declared system configuration counts toward these same entry, byte, path and traversal
+bounds. Its owned readonly projection contains only selected pinned entries and the
+fixed loader controls; no separate ambient-configuration inventory is captured. Source
+descriptors remain controller-local and are not passed to mount setup or children.
+Native view identity also includes the supported invoking-interpreter path description,
+aliases, closed prefix destinations and startup flags. These
+[startup closures](bubblewrap-api.md#invoking-python-startup-closure) can narrow `/usr`
+and the actual virtual-environment prefix to selected entries; no host siblings remain
+under those projections. Uncovered environment bind destinations refuse before reuse
+or launch, rather than reopening the declared view.
+Each capture attempt has the lesser of the configured session timeout and 120 seconds,
+with cancellation checks during traversal and hashing. There are at most two attempts,
+each with fresh exclusive staging. Bounds refuse explicitly without truncating entries
+or installing a smaller/different executable.
+
+Missing declared inputs or malformed declarations are declaration errors. Unsupported
+versions/layouts, exceeded bounds and incompatible declared pins use `tool:frozen-v1`,
+`tool:layout`, `tool:bounds` and `tool:identity` respectively. Observed source mutation,
+I/O failure or corrupt owned capture gets bounded infrastructure recovery. Cleanup
+uncertainty is terminal: stop new work, drain owned children, preserve existing records
+and publish none of the invocation's pending successes. Remove only owned staging/views;
+restore directory traversal/write permissions only on verified owned material after
+views finish, never on source paths or symlink targets. A refusal does not authorize an
+ordinary replay or prove earlier ordinary cases never ran.
+
+Verification of restrictive owned directories uses read handles acquired before their
+final frozen modes are applied; verification does not widen a live view's permissions.
+These controller-only handles refer to owned copies and projections, never source
+directories, and are not transported to children. Verification checks that each held
+inode still corresponds to its declared owned path. Cleanup restores only the verified
+owned inode and closes retained handles on every exit and before retry. Descriptor
+exhaustion follows the bounded infrastructure-failure path, without changing caller limits.
+
+Materialization reserves a complete bounded set of new owned paths before creating it.
+The aggregate includes capture copies, tool and projection roots, empty ancestors,
+closed-view members, command directories/symlinks and fixed loader controls. Count each
+directory-entry path once; separate hardlink destinations count separately even when
+they share an already-owned inode. Reusing an existing view adds no paths. A reservation
+that would exceed 200,000 refuses with `tool:bounds` before accepting the view or
+publishing results, without truncation or leaving new view members behind.
+
+After a partial failure, retain the reservation until verified owned cleanup removes
+its paths. A fresh capture attempt resets accounting only after complete cleanup.
+Normal removal and abandoned recovery use the same capacity and a 60-second deadline,
+counting each owned path once rather than counting a directory again when traversing
+its children. Neither follows symlink targets nor changes source permissions. Cleanup
+uncertainty is terminal and preserves previously valid records. These bounds govern
+owned tool material, not caller CPU, memory, process or filesystem resource policy.
+
+A late typed declaration/capability refusal preserves its type and capability while
+retaining available session observations in the strict versioned
+[refusal accounting](result-schema.md#retained-observations-after-a-late-refusal)
+object. It is still a refusal, with no nested overall success verdict and no pending
+publication. An early refusal has no accounting object; bounded unavailability is explicit.
+
+Public evidence identifies tool names and failure categories, never external source
+paths, file contents, secret values or raw tool stderr. The cache and worker protocol
+retain opaque context identities, not raw tool-source inventories. The invoking runtime,
+normal phase/lifecycle validation and output/session/cardinality limits remain in force.
 
 ## Bounds and performance
 
@@ -240,8 +406,8 @@ Paths are project-relative. Inputs accept explicit files, directories and globs.
 Missing declared inputs, unknown fields/bundles, cyclic bundle references, malformed
 values and paths escaping the project are errors. Expected-absent paths must be
 absent in the source project and participate in identity. Relative leaf symlinks
-require their destination in the effective scope; absolute links and directory
-symlinks are unsupported. Explicit hidden glob components are supported.
+require their destination in the effective scope; other links require the exact
+selected frozen-tool binding described above. Explicit hidden glob components are supported.
 
 The default suite keeps pytest configuration in this pyproject's `[tool.pytest.ini_options]`.
 [Independent suite declarations](scoped-execution.md) also support explicit
@@ -356,3 +522,20 @@ process still present afterward, including any live descendant or unconsumed zom
 after the bound, makes the result ineligible; the remaining processes end with the
 sandbox. The engine never waits for ongoing child work to turn an incomplete run into a
 reusable success.
+
+## Required fixture conservation (unreleased)
+
+The optional [fixture guard](batching.md#required-fixture-guard-unreleased) is a required
+future contract, not a shipped or qualified capability. It validates all available user
+fixture definitions and actual package-collector xunit lifetimes in each exact group view
+before selected bodies and conservatively refuses shared lifetimes split across groups
+without broadening declared inputs. Mutable
+framework fixtures retain their documented per-group lifetime. The discovery union is
+not an execution view, and collection hooks can have side effects. Execution-side drift
+preserves actual prior attempts and prevents new cache publication. Unguarded behavior
+and schema 4 remain unchanged; unguarded records use cache envelope 8. A body-free
+fixture capture binds provisional context and membership; its registry and
+context-independent content commitments enter
+the final group and cache identity before context-bound inspection and execution
+revalidation. A guarded run with incomplete pre-admission observations can report guard
+state `unavailable` without inferring whether any bodies ran.

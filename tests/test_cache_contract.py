@@ -14,7 +14,8 @@ from pytest_telescope.model import DeclarationError, fingerprint, load
 
 def success():
     return {
-        "protocol": 5,
+        "protocol": 9,
+        "declaration_error": False,
         "context_id": "d" * 64,
         "collection_skips": [],
         "case_results": [
@@ -128,7 +129,8 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
         calls.append(request["mode"])
         if request["mode"] == "collection":
             return dict(
-                protocol=8,
+                protocol=11,
+                declaration_error=False,
                 context_id=request["context_id"],
                 collection_skips=[],
                 kind="collection",
@@ -141,6 +143,7 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
                 failures=[],
             )
         # The worker's own scratch fails to clean after this attempt.
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         raise sandbox.CleanupError("owned cleanup failed")
 
     sandbox_double(execute)
@@ -188,7 +191,8 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     rows = module_rows(tmp_path, [("test_unit.py", ["unit"])])
     collected = {
-        "protocol": 8,
+        "protocol": 11,
+        "declaration_error": False,
         "context_id": "d" * 64,
         "collection_skips": [],
         "kind": "collection",
@@ -206,6 +210,7 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
         calls.append(request["mode"])
         if request["mode"] == "collection":
             return collected | {"context_id": request["context_id"]}
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         result = success()
         result["context_id"] = request["context_id"]
         result["case_ids"] = [rows[0]["case_id"]]

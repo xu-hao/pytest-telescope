@@ -1,6 +1,20 @@
 {
-  "description": "Synthetic unreleased schema 4 examples. Digests and timings are illustrative, not execution receipts.",
+  "description": "Synthetic unreleased schema 4 and guarded schema 5 examples. Digests and timings are illustrative, not execution receipts.",
   "examples": {
+    "guarded_unavailable_refusal": {
+      "schema": 5,
+      "kind": "refusal",
+      "inventory_complete": false,
+      "inventory_digest": null,
+      "status": "unsupported",
+      "error": "fixture sharing cannot be conserved",
+      "capability": "execution:fixture-sharing",
+      "fixture_guard": {
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": []
+      }
+    },
     "mixed_cold_run": {
       "case_outcomes": {
         "cached_passed": 0,
@@ -759,6 +773,257 @@
           "worker_seconds": null
         }
       ]
+    },
+    "guarded_cold_run": {
+      "case_outcomes": {
+        "cached_passed": 0,
+        "cached_skipped": 0,
+        "fresh_passed": 1,
+        "fresh_skipped": 1
+      },
+      "cases": {
+        "collected": 2,
+        "failed": 0,
+        "passed": 1,
+        "skipped": 1
+      },
+      "collection": {
+        "collected": 2,
+        "failures": [],
+        "outcome": "executed",
+        "skips": [],
+        "suites": [
+          {
+            "collected": 2,
+            "files": [
+              "tests/test_prices.py"
+            ],
+            "inventory_digest": "d457dae1f2f2d3ad3c0b3fdc14b44c92a6fc2fd8ba1991a1aa2e160fc791d5e0",
+            "name": "default",
+            "outcome": "executed",
+            "route": "scoped",
+            "skips": [],
+            "worker_seconds": 0.33
+          }
+        ],
+        "worker_seconds": 0.33
+      },
+      "counts": {
+        "executed": 2,
+        "failed": 0,
+        "infrastructure_error": 0,
+        "not-selected": 0,
+        "reused": 0,
+        "selected": 2,
+        "unsupported": 0
+      },
+      "elapsed_seconds": 1.48,
+      "execution": {
+        "mode": "batch",
+        "profile": "batch-available-v1",
+        "workers": 2
+      },
+      "grouping_complete": true,
+      "groups": [
+        {
+          "attempt_seconds": 0.36,
+          "attempts": 1,
+          "cache_eligible": true,
+          "case_ids": [
+            "6a5a47c65d5a28557b3f8c7ef2eec3d4a81b05caec39ece9b039e7b7eaa8dbd1"
+          ],
+          "collection_skips": [],
+          "complete": true,
+          "failed": 0,
+          "failures": [],
+          "files": [
+            "tests/test_prices.py"
+          ],
+          "group_id": "08527a0f31f0f6c2ccec61814790aed09a76e5070c8b242a430bd4e9cff20865",
+          "not_run": 0,
+          "outcome": "executed",
+          "passed": 1,
+          "profile": "batch-available-v1",
+          "route": "scoped",
+          "skipped": 0,
+          "stop_reason": null,
+          "suite": "default",
+          "timing_complete": true,
+          "unresolved": 0,
+          "worker_seconds": 0.36
+        },
+        {
+          "attempt_seconds": 0.36,
+          "attempts": 1,
+          "cache_eligible": true,
+          "case_ids": [
+            "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb"
+          ],
+          "collection_skips": [],
+          "complete": true,
+          "failed": 0,
+          "failures": [],
+          "files": [
+            "tests/test_prices.py"
+          ],
+          "group_id": "85300a61a6c4df9628dcb9d412960b4573b269473ac44e1201963ec255eb2e73",
+          "not_run": 0,
+          "outcome": "executed",
+          "passed": 0,
+          "profile": "batch-available-v1",
+          "route": "scoped",
+          "skipped": 1,
+          "stop_reason": null,
+          "suite": "default",
+          "timing_complete": true,
+          "unresolved": 0,
+          "worker_seconds": 0.36
+        }
+      ],
+      "inventory_complete": true,
+      "inventory_digest": "e34def9f8faadcc348b5f26e6d4a83933fb456b2dcbe9936a5452eabc8ade3bc",
+      "kind": "run",
+      "route_counts": {
+        "ordinary": {
+          "executed": 0,
+          "failed": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "reused": 0,
+          "selected": 0,
+          "unsupported": 0
+        },
+        "scoped": {
+          "executed": 2,
+          "failed": 0,
+          "infrastructure_error": 0,
+          "not-selected": 0,
+          "reused": 0,
+          "selected": 2,
+          "unsupported": 0
+        }
+      },
+      "sandbox": {
+        "backend": "bubblewrap",
+        "identity": "05b7e237ccdc9daee8ec492e79dcb3a7ee2c2b84998b6e30cd1070128a5c1429",
+        "policy": "bubblewrap-view-v2",
+        "required": true
+      },
+      "schema": 5,
+      "setup_seconds": 0.07,
+      "status": "passed",
+      "suites": [
+        "default"
+      ],
+      "units": [
+        {
+          "attempts": 1,
+          "case_id": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
+          "collected": 1,
+          "complete": true,
+          "failed": 0,
+          "failures": [],
+          "file": "tests/test_prices.py",
+          "group_id": "85300a61a6c4df9628dcb9d412960b4573b269473ac44e1201963ec255eb2e73",
+          "name": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
+          "outcome": "executed",
+          "passed": 0,
+          "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "skipped",
+              "phase": "call",
+              "skip_reason": {
+                "kind": "skip",
+                "profile": "pytest-reason-sha256-v1",
+                "sha256": "2f0ee7f1fc690b5f7edd118cbf8ccde7030420743324ee687de1fd9e92b8aa8b"
+              }
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
+          "result_status": "skipped",
+          "route": "scoped",
+          "selected": true,
+          "skipped": 1,
+          "suite": "default",
+          "worker_seconds": null
+        },
+        {
+          "attempts": 1,
+          "case_id": "6a5a47c65d5a28557b3f8c7ef2eec3d4a81b05caec39ece9b039e7b7eaa8dbd1",
+          "collected": 1,
+          "complete": true,
+          "failed": 0,
+          "failures": [],
+          "file": "tests/test_prices.py",
+          "group_id": "08527a0f31f0f6c2ccec61814790aed09a76e5070c8b242a430bd4e9cff20865",
+          "name": "6a5a47c65d5a28557b3f8c7ef2eec3d4a81b05caec39ece9b039e7b7eaa8dbd1",
+          "outcome": "executed",
+          "passed": 1,
+          "reason": "",
+          "reports": [
+            {
+              "outcome": "passed",
+              "phase": "setup",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "call",
+              "skip_reason": null
+            },
+            {
+              "outcome": "passed",
+              "phase": "teardown",
+              "skip_reason": null
+            }
+          ],
+          "result_status": "passed",
+          "route": "scoped",
+          "selected": true,
+          "skipped": 0,
+          "suite": "default",
+          "worker_seconds": null
+        }
+      ],
+      "fixture_guard": {
+        "profile": "available-v1",
+        "state": "admitted",
+        "conditions": [
+          {
+            "case_id": "5bd87af06635d07feec28a8fea5a809b0cad410741833f7bb740f8e129e90feb",
+            "group_id": "85300a61a6c4df9628dcb9d412960b4573b269473ac44e1201963ec255eb2e73",
+            "matched": true
+          }
+        ]
+      }
+    },
+    "guarded_bounded_late_refusal": {
+      "schema": 5,
+      "kind": "refusal",
+      "status": "declaration_error",
+      "inventory_complete": true,
+      "inventory_digest": "e34def9f8faadcc348b5f26e6d4a83933fb456b2dcbe9936a5452eabc8ade3bc",
+      "error": "declaration validation failed after a session started",
+      "fixture_guard": {
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": []
+      },
+      "accounting": {
+        "version": 2,
+        "state": "unavailable",
+        "reason": "bounds"
+      }
     }
   }
 }

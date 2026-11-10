@@ -17,7 +17,7 @@ from _pytest.mark.structures import ParameterSet
 
 MAX_INVENTORY = 67_108_864
 REQUEST_PATH = "/telescope/request.json"
-SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env"})
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
 PROJECT_ROOT = Path("/project")
 
 
@@ -795,6 +795,7 @@ def main(request=None, *, ordinary=False):
     common = {
         "nonce": request["nonce"],
         "exit_code": exit_code,
+        "declaration_error": declaration_error,
         "leaked_descendants": bool(leaked),
         "worker_seconds": time.monotonic() - started,
         "failures": failures,
@@ -818,7 +819,7 @@ def main(request=None, *, ordinary=False):
         ]
         result = {
             **common,
-            "protocol": 8,
+            "protocol": 11,
             "kind": "collection",
             "items": items,
             "complete": observer.checkpoint
@@ -830,7 +831,7 @@ def main(request=None, *, ordinary=False):
     else:
         result = {
             **common,
-            "protocol": 5,
+            "protocol": 9,
             "collected": len(selected_ids),
             "case_ids": selected_ids,
             "case_results": [member(case) for case in selected_ids],
@@ -846,7 +847,7 @@ def main(request=None, *, ordinary=False):
     if mode == "batch":
         requested = request["case_ids"]
         result.update(
-            protocol=6,
+            protocol=10,
             group_id=request["group_id"],
             case_ids=requested,
             collected=len(requested),
@@ -858,10 +859,9 @@ def main(request=None, *, ordinary=False):
             item.nodeid: order for order, item in enumerate(observer.actual_selection or ())
         }
         result.update(
-            protocol=3,
+            protocol=4,
             kind="ordinary",
             dispatch_started=observer.dispatch_started,
-            declaration_error=declaration_error,
             inventory_complete=observer.checkpoint
             and not declaration_error
             and not collection_failed,

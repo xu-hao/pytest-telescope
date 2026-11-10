@@ -113,6 +113,17 @@ print(json.dumps({
         for dist in metadata.distributions()
     ),
     "references": references(sys.argv[1]),
+    "startup": {
+        "prefix": sys.prefix, "exec_prefix": sys.exec_prefix,
+        "base_prefix": sys.base_prefix, "base_exec_prefix": sys.base_exec_prefix,
+        "base_executable": getattr(sys, "_base_executable", sys.executable),
+        "stdlib": sysconfig.get_path("stdlib"),
+        "platstdlib": sysconfig.get_path("platstdlib"),
+        "purelib": sysconfig.get_path("purelib"),
+        "platlib": sysconfig.get_path("platlib"),
+        "platlibdir": sys.platlibdir,
+        "sites": site.getsitepackages(),
+    },
 }, sort_keys=True))
 """
 
@@ -157,7 +168,7 @@ def _terminate(process):
             stream.close()
 
 
-def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None):
+def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None, on_start=None):
     """Run one child with bounded merged output; never retain more than the limit.
 
     A timeout of None sets no deadline: the caller's own job bounds that session.
@@ -176,6 +187,8 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
             env=env,
             cwd=cwd,
         )
+        if on_start is not None:
+            on_start()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
@@ -278,6 +291,13 @@ def recover(root):
             except BlockingIOError:
                 continue
             if directory.exists():
+                # Restore only abandoned captures, under their owner lock. Normal
+                # invocation exit must not retry a terminal Capture cleanup failure.
+                tools = directory / "tools"
+                if os.path.lexists(tools):
+                    from .tool_capture import _remove as remove_tools
+
+                    remove_tools(tools)
                 _remove(directory)
         finally:
             os.close(descriptor)
@@ -337,7 +357,15 @@ def _probe(executable, project):
         valid = (
             type(data) is dict
             and set(data)
-            == {"executable", "prefixes", "path", "identity", "distributions", "references"}
+            == {
+                "executable",
+                "prefixes",
+                "path",
+                "identity",
+                "distributions",
+                "references",
+                "startup",
+            }
             and type(data["executable"]) is str
             and all(
                 type(data[key]) is list and all(type(entry) is str for entry in data[key])
@@ -350,6 +378,7 @@ def _probe(executable, project):
                 for row in data["distributions"]
             )
             and type(data["references"]) is list
+            and type(data["startup"]) is dict
             and all(
                 type(row) is list and len(row) == 3 and all(type(value) is str for value in row)
                 for row in data["references"]
@@ -455,13 +484,21 @@ def _project_paths(description, project):
     return sorted(found)
 
 
-def _base_arguments(box, project=None):
+def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False):
     """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
-        arguments += ["--ro-bind", directory, directory]
+        if directory != "/etc" or not native:
+            arguments += ["--ro-bind", directory, directory]
+    prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
-        if os.path.islink(link):
+        if link in prefixes:
+            row = prefixes[link]
+            if row["kind"] == "symlink":
+                arguments += ["--symlink", row["target"], link]
+            elif row["kind"] == "directory":
+                arguments += ["--ro-bind", link, link]
+        elif os.path.islink(link):
             arguments += ["--symlink", os.readlink(link), link]
         elif os.path.isdir(link):
             arguments += ["--ro-bind", link, link]
@@ -646,7 +683,9 @@ def execute(
     suite_cwd=".",
     suite="default",
     metadata_directory=None,
+    tool_view=None,
     cancellation=None,
+    on_session_start=None,
     selection_disabled=False,
     allow_unknown_selectors=False,
 ):
@@ -705,9 +744,67 @@ def execute(
             stream.write(encoded)
     request_path.chmod(0o444)
     project = Path(root).resolve()
-    argv = [*_base_arguments(box, project), *_project_arguments(box, view, project)]
+    prefixes = ()
+    native = False
+    if tool_view is not None:
+        from .tool_capture import ToolView
+
+        if (
+            type(tool_view) is not ToolView
+            or tool_view.directory.parent.parent != scratch
+            or tool_view.directory.name != "tools"
+        ):
+            raise InfrastructureError("tools require an owned frozen invocation")
+        if tool_view.names and (
+            _inside(project, Path("/tools"))
+            or _inside(Path("/tools"), project)
+            or any(
+                _inside(Path(destination), Path("/tools"))
+                or _inside(Path("/tools"), Path(destination))
+                for _, destination in box.binds
+            )
+        ):
+            raise UnsupportedCapability(
+                "tool:layout", "frozen-tool namespace overlaps the invoking environment or project"
+            )
+        for source, destination in tool_view.bindings:
+            if not source.is_relative_to(tool_view.directory) or source.is_symlink():
+                raise InfrastructureError("tool binding is outside its owned frozen material")
+        prefixes = tool_view.prefixes
+        native = tool_view.native
+        if type(native) is not bool:
+            raise InfrastructureError("tool view has an invalid native profile")
+        if native:
+            from .tool_startup import environment as startup_environment
+            from .tool_startup import signature
+
+            if signature(box) != tool_view.startup_identity:
+                raise InfrastructureError("native startup environment changed after projection")
+            destinations = {destination: source for source, destination in tool_view.bindings}
+            if "/etc" not in tool_view.closed or any(
+                name not in destinations for name in tool_view.closed
+            ):
+                raise InfrastructureError("native view lacks its closed startup projections")
+            for destination in tool_view.closed:
+                if not destinations[destination].is_dir():
+                    raise InfrastructureError("native closed projection is not an owned directory")
+            box = replace(box, binds=startup_environment(box, tool_view.closed))
+        from .tool_context import validate_environment
+
+        validate_environment(environment, tool_view.names)
+    argv = [
+        *_base_arguments(box, project, frozen_prefixes=prefixes, native=native),
+        *_project_arguments(box, view, project),
+    ]
+    if tool_view is not None:
+        for source, destination in tool_view.bindings:
+            argv += ["--ro-bind", str(source), destination]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
+    controlled = box
+    if tool_view is not None and tool_view.command_path is not None:
+        controlled = replace(box, path=tool_view.command_path + ":" + box.path)
+    startup = [box.executable, "-I", "-B", WORKER_PATH]
     argv += [
         "--ro-bind",
         str(WORKER),
@@ -719,12 +816,9 @@ def execute(
         "/",
         "--chdir",
         "/project/" + suite_cwd,
-        *_environment(box, {**environment, "TELESCOPE_REQUEST": REQUEST}),
+        *_environment(controlled, {**environment, "TELESCOPE_REQUEST": REQUEST}),
         "--",
-        box.executable,
-        "-I",
-        "-B",
-        WORKER_PATH,
+        *startup,
     ]
     code, output = capture(
         argv,
@@ -732,6 +826,7 @@ def execute(
         env=_host_environment(),
         limit=MAX_COLLECTION if request["mode"] in {"collection", "batch"} else MAX_OUTPUT,
         cancellation=cancellation,
+        on_start=on_session_start,
     )
     try:
         unsupported = [
@@ -755,6 +850,8 @@ def execute(
         ]
         if len(reports) != 1:
             message = _bwrap_message(output)
+            if tool_view is not None and tool_view.names and message:
+                message = "the frozen tool filesystem view could not start"
             raise InfrastructureError(
                 "sandbox startup failed: " + message
                 if message
