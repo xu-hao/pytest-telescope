@@ -12,6 +12,7 @@ from gate import Stages, candidate_binding, source_identity, write_json
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", required=True, type=Path)
+    parser.add_argument("--functional-profile", choices=("core", "all"), default="all")
     args = parser.parse_args()
     if sys.prefix == sys.base_prefix:
         parser.error("activate a dedicated virtual environment before running checks")
@@ -90,8 +91,21 @@ def main() -> None:
                 binding_hash,
                 "--scratch",
                 str(scratch),
+                "--functional-profile",
+                args.functional_profile,
             ]
-            stages.run("functional", "-I", "-B", helper, "tests", *arguments, timeout=900, env=env)
+            stages.run(
+                "functional",
+                "-I",
+                "-B",
+                helper,
+                "tests",
+                *arguments,
+                "--membership",
+                str(output / "functional-membership.json"),
+                timeout=900,
+                env=env,
+            )
             stages.run("harness", "-I", "-B", helper, "harness", *arguments, env=env)
         if source_identity(root) != source:
             raise RuntimeError("candidate changed during qualification")
@@ -101,7 +115,13 @@ def main() -> None:
     finally:
         write_json(
             output / "gate-result.json",
-            {"source": source, "error": error, "status": "passed" if error is None else "failed"},
+            {
+                "source": source,
+                "error": error,
+                "status": "passed" if error is None else "failed",
+                "functional_profile": args.functional_profile,
+                "verdict_kind": "full" if args.functional_profile == "all" else "compatibility",
+            },
         )
 
 

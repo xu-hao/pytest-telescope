@@ -14,7 +14,12 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.11", "3.13"]
-        pytest: ["pytest==8.3.5", "pytest>=9,<10"]
+        pytest: ["pytest==8.3.5", "pytest==9.2.0"]
+        include:
+          - pytest: "pytest==8.3.5"
+            functional_profile: core
+          - pytest: "pytest==9.2.0"
+            functional_profile: all
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -31,4 +36,4 @@ jobs:
       - name: Check installed distribution and strict Sphinx documentation
         env:
           TMPDIR: ${{ runner.temp }}
-        run: .venv/bin/python scripts/check.py --artifacts "$RUNNER_TEMP/telescope-check"
+        run: .venv/bin/python scripts/check.py --functional-profile '${{ matrix.functional_profile }}' --artifacts "$RUNNER_TEMP/telescope-check"
