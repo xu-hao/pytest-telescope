@@ -6,7 +6,13 @@ import stat
 
 import pytest
 from frozen_tool_fixtures import ToolProject, manifest
-from frozen_tool_permission_fixture import errors, identity, make_capture, record_material, restore_owned
+from frozen_tool_permission_fixture import (
+    errors,
+    identity,
+    make_capture,
+    record_material,
+    restore_owned,
+)
 
 
 def test_empty_mode_zero_files_root_capture_verify_and_cleanup(tmp_path):

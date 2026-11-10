@@ -9,7 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from frozen_tool_owned_handles_fixture import DirectoryReads, inode, mode, moved, owned_capture, remember
+from frozen_tool_owned_handles_fixture import (
+    DirectoryReads,
+    inode,
+    mode,
+    moved,
+    owned_capture,
+    remember,
+)
 from frozen_tool_permission_fixture import errors, identity
 
 from pytest_telescope import sandbox

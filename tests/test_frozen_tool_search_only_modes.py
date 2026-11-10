@@ -8,7 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from frozen_tool_permission_fixture import PermissionFixture, errors, identity, record_material, restore_owned
+from frozen_tool_permission_fixture import (
+    PermissionFixture,
+    errors,
+    identity,
+    record_material,
+    restore_owned,
+)
 
 import pytest_telescope
 from pytest_telescope import controller, sandbox
