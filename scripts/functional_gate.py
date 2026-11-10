@@ -1,63 +1,15 @@
 """Guard the installed candidate before functional tests or portable harness checks."""
 
 import argparse
-import copy
-import hashlib
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 # -I excludes both the checkout and script directory. Admit only the trusted gate
 # helpers here; candidate imports must still resolve to the verified installed wheel.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gate import read_json, verify_candidate, write_json  # noqa: E402
-
-
-def admission(path, expected, directory):
-    receipt = read_json(path, expected)
-    if (
-        type(receipt) is not dict
-        or set(receipt) != {"schema", "profiles"}
-        or type(receipt["schema"]) is not int
-        or receipt["schema"] != 1
-        or type(receipt["profiles"]) is not dict
-        or set(receipt["profiles"]) != {"node", "installed"}
-    ):
-        raise ValueError("functional readiness requires exactly node and installed profiles")
-    expected_documents = {
-        "node": {"worker", "frontend"},
-        "installed": {"worker", "unselected-baseline"},
-    }
-    for name, profile in receipt["profiles"].items():
-        if type(profile) is not dict or set(profile) != {"identity", "documents"}:
-            raise ValueError("invalid functional profile")
-        documents = copy.deepcopy(profile["documents"])
-        if type(documents) is not dict or set(documents) != expected_documents[name]:
-            raise ValueError("functional profile has no declarations")
-        # Reuse the guarded candidate's strict manifest parser. This only reads
-        # the owned JSON copies; it does not capture source inputs or run a tool.
-        from pytest_telescope.tool_context import FORMAT, parse
-
-        with tempfile.TemporaryDirectory(prefix="receipt-validation-", dir=directory) as owned:
-            project = Path(owned)
-            for index, document in enumerate(documents.values()):
-                filename = f"declaration-{index}.json"
-                write_json(project / filename, document)
-                parsed = parse(project, "gate", {"format": FORMAT, "manifest": filename})
-                if not parsed.document["roots"]:
-                    raise ValueError("functional profile has an empty declaration")
-        for document in documents.values():
-            for root in document["roots"]:
-                if root["id"] == "driver":
-                    root["source"] = "<owned-driver>"
-        actual = hashlib.sha256(
-            json.dumps(documents, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        if actual != profile["identity"]:
-            raise ValueError("functional prerequisite declaration identity disagrees")
-    return receipt
+from gate import read_json, verify_candidate  # noqa: E402
 
 
 def main():
