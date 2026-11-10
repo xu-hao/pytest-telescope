@@ -15,7 +15,12 @@ def project(tmp_path):
 
 
 def invoke(project, *args, extra_env=None):
-    env = {"PATH": os.defpath, "HOME": str(project), "TMPDIR": str(project)}
+    env = {
+        "PATH": os.defpath,
+        "HOME": str(project),
+        "TMPDIR": str(project),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
     env.update(extra_env or {})
     return subprocess.run(
         [sys.executable, "-I", "-B", "-m", "pytest", "-q", *args],
