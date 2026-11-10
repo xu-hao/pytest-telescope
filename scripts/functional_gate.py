@@ -17,7 +17,7 @@ def selection_plugin(pytest, profile, membership, version):
 
     class Selection:
         def __init__(self):
-            self.own_deselection = False
+            self.pending_deselection = None
             self.external_deselection = False
             self.collection_failed = False
             self.selected = None
@@ -25,9 +25,19 @@ def selection_plugin(pytest, profile, membership, version):
             self.digest = None
             self.record = None
 
+        @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_deselected(self, items):
-            if items and not self.own_deselection:
+            expected = self.pending_deselection
+            self.pending_deselection = None
+            owned = (
+                expected is not None
+                and items is expected[0]
+                and len(items) == len(expected[1])
+                and all(item is original for item, original in zip(items, expected[1]))
+            )
+            if items and not owned:
                 self.external_deselection = True
+            yield
 
         def pytest_collectreport(self, report):
             if report.failed:
@@ -46,6 +56,7 @@ def selection_plugin(pytest, profile, membership, version):
                 or set(current) != set(identities)
             ):
                 raise pytest.UsageError("functional profile refuses external collection changes")
+            self.selected = current
             if profile == "core":
                 removed = [
                     item for item in items if item.get_closest_marker("requires_fixture_guard")
@@ -53,12 +64,12 @@ def selection_plugin(pytest, profile, membership, version):
                 self.deselected = [item.nodeid for item in removed]
                 excluded = set(self.deselected)
                 items[:] = [item for item in items if item.nodeid not in excluded]
-                self.own_deselection = True
+                self.selected = [item.nodeid for item in items]
+                self.pending_deselection = (removed, tuple(removed))
                 try:
                     config.hook.pytest_deselected(items=removed)
                 finally:
-                    self.own_deselection = False
-            self.selected = [item.nodeid for item in items]
+                    self.pending_deselection = None
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_runtestloop(self, session):
