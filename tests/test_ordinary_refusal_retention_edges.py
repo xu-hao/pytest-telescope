@@ -27,7 +27,7 @@ def actual_frames(observed, count):
     assert len({frame["context_id"] for frame in observed["frames"]}) == count
     for frame in observed["frames"]:
         # observe_ordinary already checked each real frame against its original request.
-        assert frame["protocol"] == 2 and type(frame["declaration_error"]) is bool
+        assert frame["protocol"] == 4 and type(frame["declaration_error"]) is bool
         assert frame["worker_seconds"] >= 0
     return observed["frames"]
 

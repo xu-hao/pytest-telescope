@@ -85,7 +85,7 @@ def actual_frame(processes, frames, returned):
     assert len(processes) == len(frames) == len(returned) == 1
     assert processes[0].poll() is not None
     (frame,) = frames
-    assert returned == [frame] and frame["protocol"] == 2
+    assert returned == [frame] and frame["protocol"] == 4
     return frame
 
 

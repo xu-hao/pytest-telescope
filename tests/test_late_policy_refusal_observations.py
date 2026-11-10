@@ -95,7 +95,7 @@ def prerequisites(observed, counter):
     frame = observed["frames"][0]
     assert observed["returned"][0] == frame
     assert type(frame["declaration_error"]) is bool and frame["declaration_error"] is True
-    assert frame["protocol"] == 2 and frame["exit_code"] == 4
+    assert frame["protocol"] == 4 and frame["exit_code"] == 4
     assert frame["complete"] is False and frame["inventory_complete"] is False
     assert frame["dispatch_started"] is True and frame["worker_seconds"] >= 0
     assert counter.read_text() == "x"
@@ -138,8 +138,8 @@ def retained(report, frame, *, ordinary_route, empty_ordinary=None):
         group = by_context[frame["context_id"]]
         empty = by_context[empty_ordinary["context_id"]]
         assert group["route"] == "scoped"
-        assert frame["protocol"] in (8, 9)
-        assert group["profile"] == ("case-v2" if frame["protocol"] == 8 else "batch-v2")
+        assert frame["protocol"] in (9, 10)
+        assert group["profile"] == ("case-v2" if frame["protocol"] == 9 else "batch-v2")
         assert empty["route"] == "ordinary" and empty["profile"] == "ordinary-v2"
         assert empty["case_ids"] == empty_ordinary["case_ids"] == []
         assert empty["suite"] == group["suite"] == unit["suite"]
@@ -318,11 +318,11 @@ def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkey
     assert len(returned) == len(started) == 1 and not counter.exists()
     frame = returned[0]
     assert frame["declaration_error"] is True and frame["exit_code"] == 4 and not frame["complete"]
-    assert frame["protocol"] == (8 if mode == "case" else 9)
+    assert frame["protocol"] == (9 if mode == "case" else 10)
     member(frame)
     (empty_ordinary,) = empty_sessions
     assert len(ordinary_processes) == 1 and ordinary_processes[0].poll() is not None
-    assert empty_ordinary["protocol"] == 2 and empty_ordinary["exit_code"] == 5
+    assert empty_ordinary["protocol"] == 4 and empty_ordinary["exit_code"] == 5
     assert empty_ordinary["declaration_error"] is False
     assert empty_ordinary["complete"] is True and empty_ordinary["inventory_complete"] is True
     assert empty_ordinary["dispatch_started"] is True

@@ -74,7 +74,7 @@ def test_actual_worker_response_mismatch_is_bounded_and_not_cached(
     )
     assert not any(group["cache_eligible"] for group in report["groups"])
     for path in (tmp_path / ".pytest-telescope/cache").glob("*.json"):
-        assert json.loads(path.read_text())["schema"] != 7
+        assert json.loads(path.read_text())["schema"] != 8
 
 
 def test_guard_refuses_mixed_ordinary_boundary_before_ordinary_session(tmp_path, monkeypatch):

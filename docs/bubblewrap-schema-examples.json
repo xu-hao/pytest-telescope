@@ -161,7 +161,7 @@
         }
       ],
       "inventory_complete": true,
-      "inventory_digest": "805f42e1adbbaf85a6ed3bd3637d489af1b7ae7e0827a29347a54a003b98e826",
+      "inventory_digest": "ac0cdde2266eae53834585d11fce80063103b2e544e2f0a5564cc935095219df",
       "kind": "run",
       "route_counts": {
         "ordinary": {
@@ -459,7 +459,7 @@
         }
       ],
       "inventory_complete": true,
-      "inventory_digest": "805f42e1adbbaf85a6ed3bd3637d489af1b7ae7e0827a29347a54a003b98e826",
+      "inventory_digest": "ac0cdde2266eae53834585d11fce80063103b2e544e2f0a5564cc935095219df",
       "kind": "run",
       "route_counts": {
         "ordinary": {
@@ -700,7 +700,7 @@
         }
       ],
       "inventory_complete": true,
-      "inventory_digest": "17dac06a213a537a57ccdafe65f9816ebcee4ecb56a87a45d3be58168fcf823e",
+      "inventory_digest": "f3f20a1ac26c607bfa5894e4ac5daadf830790c98e69f04944c39409b5e273f0",
       "kind": "run",
       "route_counts": {
         "ordinary": {
@@ -881,7 +881,7 @@
         }
       ],
       "inventory_complete": true,
-      "inventory_digest": "e34def9f8faadcc348b5f26e6d4a83933fb456b2dcbe9936a5452eabc8ade3bc",
+      "inventory_digest": "899e0bebdb6ce2ea5e04d4ff3bc8d575315f5ce05dda29e880f7af18f561b3ff",
       "kind": "run",
       "route_counts": {
         "ordinary": {
@@ -1012,7 +1012,7 @@
       "kind": "refusal",
       "status": "declaration_error",
       "inventory_complete": true,
-      "inventory_digest": "e34def9f8faadcc348b5f26e6d4a83933fb456b2dcbe9936a5452eabc8ade3bc",
+      "inventory_digest": "899e0bebdb6ce2ea5e04d4ff3bc8d575315f5ce05dda29e880f7af18f561b3ff",
       "error": "declaration validation failed after a session started",
       "fixture_guard": {
         "profile": "available-v1",

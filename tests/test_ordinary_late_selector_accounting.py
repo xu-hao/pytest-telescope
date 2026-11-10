@@ -59,7 +59,7 @@ def assert_actual_pass(root, starts, sessions, frames):
     assert starts == ["real-child-started"] and len(sessions) == len(frames) == 1
     code, frame = frames[0]
     result = sessions[0]
-    assert code == 0 and frame == result and result["protocol"] == 2
+    assert code == 0 and frame == result and result["protocol"] == 4
     assert result["declaration_error"] is False and result["inventory_complete"]
     assert result["passed"] == 1 and result["complete"]
     (member,) = result["case_results"]

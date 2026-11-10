@@ -79,14 +79,16 @@ def test_protocol_environment_cannot_be_declared(tmp_path):
 
 def test_controller_import_without_fcntl_is_clean():
     code = "import sys; sys.modules['fcntl'] = None; import pytest_telescope.controller"
-    completed = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, timeout=10)
+    completed = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code], capture_output=True, timeout=10
+    )
     assert completed.returncode == 0, completed.stderr
 
 
 def test_fifo_manifest_is_rejected_without_blocking(tmp_path):
     os.mkfifo(tmp_path / "pyproject.toml")
     completed = subprocess.run(
-        [sys.executable, "-I", "-m", "pytest_telescope", "plan"],
+        [sys.executable, "-I", "-B", "-m", "pytest_telescope", "plan"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -232,11 +234,11 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
 def test_summary_output_budget_rejects_before_partial_json(monkeypatch, capsys):
     from pytest_telescope import controller, model
 
-    monkeypatch.setattr(model, "MAX_OUTPUT_BYTES", 128)
+    monkeypatch.setattr(model, "MAX_OUTPUT_BYTES", 1024)
     monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": []})
     assert controller.main(["run"]) == 0
     assert json.loads(capsys.readouterr().out) == {"units": []}
-    monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": ["a" * 100] * 3})
+    monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": ["a" * 1024] * 3})
     assert controller.main(["run"]) == 3
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "infrastructure_error"

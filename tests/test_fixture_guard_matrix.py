@@ -171,7 +171,7 @@ def test_item(): pass
     assert cold["status"] == "passed" and cold["counts"]["executed"] == 1
     assert controller.run(tmp_path, fixture_guard="available-v1")["counts"]["reused"] == 1
     paths = list((tmp_path / ".pytest-telescope/cache").glob("*.json"))
-    guarded = [path for path in paths if json.loads(path.read_text())["schema"] == 7]
+    guarded = [path for path in paths if json.loads(path.read_text())["schema"] == 8]
     assert len(guarded) == 1
     record = json.loads(guarded[0].read_text())
     record["result"]["graph_id"] = "0" * 64

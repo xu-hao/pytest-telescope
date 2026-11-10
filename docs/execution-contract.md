@@ -525,8 +525,8 @@ reusable success.
 
 ## Required fixture conservation (unreleased)
 
-The optional [fixture guard](batching.md#required-fixture-guard-unreleased) is a required
-future contract, not a shipped or qualified capability. It validates all available user
+The optional [fixture guard](batching.md#required-fixture-guard-unreleased) is implemented
+in the unreleased candidate; published 0.1.0a6 does not provide it. It validates all available user
 fixture definitions and actual package-collector xunit lifetimes in each exact group view
 before selected bodies and conservatively refuses shared lifetimes split across groups
 without broadening declared inputs. Mutable
