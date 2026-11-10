@@ -250,6 +250,11 @@ class RefusalAccounting:
         record(metadata, {"schema", "kind", "inventory_complete", "inventory_digest", "status", "error"} | ({"capability"} if metadata["status"] == "unsupported" else set()) | ({"fixture_guard"} if guarded else set()))
         require(type(metadata["schema"]) is int and metadata["schema"] == (5 if guarded else 4) and metadata["kind"] == "refusal")
         require(metadata["status"] in ("unsupported", "declaration_error") and _text(metadata["error"]))
+        require(type(metadata["inventory_complete"]) is bool)
+        if metadata["inventory_complete"]:
+            require(complete and metadata["inventory_digest"] == identity and _digest(metadata["inventory_digest"]))
+        else:
+            require(metadata["inventory_digest"] is None)
         if metadata["status"] == "unsupported":
             require(_text(metadata["capability"]))
         if guarded:
