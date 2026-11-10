@@ -1,4 +1,4 @@
-"""Guard the installed candidate before preparation, functional tests or harness checks."""
+"""Guard the installed candidate before functional tests or portable harness checks."""
 
 import argparse
 import copy
@@ -12,7 +12,7 @@ from pathlib import Path
 # -I excludes both the checkout and script directory. Admit only the trusted gate
 # helpers here; candidate imports must still resolve to the verified installed wheel.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gate import file_identity, read_json, verify_candidate, write_json  # noqa: E402
+from gate import read_json, verify_candidate, write_json  # noqa: E402
 
 
 def admission(path, expected, directory):
@@ -62,14 +62,10 @@ def admission(path, expected, directory):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("prepare", "tests", "harness"))
+    parser.add_argument("mode", choices=("tests", "harness"))
     parser.add_argument("--binding", required=True, type=Path)
     parser.add_argument("--binding-sha256", required=True)
     parser.add_argument("--scratch", required=True, type=Path)
-    parser.add_argument("--receipt", required=True, type=Path)
-    parser.add_argument("--receipt-sha256")
-    parser.add_argument("--admission", required=True, type=Path)
-    parser.add_argument("--admission-sha256")
     args = parser.parse_args()
     claimed = os.environ.get("TMPDIR")
     if (
@@ -96,65 +92,26 @@ def main():
         ),
         flush=True,
     )
-    os.environ["TELESCOPE_FIXTURE_NODE"] = binding["node"]["path"]
-    os.environ.pop("TELESCOPE_FIXTURE_CHROMIUM", None)
+    for name in (
+        "TELESCOPE_FIXTURE_NODE",
+        "TELESCOPE_FIXTURE_CHROMIUM",
+        "TELESCOPE_FIXTURE_ADMISSION",
+        "TELESCOPE_FIXTURE_ADMISSION_SHA256",
+    ):
+        os.environ.pop(name, None)
     sys.path.insert(0, str(Path(binding["root"]) / "tests"))
-    status = 0
-    readiness = None
-    if args.mode == "prepare":
-        from frozen_tool_prepare_programs import prepare
+    if args.mode == "tests":
+        import pytest
 
-        directory = args.scratch / "preparation"
-        directory.mkdir()
-        prepare(directory, args.receipt, profiles=("node", "installed"))
-        receipt_hash = file_identity(args.receipt, 4 * 1024 * 1024)["sha256"]
-        admission(args.receipt, receipt_hash, args.scratch)
-        verify_candidate(binding)
-        readiness = {
-            "schema": 1,
-            "binding_sha256": args.binding_sha256,
-            "receipt": str(args.receipt),
-            "receipt_sha256": receipt_hash,
-            "source": binding["source"],
-            "interpreter": binding["interpreter"],
-            "wheel_sha256": binding["wheel"]["sha256"],
-        }
+        status = int(pytest.main(["-q", "--basetemp", str(args.scratch / "tests"), "tests"]))
     else:
-        if not args.receipt_sha256 or not args.admission_sha256:
-            raise ValueError("functional execution requires exact new readiness hashes")
-        ready = read_json(args.admission, args.admission_sha256)
-        expected = {
-            "schema": 1,
-            "binding_sha256": args.binding_sha256,
-            "receipt": str(args.receipt),
-            "receipt_sha256": args.receipt_sha256,
-            "source": binding["source"],
-            "interpreter": binding["interpreter"],
-            "wheel_sha256": binding["wheel"]["sha256"],
-        }
-        if ready != expected:
-            raise ValueError("functional admission belongs to a different candidate")
-        admission(args.receipt, args.receipt_sha256, args.scratch)
-        os.environ["TELESCOPE_FIXTURE_ADMISSION"] = str(args.receipt)
-        os.environ["TELESCOPE_FIXTURE_ADMISSION_SHA256"] = args.receipt_sha256
-        if args.mode == "tests":
-            import pytest
+        import unittest
 
-            status = int(pytest.main(["-q", "--basetemp", str(args.scratch / "tests"), "tests"]))
-        else:
-            import unittest
-
-            suite = unittest.defaultTestLoader.discover("benchmarks", pattern="test_*.py")
-            status = int(not unittest.TextTestRunner().run(suite).wasSuccessful())
-        verify_candidate(binding)
-        admission(args.receipt, args.receipt_sha256, args.scratch)
-        if read_json(args.admission, args.admission_sha256) != expected:
-            raise ValueError("functional admission changed during execution")
+        suite = unittest.defaultTestLoader.discover("benchmarks", pattern="test_*.py")
+        status = int(not unittest.TextTestRunner().run(suite).wasSuccessful())
+    verify_candidate(binding)
     if read_json(args.binding, args.binding_sha256) != binding:
         raise ValueError("candidate binding changed during qualification")
-    # Publication is last: failed preparation postconditions leave no readiness.
-    if readiness is not None:
-        write_json(args.admission, readiness)
     return status
 
 

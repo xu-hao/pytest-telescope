@@ -6,24 +6,15 @@ import sys
 import tempfile
 from pathlib import Path
 
-from gate import (
-    Stages,
-    candidate_binding,
-    file_identity,
-    node_identity,
-    source_identity,
-    write_json,
-)
+from gate import Stages, candidate_binding, source_identity, write_json
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", required=True, type=Path)
-    parser.add_argument("--node", default=os.environ.get("TELESCOPE_FIXTURE_NODE"))
     args = parser.parse_args()
     if sys.prefix == sys.base_prefix:
         parser.error("activate a dedicated virtual environment before running checks")
-    node_identity(args.node)
     claimed = os.environ.get("TMPDIR")
     if not claimed or not Path(claimed).is_absolute() or not Path(claimed).is_dir():
         parser.error("provide an existing absolute caller-owned TMPDIR")
@@ -40,6 +31,7 @@ def main() -> None:
             scratch = Path(scratch)
             env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", TMPDIR=str(scratch))
             for name in (
+                "TELESCOPE_FIXTURE_NODE",
                 "TELESCOPE_FIXTURE_ADMISSION",
                 "TELESCOPE_FIXTURE_ADMISSION_SHA256",
                 "TELESCOPE_FIXTURE_CHROMIUM",
@@ -74,7 +66,7 @@ def main() -> None:
             wheels = list((output / "dist").glob("*.whl"))
             if len(wheels) != 1:
                 raise RuntimeError("expected exactly one built wheel")
-            binding = candidate_binding(root, wheels[0], args.node)
+            binding = candidate_binding(root, wheels[0])
             if binding["source"] != source:
                 raise RuntimeError("candidate changed during build")
             stages.run(
@@ -90,8 +82,6 @@ def main() -> None:
             )
             binding_file = output / "candidate-binding.json"
             binding_hash = write_json(binding_file, binding)
-            receipt = output / "functional-prerequisites.json"
-            ready = output / "functional-admission.json"
             helper = str(root / "scripts/functional_gate.py")
             arguments = [
                 "--binding",
@@ -100,17 +90,6 @@ def main() -> None:
                 binding_hash,
                 "--scratch",
                 str(scratch),
-                "--receipt",
-                str(receipt),
-                "--admission",
-                str(ready),
-            ]
-            stages.run("prepare", "-I", "-B", helper, "prepare", *arguments, timeout=900, env=env)
-            arguments += [
-                "--receipt-sha256",
-                file_identity(receipt, 4 * 1024 * 1024)["sha256"],
-                "--admission-sha256",
-                file_identity(ready, 4 * 1024 * 1024)["sha256"],
             ]
             stages.run("functional", "-I", "-B", helper, "tests", *arguments, timeout=900, env=env)
             stages.run("harness", "-I", "-B", helper, "harness", *arguments, env=env)

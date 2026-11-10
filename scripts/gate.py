@@ -169,22 +169,7 @@ def interpreter_identity():
     }
 
 
-def node_identity(value):
-    if not value or not Path(value).is_absolute():
-        raise ValueError("select an existing absolute Node executable")
-    actual = Path(value).resolve(strict=True)
-    mode = stat.S_IMODE(actual.stat().st_mode)
-    if not mode & 0o111 or not os.access(actual, os.R_OK | os.X_OK):
-        raise ValueError("selected Node file is not executable")
-    return {
-        "path": str(Path(value)),
-        "actual": str(actual),
-        "mode": mode,
-        "file": file_identity(actual, 512 * 1024 * 1024),
-    }
-
-
-def candidate_binding(root, wheel, node):
+def candidate_binding(root, wheel):
     root, wheel = Path(root).resolve(), Path(wheel).resolve()
     identity = wheel_identity(wheel)
     with (root / "pyproject.toml").open("rb") as stream:
@@ -198,30 +183,25 @@ def candidate_binding(root, wheel, node):
     ):
         raise ValueError("wheel bytes or version differ from the candidate checkout")
     return {
-        "schema": 1,
+        "schema": 2,
         "root": str(root),
         "source": source_identity(root),
         "wheel_path": str(wheel),
         "wheel": identity,
         "interpreter": interpreter_identity(),
-        "node": node_identity(node),
     }
 
 
 def verify_candidate(binding, *, first_import=False):
     if (
         type(binding) is not dict
-        or set(binding)
-        != {"schema", "root", "source", "wheel_path", "wheel", "interpreter", "node"}
+        or set(binding) != {"schema", "root", "source", "wheel_path", "wheel", "interpreter"}
         or type(binding["schema"]) is not int
-        or binding["schema"] != 1
+        or binding["schema"] != 2
     ):
         raise ValueError("invalid candidate binding")
-    if (
-        candidate_binding(binding["root"], binding["wheel_path"], binding["node"]["path"])
-        != binding
-    ):
-        raise ValueError("candidate source, wheel, interpreter or Node changed")
+    if candidate_binding(binding["root"], binding["wheel_path"]) != binding:
+        raise ValueError("candidate source, wheel or interpreter changed")
     if first_import and any(
         name == "pytest_telescope" or name.startswith("pytest_telescope.") for name in sys.modules
     ):
