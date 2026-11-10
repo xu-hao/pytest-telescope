@@ -4,6 +4,7 @@ import pytest
 from frozen_tool_fixtures import ToolProject, put
 
 from pytest_telescope import model
+from pytest_telescope.result import dimension_identity, owner_identity
 
 
 @pytest.mark.parametrize("parameter", ["c", "d"], ids=["three-explicit", "four-explicit"])
@@ -28,12 +29,24 @@ class TestOwned:
     monkeypatch.setattr(model, "MAX_INPUT_PATHS", 4)
     manifest = model.load(project.root)
     assert len(manifest.registry) == 4
-    # This is the real case-unit composition seam with statically discovered
-    # origins, not a fabricated claim that pytest collected/executed the case.
+    # This explicit static fixture uses the declared lineage and its sole literal
+    # alternative; it does not claim that pytest collected or executed the case.
+    owners = sorted({owner_identity(row["file"], row["owner"]) for row in manifest.registry})
+    parameter_origin = next(row for row in manifest.registry if row["kind"] == "parameter")
     item = {
         "file": "tests/test_owned.py",
         "case_id": "0" * 64,
-        "origins": [row["id"] for row in manifest.registry],
+        "origins": sorted(row["id"] for row in manifest.registry),
+        "owners": owners,
+        "parameters": [
+            {
+                "dimension": dimension_identity(
+                    parameter_origin["file"], parameter_origin["parameter"]["position"]
+                ),
+                "index": parameter_origin["parameter"]["index"],
+            }
+        ],
+        "aliases": sorted({"0" * 64, *owners}),
     }
     unit = model.case_unit(manifest, item, manifest.suites[0])
     explicit = {"data/a", "data/b", "data/c", "data/" + parameter}

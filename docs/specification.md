@@ -36,8 +36,7 @@ Project defaults alone do not make it scoped. A scoped case sees exactly the uni
 inherited declarations, defaults, containing test source and configuration, read-only, in
 a [Bubblewrap view](bubblewrap.md). Each actual parametrized item is a separate unit.
 
-Use direct `pytest.mark.telescope(...)` calls with literal lists of strings and booleans;
-the Git field takes the literal version string shown above.
+Use direct `pytest.mark.telescope(...)` calls with literal lists of strings and booleans.
 Supported locations are function/class decorators, module/class `pytestmark`, and
 `pytest.param(..., marks=...)` inside literal parametrization declarations. Do not use
 marker aliases, generated telescope markers, computed arguments, or factory functions.

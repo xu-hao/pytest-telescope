@@ -11,6 +11,7 @@ import pytest
 
 from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError, UnsupportedCapability
+from pytest_telescope.result import validate_batch
 
 
 def put(root, name, text):
@@ -248,7 +249,7 @@ def test_item(): pass
         pending.extend([error.__context__, error.__cause__])
 
 
-def test_unguarded_post_body_exit_four_reports_declaration_error(tmp_path, monkeypatch):
+def test_unguarded_post_body_exit_four_retains_incomplete_session(tmp_path, monkeypatch):
     configure(tmp_path)
     put(
         tmp_path,
@@ -263,6 +264,7 @@ def test_item():
     )
     original = sandbox.capture
     events = []
+    records = []
 
     def observe(argv, timeout, **kwargs):
         code, output = original(argv, timeout, **kwargs)
@@ -270,10 +272,30 @@ def test_item():
             request = json.loads(Path(argv[argv.index(sandbox.REQUEST) - 1]).read_text())
             if request["mode"] == "batch":
                 events.append((code, b"F3_PLAIN_BODY\n" in output))
+                frames = [
+                    json.loads(line.removeprefix(b"TELESCOPE_RESULT "))
+                    for line in output.splitlines()
+                    if line.startswith(b"TELESCOPE_RESULT ")
+                ]
+                assert len(frames) == 1
+                records.append((request, frames[0]))
         return code, output
 
     monkeypatch.setattr(sandbox, "capture", observe)
-    with pytest.raises(DeclarationError) as error:
-        controller.run(tmp_path, arguments=["-s"])
-    assert type(error.value) is DeclarationError
+    report = controller.run(tmp_path, arguments=["-s"])
     assert events == [(4, True)]
+    ((request, actual),) = records
+    assert actual["declaration_error"] is False and actual["exit_code"] == 4
+    assert not actual["complete"]
+    assert validate_batch(
+        actual,
+        nonce=request["nonce"],
+        group_id=request["group_id"],
+        case_ids=request["case_ids"],
+    )
+    assert report["schema"] == 4 and report["kind"] == "run"
+    assert report["status"] == "infrastructure_error"
+    assert report["groups"][0]["outcome"] == "incomplete"
+    assert report["groups"][0]["attempts"] == 1
+    assert not report["groups"][0]["cache_eligible"]
+    assert report["units"][0]["reports"] == actual["case_results"][0]["reports"]
