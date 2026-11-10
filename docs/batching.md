@@ -306,8 +306,9 @@ stale or mismatched refusal responses, unexpected exit status and leaked descend
 infrastructure failures, subject to the bounded retry and cleanup rules.
 
 Malformed, stale, duplicate, truncated, missing, mismatched or oversized records fail
-closed. Cache envelope 7 and the guarded profile are distinct from unguarded cache 6;
-only a fresh guard preflight and matching current context can admit a guarded cache hit.
+closed. Guarded and unguarded records use cache envelope 7; their profiles and strict
+result validation keep the records distinct. Only a fresh guard preflight and matching
+current context can admit a guarded cache hit.
 Existing atomic group success, two-attempt infrastructure bound and cleanup rules still
 apply, including no publication after incomplete member teardown, session failure or
 outer cleanup failure.

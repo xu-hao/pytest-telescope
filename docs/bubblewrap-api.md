@@ -124,7 +124,7 @@ current published package implements or qualifies it. The Python signature exten
 exactly `None` or `"available-v1"`; the guard requires batch mode and refuses ordinary
 or mixed structural routes. The CLI opts in with `run --fixture-guard available-v1`;
 it accepts no condition expectation values. Existing calls and CLI behavior with the
-guard omitted retain schema 4 and cache envelope 6.
+guard omitted retain schema 4 and use cache envelope 7.
 
 With the guard, `condition_checks` is an actual tuple or list of at most 4,096 exact
 dictionaries, in output order. Each has exactly `case_id`, `name`, and `op`; `equals`
@@ -149,13 +149,16 @@ captured case and group; it does not establish a skip, pass or teardown. Inspect
 actual reports, group lifecycle and final run status too.
 
 `run` retains its typed exceptions. Callers may use
-`error_result(error, fixture_guard="available-v1")` to request the schema 5 refusal
-shape; omitting the option retains the schema 4 converter exactly. An invalid converter
-option raises `DeclarationError`. The converter reports guard state `unavailable`: it
-has no trusted admission or attempt evidence and does not assert no body ran. Expected
-late failures are returned by the invocation as truthful run results with observed
-attempts, rather than converted into a pre-body refusal. The CLI supplies guard context
-to its existing error handlers only after successful parsing; parser failures keep schema 4.
+`error_result(error, fixture_guard="available-v1")` to request a schema 5 refusal.
+A typed late refusal can carry bounded version 2 accounting with the actual inventory,
+guard state, and observed attempts; the converter preserves it. A refusal without
+accounting reports guard state `unavailable` and does not assert that no body ran.
+Guarded accounting requires explicit guard context; omitting it uses the unguarded
+schema 4 converter. A mismatch between the context and retained accounting raises
+`InfrastructureError`, and an invalid converter option raises `DeclarationError`.
+Controlled late infrastructure failures can instead return run results with observed
+attempts. The CLI supplies guard context to its existing error handlers only after
+successful parsing; parser failures keep schema 4.
 
 Guard capability refusals use `execution:fixture-profile`, `execution:fixture-version`,
 `execution:fixture-metadata`, `execution:fixture-sharing`, `execution:fixture-limit`,

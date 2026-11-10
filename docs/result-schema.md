@@ -355,21 +355,26 @@ from the current invocation's capture, before accepting the hit. Match evidence 
 is not a pass, skip, teardown or final-session verdict.
 
 `error_result(error, fixture_guard="available-v1")` produces a schema 5 refusal with
-existing schema 4 refusal fields and this exact additional field:
+the `fixture_guard` field. Without retained accounting, that field is:
 
 ```json
 {"profile": "available-v1", "state": "unavailable", "conditions": []}
 ```
 
-`unavailable` means the converter has no validated phase, admission or attempt evidence.
-It does not establish that admission failed, no collection occurred, no body ran, or
-that replay is safe. It adds no fabricated units, groups or zero-attempt assertion.
-`inventory_complete: false` likewise means inventory is unknown. There is no
-`not-admitted` state inferred from an exception. `error_result(error)` remains schema 4;
-a parser failure before a valid guarded CLI invocation also retains schema 4.
+Without accounting, `unavailable` means the converter has no validated phase, admission
+or attempt evidence. It does not establish that admission failed, no collection occurred,
+no body ran, or that replay is safe. It adds no fabricated units, groups or zero-attempt
+assertion. `inventory_complete: false` likewise means inventory is unknown. There is no
+`not-admitted` state inferred from an exception. A typed late refusal with available
+version 2 accounting instead preserves its actual guard state and observations as described
+above. If accounting exceeds its bounds, the guard state is `unavailable` with no
+conditions, while known outer inventory remains. Guarded accounting requires explicit
+guard context; a mismatch raises `InfrastructureError`. `error_result(error)` is the
+unguarded schema 4 converter; a parser failure before a valid guarded CLI invocation also
+retains schema 4.
 
 Expected execution-side drift or another controlled late infrastructure failure is
 reported as a schema 5 run with `admitted` for the original plan and the actual prior
 attempts, group outcomes and infrastructure status retained. No new staged successes
-are published. An unexpected exception escaping after possible execution can still be
-converted, but the resulting `unavailable` refusal makes no claim about phase or bodies.
+are published. A late typed refusal instead carries its available retained observations;
+an exception without accounting makes no claim about phase or bodies.
