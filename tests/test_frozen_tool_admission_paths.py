@@ -7,14 +7,21 @@ from pytest_telescope import controller, model, tool_capture
 from pytest_telescope.model import InfrastructureError
 
 
-@pytest.mark.parametrize("fault", ["stable", "link-once", "link-always", "file-once", "file-always"])
-def test_capture_reopens_owned_ancestors_without_following_replacement(tmp_path, monkeypatch, fault):
+@pytest.mark.parametrize(
+    "fault", ["stable", "link-once", "link-always", "file-once", "file-always"]
+)
+def test_capture_reopens_owned_ancestors_without_following_replacement(
+    tmp_path, monkeypatch, fault
+):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
     source = project.add_tree("owned", files={"value.txt": "pinned bytes\n"})
-    project.module("test_owned.py", '''import pytest
+    project.module(
+        "test_owned.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(tools=["owned"])
 def test_owned(): pass
-''')
+""",
+    )
     declaration = model.load(project.root)
     stage = tmp_path / "stage"
     stage.mkdir()

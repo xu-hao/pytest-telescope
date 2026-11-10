@@ -577,17 +577,30 @@ payload = b"frozen example\n"
 (source / "data.txt").chmod(0o644)
 manifest = {
     "schema": 1,
-    "roots": [{
-        "id": "install", "source": str(source), "coverage": "tree",
-        "preserve_source": False,
-        "entries": [
-            {"path": ".", "kind": "directory", "mode": 0o755},
-            {"path": "data.txt", "kind": "file", "mode": 0o644,
-             "size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()},
-        ],
-    }],
-    "executables": [], "python": [], "links": [], "locks": [],
-    "commands": [], "loader": None,
+    "roots": [
+        {
+            "id": "install",
+            "source": str(source),
+            "coverage": "tree",
+            "preserve_source": False,
+            "entries": [
+                {"path": ".", "kind": "directory", "mode": 0o755},
+                {
+                    "path": "data.txt",
+                    "kind": "file",
+                    "mode": 0o644,
+                    "size": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                },
+            ],
+        }
+    ],
+    "executables": [],
+    "python": [],
+    "links": [],
+    "locks": [],
+    "commands": [],
+    "loader": None,
 }
 (project / "tool-locks").mkdir(exist_ok=True)
 (project / "tool-locks/example.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -600,6 +613,7 @@ test, keeping the external tree while its manifest is in use:
 ```python
 from pathlib import Path
 import pytest
+
 
 @pytest.mark.telescope(tools=["example"])
 def test_frozen_data():

@@ -100,16 +100,23 @@ import subprocess
 import sys
 import pytest
 
+
 @pytest.mark.telescope(tools=["example_plugin"])
 def test_installed_plugin_in_isolated_child():
     completed = subprocess.run(
-        [sys.executable, "-I", "-c",
-         "from importlib import metadata, resources; import example_plugin; "
-         "assert example_plugin.VALUE == 7; "
-         "assert metadata.version('example-plugin') == '1.0.0'; "
-         "assert resources.files('example_plugin').joinpath('message.txt').read_text() "
-         "== 'ready\\n'"],
-        capture_output=True, text=True, timeout=10,
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "from importlib import metadata, resources; import example_plugin; "
+            "assert example_plugin.VALUE == 7; "
+            "assert metadata.version('example-plugin') == '1.0.0'; "
+            "assert resources.files('example_plugin').joinpath('message.txt').read_text() "
+            "== 'ready\\n'",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     assert completed.returncode == 0, completed.stderr
 ```

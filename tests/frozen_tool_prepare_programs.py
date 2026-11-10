@@ -20,7 +20,11 @@ PROFILES = ("node", "installed", "browser")
 
 
 def prepare(directory, destination, *, profiles=("node", "installed")):
-    if not profiles or len(profiles) != len(set(profiles)) or any(name not in PROFILES for name in profiles):
+    if (
+        not profiles
+        or len(profiles) != len(set(profiles))
+        or any(name not in PROFILES for name in profiles)
+    ):
         raise ValueError("select distinct supported preparation profiles")
     directory = Path(directory)
     prepared = {}
@@ -33,16 +37,27 @@ def prepare(directory, destination, *, profiles=("node", "installed")):
                 documents = fixture.admission_documents
             else:
                 worker = WorkerConfiguration(owned, monkeypatch)
-                fixture = ProgramConfiguration(worker, browser=name == "browser", require_receipt=False)
+                fixture = ProgramConfiguration(
+                    worker, browser=name == "browser", require_receipt=False
+                )
                 documents = {"worker": worker.document, "frontend": fixture.document}
             prepared[name] = {"identity": fixture.identity, "documents": documents}
-    content = json.dumps({"schema": 1, "profiles": prepared}, sort_keys=True, separators=(",", ":")).encode()
+    content = json.dumps(
+        {"schema": 1, "profiles": prepared}, sort_keys=True, separators=(",", ":")
+    ).encode()
     if len(content) > 4 * 1024 * 1024:
         raise ValueError("complete prerequisite receipt exceeds4MiB")
     with Path(destination).open("xb") as stream:
         stream.write(content)
-    print(json.dumps({"prepared": {name: profile["identity"] for name, profile in prepared.items()},
-                      "receipt_bytes": len(content)}), flush=True)
+    print(
+        json.dumps(
+            {
+                "prepared": {name: profile["identity"] for name, profile in prepared.items()},
+                "receipt_bytes": len(content),
+            }
+        ),
+        flush=True,
+    )
 
 
 def main():

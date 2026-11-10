@@ -206,6 +206,7 @@ report actually gives `Skipped: optional feature disabled`, a consumer computes:
 
 ```python
 import hashlib
+
 expected = hashlib.sha256(b"Skipped: optional feature disabled").hexdigest()
 ```
 

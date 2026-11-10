@@ -13,8 +13,11 @@ def test_absolute_needed_requires_pinned_closed_target(tmp_path, monkeypatch, se
     target = fixture.prefix / relative
     if selection != "missing":
         fixture.object(relative)
-    fixture.entry("bin/python3.12", needed=[str(target)],
-                  libraries=[] if selection == "missing" else [relative])
+    fixture.entry(
+        "bin/python3.12",
+        needed=[str(target)],
+        libraries=[] if selection == "missing" else [relative],
+    )
     fixture.finish()
     capture = fixture.capture()
     if selection == "declared":
@@ -32,8 +35,9 @@ def test_absolute_needed_requires_pinned_closed_target(tmp_path, monkeypatch, se
 def test_cache_target_cannot_borrow_unselected_owned_source(tmp_path, monkeypatch, selected):
     fixture = Ordering(tmp_path, monkeypatch)
     target = fixture.object("a/libchoice.so")
-    fixture.entry("bin/python3.12", needed=["libchoice.so"],
-                  libraries=["a/libchoice.so"] if selected else [])
+    fixture.entry(
+        "bin/python3.12", needed=["libchoice.so"], libraries=["a/libchoice.so"] if selected else []
+    )
     fixture.fallback("libchoice.so", "a/libchoice.so")
     fixture.finish()
     if not selected:

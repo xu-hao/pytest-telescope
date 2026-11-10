@@ -95,7 +95,11 @@ def owned_capture(tmp_path, *, projection=False):
                 remember(records, destination)
             return value
 
-        with record_material(capture.directory, records), patch.object(os, "link", link), patch.object(os, "symlink", symlink):
+        with (
+            record_material(capture.directory, records),
+            patch.object(os, "link", link),
+            patch.object(os, "symlink", symlink),
+        ):
             yield SimpleNamespace(fixture=fixture, capture=capture, stage=stage, records=records)
     finally:
         try:
@@ -136,7 +140,9 @@ class DirectoryReads:
         descriptor = self.real_open(path, flags, *args, **kwargs)
         if flags & os.O_DIRECTORY and not flags & os.O_PATH:
             with self.lock:
-                explicit = isinstance(path, (str, bytes, os.PathLike)) and Path(os.fsdecode(path)).is_relative_to(self.directory)
+                explicit = isinstance(path, (str, bytes, os.PathLike)) and Path(
+                    os.fsdecode(path)
+                ).is_relative_to(self.directory)
                 if explicit or inode(os.fstat(descriptor)) in self.inodes:
                     self.opened(descriptor)
         return descriptor
@@ -158,7 +164,11 @@ class DirectoryReads:
 
     @contextmanager
     def observe(self):
-        with patch.object(os, "open", self.open), patch.object(os, "dup", self.dup), patch.object(os, "close", self.close):
+        with (
+            patch.object(os, "open", self.open),
+            patch.object(os, "dup", self.dup),
+            patch.object(os, "close", self.close),
+        ):
             yield self
 
     def assert_closed(self):
@@ -170,4 +180,6 @@ class DirectoryReads:
             except OSError as error:
                 assert error.errno == errno.EBADF
             else:
-                assert inode(current) not in self.inodes, "an observed owned read handle survived cleanup"
+                assert inode(current) not in self.inodes, (
+                    "an observed owned read handle survived cleanup"
+                )

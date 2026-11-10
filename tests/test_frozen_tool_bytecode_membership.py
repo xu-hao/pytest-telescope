@@ -19,11 +19,24 @@ from pytest_telescope import tool_capture, tool_context
 from pytest_telescope.model import UnsupportedCapability
 
 
-@pytest.mark.parametrize("variant", [
-    "checked", "unchecked", "timestamp", "unrecorded", "stale-source", "missing-source",
-    "wrong-magic", "invalid-flags", "wrong-size", "changed-pinned-bytes",
-])
-def test_owned_bytecode_requires_pinned_header_source_and_payload_identity(tmp_path, monkeypatch, variant):
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "checked",
+        "unchecked",
+        "timestamp",
+        "unrecorded",
+        "stale-source",
+        "missing-source",
+        "wrong-magic",
+        "invalid-flags",
+        "wrong-size",
+        "changed-pinned-bytes",
+    ],
+)
+def test_owned_bytecode_requires_pinned_header_source_and_payload_identity(
+    tmp_path, monkeypatch, variant
+):
     initial = installed_metadata(tmp_path, monkeypatch, "valid")
     tool = initial.manifest.tools["owned"]
     document = copy.deepcopy(tool.document)
@@ -31,8 +44,11 @@ def test_owned_bytecode_requires_pinned_header_source_and_payload_identity(tmp_p
     source = put(roots["package"], "worker.py", "VALUE = 2\n")
     original_source = source.read_bytes()
     flags = 1 if variant == "unchecked" else 0 if variant in {"timestamp", "wrong-size"} else 3
-    relation = (struct.pack("<II", 0, len(original_source) + (variant == "wrong-size"))
-                if flags == 0 else importlib.util.source_hash(original_source))
+    relation = (
+        struct.pack("<II", 0, len(original_source) + (variant == "wrong-size"))
+        if flags == 0
+        else importlib.util.source_hash(original_source)
+    )
     magic = b"BAD!" if variant == "wrong-magic" else importlib.util.MAGIC_NUMBER
     if variant == "invalid-flags":
         flags = 2
@@ -64,8 +80,9 @@ def test_owned_bytecode_requires_pinned_header_source_and_payload_identity(tmp_p
     tools = tool_context.load_selected(project, {"owned": tool.registration}, ["owned"])
     if variant == "changed-pinned-bytes":
         bytecode.write_bytes(payload[:-1] + b"X")
-    capture = tool_capture.Capture(SimpleNamespace(root=project, tools=tools),
-                                  initial.directory.parent, 10, None)
+    capture = tool_capture.Capture(
+        SimpleNamespace(root=project, tools=tools), initial.directory.parent, 10, None
+    )
     if variant in {"checked", "unchecked", "timestamp", "unrecorded"}:
         with capture:
             key = ("package", bytecode.relative_to(roots["package"]).as_posix())
@@ -74,5 +91,7 @@ def test_owned_bytecode_requires_pinned_header_source_and_payload_identity(tmp_p
         with pytest.raises(UnsupportedCapability) as caught:
             with capture:
                 pytest.fail("invalid bytecode relation or changed pinned bytes admitted")
-        assert caught.value.capability == ("tool:identity" if variant == "changed-pinned-bytes" else "tool:layout")
+        assert caught.value.capability == (
+            "tool:identity" if variant == "changed-pinned-bytes" else "tool:layout"
+        )
     assert not capture.directory.exists() and not capture.materialized

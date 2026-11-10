@@ -16,7 +16,9 @@ from pytest_telescope.sandbox import InvocationInterrupted
 def capture_for(project, stage, cancellation=None):
     stage.mkdir()
     tools = tool_context.load_selected(project.root, project.definitions, ["owned"])
-    return tool_capture.Capture(SimpleNamespace(root=project.root, tools=tools), stage, 10, cancellation)
+    return tool_capture.Capture(
+        SimpleNamespace(root=project.root, tools=tools), stage, 10, cancellation
+    )
 
 
 @pytest.mark.parametrize("protected", [".ssh", ".aws"])

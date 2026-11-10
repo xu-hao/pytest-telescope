@@ -5,7 +5,9 @@ from frozen_tool_ordering_fixture import Ordering
 
 
 @pytest.mark.parametrize("association", ["none", "file", "directory"])
-def test_resource_membership_is_explicit_and_stays_with_its_entrypoint(tmp_path, monkeypatch, association):
+def test_resource_membership_is_explicit_and_stays_with_its_entrypoint(
+    tmp_path, monkeypatch, association
+):
     fixture = Ordering(tmp_path, monkeypatch)
     fixture.object("resources/left.so")
     fixture.object("resources/right.so")

@@ -10,14 +10,17 @@ from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError, InfrastructureError
 
 
-@pytest.mark.parametrize("scenario,expected_calls,expected_starts", [
-    ("before-refusal", 1, 0),
-    ("after-refusal", 1, 1),
-    ("before-cancel", 1, 0),
-    ("normal", 1, 1),
-    ("started-then-prestart-failure", 2, 1),
-    ("started-then-started-retry", 2, 2),
-])
+@pytest.mark.parametrize(
+    "scenario,expected_calls,expected_starts",
+    [
+        ("before-refusal", 1, 0),
+        ("after-refusal", 1, 1),
+        ("before-cancel", 1, 0),
+        ("normal", 1, 1),
+        ("started-then-prestart-failure", 2, 1),
+        ("started-then-started-retry", 2, 2),
+    ],
+)
 def test_controller_counts_explicit_launches_not_execute_entries(
     tmp_path, sandbox_double, module_rows, scenario, expected_calls, expected_starts
 ):

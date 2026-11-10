@@ -11,7 +11,9 @@ from pytest_telescope import controller, model, sandbox, tool_capture, tool_cont
 from pytest_telescope.model import InfrastructureError, UnsupportedCapability
 
 
-def test_partial_projection_keeps_reservation_until_cleanup_and_fresh_capture(sparse_pair, monkeypatch):
+def test_partial_projection_keeps_reservation_until_cleanup_and_fresh_capture(
+    sparse_pair, monkeypatch
+):
     project, sources, stage = sparse_pair
     monkeypatch.setattr(tool_context, "MAX_VISITS", 64)
     capture = tool_capture.Capture(model.load(project.root), stage, 10, None)
@@ -78,7 +80,9 @@ def test_interrupted_reservation_creates_no_members_and_consumes_no_capacity(
         assert len(owned_paths(capture.directory)) == 37
 
 
-def test_cancellation_after_materialized_members_unwinds_without_source_changes(sparse_pair, monkeypatch):
+def test_cancellation_after_materialized_members_unwinds_without_source_changes(
+    sparse_pair, monkeypatch
+):
     project, _, stage = sparse_pair
     cancellation = threading.Event()
     monkeypatch.setattr(tool_context, "MAX_VISITS", 64)
