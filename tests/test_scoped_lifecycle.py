@@ -17,7 +17,8 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
             return dict(
-                protocol=8,
+                protocol=11,
+                declaration_error=False,
                 context_id=request["context_id"],
                 collection_skips=[],
                 kind="collection",
@@ -29,9 +30,13 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
                 worker_seconds=0.1,
                 failures=[],
             )
+        # This stand-in models a successfully started worker, including an
+        # unavailable result after that start. Pre-start faults use other doubles.
+        kwargs["on_session_start"]()
         behavior(request["case_id"], kwargs)
         return dict(
-            protocol=5,
+            protocol=9,
+            declaration_error=False,
             context_id=request["context_id"],
             collection_skips=[],
             nonce="a" * 32,
@@ -194,7 +199,8 @@ def test_failed_collection_is_a_failure_even_with_parked_scoped_cases(
     def execute(*args, request, **kwargs):
         assert request["mode"] == "collection", "no scoped case may run after a failed collection"
         return dict(
-            protocol=8,
+            protocol=11,
+            declaration_error=False,
             context_id=request["context_id"],
             collection_skips=[],
             kind="collection",
