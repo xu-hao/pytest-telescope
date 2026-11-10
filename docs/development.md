@@ -61,6 +61,12 @@ refuses before any test body, even when the earlier snapshot still matches the r
 profile. A post-run mismatch cannot repair a body that already executed under false
 membership evidence.
 
+For `core`, fix the intended selected and excluded cases before notifying exclusion
+callbacks. Those callbacks still run. Only the gate's exact exclusion notification is
+owned by the profile; additional notifications inside a callback remain external.
+Neither a recursive notification nor a silent callback removal may erase a case from
+the complete partition or allow a body to run before refusal.
+
 The final gate result records `functional_profile` and `verdict_kind`: `full` for
 `all`, `compatibility` for `core`. A successful `core` result remains compatibility
 evidence. The candidate binding remains schema 2 with its existing exact fields;

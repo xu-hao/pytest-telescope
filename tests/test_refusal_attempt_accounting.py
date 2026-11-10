@@ -84,8 +84,8 @@ def test_ordinary():
             if filename == "tests/test_20_refusal.py":
                 refused.set()
 
-    def stage(self, final, key, result, *, kind="execution"):
-        original_stage(self, final, key, result, kind=kind)
+    def stage(self, final, key, result, *, kind="execution", guarded=False):
+        original_stage(self, final, key, result, kind=kind, guarded=guarded)
         if kind == "execution":
             staged.append(key)
             with guard:
@@ -193,8 +193,8 @@ def test_ordinary():
             if filename == "tests/test_20_refusal.py":
                 refused.set()
 
-    def stage(self, final, key, result, *, kind="execution"):
-        original_stage(self, final, key, result, kind=kind)
+    def stage(self, final, key, result, *, kind="execution", guarded=False):
+        original_stage(self, final, key, result, kind=kind, guarded=guarded)
         if kind == "execution":
             staged.append(key)
             with guard:
