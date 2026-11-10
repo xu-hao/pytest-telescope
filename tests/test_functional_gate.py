@@ -352,7 +352,10 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
         next(hook)
         with pytest.raises(StopIteration):
             next(hook)
-        selection.pytest_collection_finish(types.SimpleNamespace(items=items))
+        loop = selection.pytest_runtestloop(types.SimpleNamespace(items=items))
+        next(loop)
+        with pytest.raises(StopIteration):
+            next(loop)
 
     def dispatch(arguments, *, plugins):
         assert all(name not in os.environ for name in profile_names)
