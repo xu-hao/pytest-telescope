@@ -72,7 +72,6 @@ def candidate(tmp_path, monkeypatch, gates):
         write(source / name, content)
         write(package / name, content)
     write(root / "pyproject.toml", b'[project]\nversion = "0.0.1"\n')
-    node = write(tmp_path / "selected-node", b"owned executable bytes, never launched\n", 0o755)
     wheel = tmp_path / "candidate.whl"
     make_wheel(wheel, files)
     identity = {"head": "a" * 40, "tree": "b" * 40}
@@ -102,7 +101,7 @@ def candidate(tmp_path, monkeypatch, gates):
         "find_spec",
         lambda name: spec if name == "pytest_telescope" else original_spec(name),
     )
-    binding = gate.candidate_binding(root, wheel, str(node))
+    binding = gate.candidate_binding(root, wheel)
     value = types.SimpleNamespace(
         gate=gate,
         root=root,
@@ -111,7 +110,6 @@ def candidate(tmp_path, monkeypatch, gates):
         source=source,
         files=files,
         wheel=wheel,
-        node=node,
         binding=binding,
         identity=identity,
         distribution=distribution,
@@ -130,6 +128,23 @@ def test_owned_exact_package_is_accepted(candidate):
         candidate.package / "__init__.py"
     )
     assert not any(name == "pytest_telescope" for name in sys.modules)
+
+
+@pytest.mark.parametrize("change", [{"schema": 1}, {"schema": True}, {"node": {}}, {"extra": 0}])
+def test_candidate_binding_rejects_old_versions_and_extra_fields(candidate, change):
+    assert candidate.binding["schema"] == 2
+    with pytest.raises(ValueError):
+        candidate.gate.verify_candidate(candidate.binding | change, first_import=True)
+
+
+@pytest.mark.parametrize(
+    "field", ["schema", "root", "source", "wheel_path", "wheel", "interpreter"]
+)
+def test_candidate_binding_requires_every_declared_field(candidate, field):
+    incomplete = copy.deepcopy(candidate.binding)
+    incomplete.pop(field)
+    with pytest.raises(ValueError):
+        candidate.gate.verify_candidate(incomplete, first_import=True)
 
 
 @pytest.mark.parametrize(
@@ -167,7 +182,6 @@ def test_owned_installed_package_mismatch_refuses(candidate, fault):
         "head",
         "tree",
         "interpreter",
-        "node",
     ],
 )
 def test_candidate_binding_drift_refuses(candidate, monkeypatch, fault):
@@ -185,8 +199,6 @@ def test_candidate_binding_drift_refuses(candidate, monkeypatch, fault):
         monkeypatch.setattr(
             candidate.gate, "interpreter_identity", lambda: {"unit_interpreter": "changed"}
         )
-    else:
-        candidate.node.write_bytes(b"other owned bytes")
     with pytest.raises(ValueError):
         candidate.gate.verify_candidate(candidate.binding, first_import=True)
 
@@ -233,105 +245,6 @@ def test_wheel_unsupported_members_refuse(gates, tmp_path, fault):
     make_wheel(wheel, {"__init__.py": b""}, extra=[(name, b"owned")])
     with pytest.raises(ValueError):
         gates.gate.wheel_identity(wheel)
-
-
-def receipt_document(source):
-    content = b"owned configuration\n"
-    write(source / "value.txt", content)
-    return {
-        "schema": 1,
-        "roots": [
-            {
-                "id": "owned",
-                "source": str(source),
-                "coverage": "tree",
-                "preserve_source": False,
-                "entries": [
-                    {"path": ".", "kind": "directory", "mode": 0o755},
-                    {
-                        "path": "value.txt",
-                        "kind": "file",
-                        "mode": 0o644,
-                        "size": len(content),
-                        "sha256": hashlib.sha256(content).hexdigest(),
-                    },
-                ],
-            }
-        ],
-        "executables": [],
-        "python": [],
-        "links": [],
-        "locks": [],
-        "commands": [],
-        "loader": None,
-    }
-
-
-def owned_receipt(tmp_path):
-    receipt = {"schema": 1, "profiles": {}}
-    for name, keys in (
-        ("node", ("worker", "frontend")),
-        ("installed", ("worker", "unselected-baseline")),
-    ):
-        documents = {key: receipt_document(tmp_path / "inputs" / name / key) for key in keys}
-        identity = hashlib.sha256(
-            json.dumps(documents, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        receipt["profiles"][name] = {"identity": identity, "documents": documents}
-    return receipt
-
-
-def test_owned_receipt_passes_real_manifest_parser_and_cleans_copies(gates, tmp_path):
-    receipt = owned_receipt(tmp_path)
-    path = tmp_path / "receipt.json"
-    digest = gates.gate.write_json(path, receipt)
-    scratch = tmp_path / "validation"
-    scratch.mkdir()
-    assert gates.functional.admission(path, digest, scratch) == receipt
-    assert list(scratch.iterdir()) == []
-
-
-@pytest.mark.parametrize(
-    "fault",
-    [
-        "wrong_profile",
-        "missing_profile",
-        "extra_profile",
-        "schema_bool",
-        "missing_document",
-        "malformed_declaration",
-        "identity",
-        "stale_hash",
-    ],
-)
-def test_receipt_refuses_invalid_profiles_declarations_and_identity(gates, tmp_path, fault):
-    receipt = owned_receipt(tmp_path)
-    profiles = receipt["profiles"]
-    if fault == "wrong_profile":
-        profiles["browser"] = profiles.pop("node")
-    elif fault == "missing_profile":
-        profiles.pop("installed")
-    elif fault == "extra_profile":
-        profiles["browser"] = copy.deepcopy(profiles["node"])
-    elif fault == "schema_bool":
-        receipt["schema"] = True
-    elif fault == "missing_document":
-        profiles["node"]["documents"].pop("worker")
-    elif fault == "malformed_declaration":
-        profiles["node"]["documents"]["worker"]["roots"][0]["entries"][1]["size"] = -1
-    elif fault == "identity":
-        profiles["node"]["identity"] = "f" * 64
-    path = tmp_path / "receipt.json"
-    digest = gates.gate.write_json(path, receipt)
-    if fault == "stale_hash":
-        path.write_bytes(path.read_bytes() + b" ")
-    scratch = tmp_path / "validation"
-    scratch.mkdir()
-    from pytest_telescope.model import DeclarationError, UnsupportedCapability
-
-    with pytest.raises((ValueError, DeclarationError, UnsupportedCapability)):
-        gates.functional.admission(path, digest, scratch)
-    assert list(scratch.iterdir()) == []
 
 
 def stage_result(path, name):
@@ -405,39 +318,56 @@ def test_evidence_is_exclusive_and_hash_bound(gates, tmp_path):
 
 @pytest.fixture
 def invocation(candidate, gates, tmp_path, monkeypatch):
-    """Real guard and evidence I/O; preparation/parser/pytest dispatch are unit doubles."""
+    """Real candidate guard and evidence I/O with explicit tests/harness dispatch doubles."""
+    import unittest
+
     functional, gate = gates.functional, gates.gate
     scratch = tmp_path / "caller-scratch"
     scratch.mkdir()
     monkeypatch.setenv("TMPDIR", str(scratch))
-    binding_file, receipt, ready = (
-        tmp_path / name for name in ("binding.json", "receipt.json", "ready.json")
-    )
+    binding_file = tmp_path / "binding.json"
     binding_hash = gate.write_json(binding_file, candidate.binding)
     calls = []
-    receipt_value = {"schema": 1, "profiles": {"node": {}, "installed": {}}}
-    # The real parser is separately exercised above. This orchestration double
-    # keeps real bounded file/hash verification without importing another producer.
-    monkeypatch.setattr(
-        functional, "admission", lambda path, expected, directory: gate.read_json(path, expected)
+    profile_names = (
+        "TELESCOPE_FIXTURE_NODE",
+        "TELESCOPE_FIXTURE_CHROMIUM",
+        "TELESCOPE_FIXTURE_ADMISSION",
+        "TELESCOPE_FIXTURE_ADMISSION_SHA256",
     )
-    preparation = types.ModuleType("frozen_tool_prepare_programs")
+    for name in profile_names:
+        monkeypatch.setenv(name, "owned profile value that must not dispatch")
 
-    def prepare(directory, destination, *, profiles):
-        calls.append(("prepare", profiles))
-        gate.write_json(destination, receipt_value)
-
-    preparation.prepare = prepare
-    monkeypatch.setitem(sys.modules, "frozen_tool_prepare_programs", preparation)
-
-    def dispatch(args):
-        calls.append(("tests", args))
+    def dispatch(arguments):
+        assert all(name not in os.environ for name in profile_names)
+        calls.append(("tests", arguments))
         return 0
 
     monkeypatch.setattr(pytest, "main", dispatch)
+    owned_suite = object()
 
-    def arguments(mode, *, receipt_hash=None, ready_hash=None):
-        result = [
+    def discover(directory, *, pattern):
+        assert directory == "benchmarks" and pattern == "test_*.py"
+        assert all(name not in os.environ for name in profile_names)
+        calls.append(("harness", directory))
+        return owned_suite
+
+    class HarnessRunner:
+        def run(self, suite):
+            assert suite is owned_suite
+            return types.SimpleNamespace(wasSuccessful=lambda: True)
+
+    monkeypatch.setattr(unittest.defaultTestLoader, "discover", discover)
+    monkeypatch.setattr(unittest, "TextTestRunner", HarnessRunner)
+    preparation = types.ModuleType("frozen_tool_prepare_programs")
+
+    def forbidden_preparation(*args, **kwargs):
+        pytest.fail("default candidate qualification must not prepare program profiles")
+
+    preparation.prepare = forbidden_preparation
+    monkeypatch.setitem(sys.modules, "frozen_tool_prepare_programs", preparation)
+
+    def arguments(mode):
+        return [
             "functional_gate.py",
             mode,
             "--binding",
@@ -446,27 +376,7 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
             binding_hash,
             "--scratch",
             str(scratch),
-            "--receipt",
-            str(receipt),
-            "--admission",
-            str(ready),
         ]
-        if receipt_hash is not None:
-            result += ["--receipt-sha256", receipt_hash, "--admission-sha256", ready_hash]
-        return result
-
-    def ready_record():
-        receipt_hash = gate.write_json(receipt, receipt_value)
-        value = {
-            "schema": 1,
-            "binding_sha256": binding_hash,
-            "receipt": str(receipt),
-            "receipt_sha256": receipt_hash,
-            "source": candidate.binding["source"],
-            "interpreter": candidate.binding["interpreter"],
-            "wheel_sha256": candidate.binding["wheel"]["sha256"],
-        }
-        return receipt_hash, value
 
     return types.SimpleNamespace(
         candidate=candidate,
@@ -474,103 +384,90 @@ def invocation(candidate, gates, tmp_path, monkeypatch):
         functional=functional,
         scratch=scratch,
         binding_file=binding_file,
-        receipt=receipt,
-        ready=ready,
         calls=calls,
-        preparation=preparation,
         arguments=arguments,
-        ready_record=ready_record,
     )
 
 
-def test_failed_guard_never_prepares_or_dispatches(invocation, monkeypatch):
+@pytest.mark.parametrize("mode", ["tests", "harness"])
+def test_failed_guard_never_dispatches(invocation, monkeypatch, mode):
     value = invocation
     (value.candidate.package / "worker.py").write_bytes(b"changed before guard")
-    monkeypatch.setattr(sys, "argv", value.arguments("prepare"))
+    monkeypatch.setattr(sys, "argv", value.arguments(mode))
     with pytest.raises(ValueError):
         value.functional.main()
-    assert value.calls == [] and not value.receipt.exists() and not value.ready.exists()
-
-
-def test_failed_preparation_never_publishes_readiness(invocation, monkeypatch):
-    value = invocation
-
-    def refuse(*args, **kwargs):
-        raise ValueError("owned preparation failed")
-
-    monkeypatch.setattr(value.preparation, "prepare", refuse)
-    monkeypatch.setattr(sys, "argv", value.arguments("prepare"))
-    with pytest.raises(ValueError, match="owned preparation failed"):
-        value.functional.main()
-    assert not value.ready.exists() and not value.receipt.exists()
     assert value.calls == []
 
 
-@pytest.mark.parametrize(
-    "field",
-    ["binding_sha256", "source", "wheel_sha256", "interpreter", "receipt_sha256", "receipt"],
-)
-def test_stale_readiness_never_dispatches(invocation, monkeypatch, field):
+@pytest.mark.parametrize("mode", ["tests", "harness"])
+def test_exact_candidate_dispatches_without_program_profiles(invocation, monkeypatch, mode):
     value = invocation
-    receipt_hash, ready = value.ready_record()
-    ready[field] = {"changed": True} if isinstance(ready[field], dict) else "changed"
-    ready_hash = value.gate.write_json(value.ready, ready)
-    monkeypatch.setattr(
-        sys, "argv", value.arguments("tests", receipt_hash=receipt_hash, ready_hash=ready_hash)
-    )
-    with pytest.raises(ValueError, match="different candidate"):
-        value.functional.main()
-    assert value.calls == []
+    monkeypatch.setattr(sys, "argv", value.arguments(mode))
+    assert value.functional.main() == 0
+    assert len(value.calls) == 1 and value.calls[0][0] == mode
+    assert sorted(path.name for path in value.binding_file.parent.glob("*.json")) == [
+        "binding.json"
+    ]
 
 
-@pytest.mark.parametrize("fault", ["producer", "receipt", "ready", "binding"])
+@pytest.mark.parametrize("fault", ["producer", "binding", "source", "wheel", "interpreter"])
 def test_successful_dispatch_cannot_hide_postcondition_mutation(invocation, monkeypatch, fault):
     value = invocation
-    receipt_hash, ready = value.ready_record()
-    ready_hash = value.gate.write_json(value.ready, ready)
     targets = {
         "producer": value.candidate.package / "worker.py",
-        "receipt": value.receipt,
-        "ready": value.ready,
         "binding": value.binding_file,
+        "source": value.candidate.source / "worker.py",
+        "wheel": value.candidate.wheel,
     }
 
-    def mutate(args):
-        value.calls.append(("tests", args))
-        target = targets[fault]
-        target.write_bytes(target.read_bytes() + b" ")
+    def mutate(arguments):
+        value.calls.append(("tests", arguments))
+        if fault == "interpreter":
+            monkeypatch.setattr(
+                value.gate, "interpreter_identity", lambda: {"unit_interpreter": "changed"}
+            )
+        else:
+            target = targets[fault]
+            target.write_bytes(target.read_bytes() + b" ")
         return 0
 
     monkeypatch.setattr(pytest, "main", mutate)
-    monkeypatch.setattr(
-        sys, "argv", value.arguments("tests", receipt_hash=receipt_hash, ready_hash=ready_hash)
-    )
+    monkeypatch.setattr(sys, "argv", value.arguments("tests"))
     with pytest.raises(ValueError):
         value.functional.main()
     assert len(value.calls) == 1 and value.calls[0][0] == "tests"
 
 
-def test_valid_preparation_publishes_exact_two_profile_binding(invocation, monkeypatch):
+@pytest.mark.parametrize("code", [1, 3, 5])
+def test_valid_nonzero_test_verdict_is_retained_after_postconditions(invocation, monkeypatch, code):
     value = invocation
-    monkeypatch.setattr(sys, "argv", value.arguments("prepare"))
-    assert value.functional.main() == 0
-    assert value.calls == [("prepare", ("node", "installed"))]
-    ready = json.loads(value.ready.read_text())
-    assert ready["source"] == value.candidate.binding["source"]
-    assert ready["receipt_sha256"] == hashlib.sha256(value.receipt.read_bytes()).hexdigest()
+
+    def verdict(arguments):
+        value.calls.append(("tests", arguments))
+        return code
+
+    monkeypatch.setattr(pytest, "main", verdict)
+    monkeypatch.setattr(sys, "argv", value.arguments("tests"))
+    assert value.functional.main() == code
+    assert len(value.calls) == 1
 
 
-def test_changed_binding_after_preparation_never_publishes_readiness(invocation, monkeypatch):
+@pytest.mark.parametrize("argument", ["--receipt", "--admission", "--receipt-sha256"])
+def test_removed_default_readiness_arguments_refuse_before_dispatch(
+    invocation, monkeypatch, argument
+):
     value = invocation
-    original = value.preparation.prepare
-
-    def changed_binding(*args, **kwargs):
-        original(*args, **kwargs)
-        value.binding_file.write_bytes(value.binding_file.read_bytes() + b" ")
-
-    monkeypatch.setattr(value.preparation, "prepare", changed_binding)
-    monkeypatch.setattr(sys, "argv", value.arguments("prepare"))
-    with pytest.raises(ValueError):
+    monkeypatch.setattr(sys, "argv", value.arguments("tests") + [argument, "owned-old-value"])
+    with pytest.raises(SystemExit) as caught:
         value.functional.main()
-    assert not value.ready.exists(), "failed preparation binding must not publish readiness"
-    assert value.calls == [("prepare", ("node", "installed"))]
+    assert caught.value.code == 2
+    assert value.calls == []
+
+
+def test_removed_prepare_mode_refuses_before_dispatch(invocation, monkeypatch):
+    value = invocation
+    monkeypatch.setattr(sys, "argv", value.arguments("prepare"))
+    with pytest.raises(SystemExit) as caught:
+        value.functional.main()
+    assert caught.value.code == 2
+    assert value.calls == []

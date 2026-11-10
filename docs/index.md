@@ -1,8 +1,8 @@
 # pytest-telescope
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 Contributors qualify host-specific tool installations with the separately invoked
 [installed-runtime benchmarks](benchmark.md#installed-runtime-compatibility-benchmarks).
@@ -112,8 +112,10 @@ conftest files, helpers and data need declarations.
 This makes the test *scoped*: it sees the declared project files read-only, plus the
 installed environment and system directories. Undeclared project files are absent.
 Writes belong in private scratch, for example through pytest's `tmp_path` fixture.
-Tests without an `inputs`, `bundles`, `distributions`, `env`, `tools` or `git` declaration remain ordinary,
+In published 0.1.0a6, tests without an `inputs`, `bundles` or `distributions` declaration remain ordinary,
 including other tests in the same file.
+The unreleased 0.1.0a7 candidate also supports the `env` and `tools` scope fields
+described in the development references below.
 
 ### 4. Run the test twice
 
@@ -191,10 +193,11 @@ Every run executes the selected ordinary cases in one fresh pytest session per s
 Scoped cases use a cached result when they can and run in a sandbox when they cannot.
 `route_counts` breaks down the executed and reused counts for each route.
 
-A development-only `git="frozen-checkout-v1"` declaration is being added for cases
-that require a frozen checkout and history. It is not part of the published 0.1.0a6
-package. See the [Git view contract](bubblewrap.md#frozen-git-checkout-development-contract)
-for its precise supported states and limits.
+Frozen-checkout/history capture is deferred and is not implemented by the current
+candidate or published 0.1.0a6 package. The separate
+[Git design contract](bubblewrap.md#frozen-git-checkout-development-contract) records
+that future interface; it is not a runnable current declaration. Selecting a Git
+executable as an ordinary frozen tool for an owned scratch repository is a different use.
 
 ## Opt into frozen external tools (development contract)
 

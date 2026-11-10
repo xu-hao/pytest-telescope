@@ -1,5 +1,6 @@
-"""Profile-selection controls use constructor doubles and never launch programs."""
+"""Profile selection uses constructor/validation doubles and never launches programs."""
 
+import hashlib
 import json
 import sys
 import types
@@ -15,7 +16,7 @@ gates = shared_gates
 def selection(tmp_path, monkeypatch):
     import frozen_tool_prepare_programs as preparation
 
-    calls = []
+    calls, validations = [], []
 
     def worker(directory, patch):
         calls.append(("worker", directory.name))
@@ -34,10 +35,21 @@ def selection(tmp_path, monkeypatch):
     monkeypatch.setattr(preparation, "WorkerConfiguration", worker)
     monkeypatch.setattr(preparation, "ProgramConfiguration", program)
     monkeypatch.setattr(preparation, "InstalledConfiguration", installed)
+
+    def validate(path, expected, directory, *, profiles):
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
+        validations.append(tuple(profiles))
+        return json.loads(path.read_text())
+
+    monkeypatch.setattr(preparation, "validate_receipt", validate)
     directory = tmp_path / "prepare"
     directory.mkdir()
     return types.SimpleNamespace(
-        module=preparation, calls=calls, directory=directory, destination=tmp_path / "receipt.json"
+        module=preparation,
+        calls=calls,
+        validations=validations,
+        directory=directory,
+        destination=tmp_path / "receipt.json",
     )
 
 
@@ -47,6 +59,7 @@ def test_default_preparation_selects_only_node_and_installed(selection):
     assert value.calls == [("worker", "node"), ("program", False, False), ("installed", False)]
     assert set(json.loads(value.destination.read_text())["profiles"]) == {"node", "installed"}
     assert not (value.directory / "browser").exists()
+    assert value.validations == [("node", "installed")]
 
 
 def test_explicit_browser_metadata_uses_only_constructor_double(selection):
@@ -54,6 +67,7 @@ def test_explicit_browser_metadata_uses_only_constructor_double(selection):
     value.module.prepare(value.directory, value.destination, profiles=("browser",))
     assert value.calls == [("worker", "browser"), ("program", True, False)]
     assert set(json.loads(value.destination.read_text())["profiles"]) == {"browser"}
+    assert value.validations == [("browser",)]
 
 
 @pytest.mark.parametrize(
@@ -65,6 +79,7 @@ def test_invalid_profile_selection_refuses_before_construction(selection, profil
         value.module.prepare(value.directory, value.destination, profiles=profiles)
     assert value.calls == [] and list(value.directory.iterdir()) == []
     assert not value.destination.exists()
+    assert value.validations == []
 
 
 def test_explicit_profile_cli_selects_metadata_only(selection, monkeypatch, tmp_path):
@@ -86,26 +101,21 @@ def test_explicit_profile_cli_selects_metadata_only(selection, monkeypatch, tmp_
     value.module.main()
     assert value.calls == [("worker", "browser"), ("program", True, False)]
     assert set(json.loads(value.destination.read_text())["profiles"]) == {"browser"}
+    assert value.validations == [("browser",)]
 
 
 @pytest.mark.parametrize("source", ["cli", "environment", "cli_precedence"])
-def test_gate_node_selection_is_explicit_before_any_build(gates, tmp_path, monkeypatch, source):
+def test_legacy_node_option_refuses_while_environment_is_unselected(
+    gates, tmp_path, monkeypatch, source
+):
     node = write(tmp_path / "explicit-node", b"owned executable, not launched", 0o755)
-    alternate = write(tmp_path / "alternate-node", b"other owned executable", 0o755)
     claimed = tmp_path / "caller"
     claimed.mkdir()
     monkeypatch.setenv("TMPDIR", str(claimed))
     monkeypatch.delenv("TELESCOPE_FIXTURE_NODE", raising=False)
-    selected, stages = [], []
-    real_identity = gates.check.node_identity
-
-    def identify(value):
-        selected.append(value)
-        return real_identity(value)
-
-    monkeypatch.setattr(gates.check, "node_identity", identify)
+    stages = []
     monkeypatch.setattr(
-        gates.check, "source_identity", lambda root: {"head": "owned", "tree": "owned"}
+        gates.check, "source_identity", lambda root: {"head": "a" * 40, "tree": "b" * 40}
     )
 
     class StopBeforeBuild:
@@ -113,36 +123,58 @@ def test_gate_node_selection_is_explicit_before_any_build(gates, tmp_path, monke
             pass
 
         def run(self, label, *args, **kwargs):
+            assert "TELESCOPE_FIXTURE_NODE" not in kwargs["env"]
             stages.append(label)
             raise RuntimeError("owned stop before any gate command")
 
     monkeypatch.setattr(gates.check, "Stages", StopBeforeBuild)
-    args = ["check", "--artifacts", str(tmp_path / "artifacts")]
+    arguments = ["check", "--artifacts", str(tmp_path / "artifacts")]
     if source != "environment":
-        args += ["--node", str(node)]
+        arguments += ["--node", str(node)]
     if source != "cli":
-        monkeypatch.setenv(
-            "TELESCOPE_FIXTURE_NODE", str(alternate if source == "cli_precedence" else node)
-        )
-    monkeypatch.setattr(sys, "argv", args)
-    with pytest.raises(RuntimeError, match="owned stop before"):
-        gates.check.main()
-    assert selected == [str(node)] and stages == ["lint"]
+        monkeypatch.setenv("TELESCOPE_FIXTURE_NODE", str(node))
+    monkeypatch.setattr(sys, "argv", arguments)
+    if source == "environment":
+        with pytest.raises(RuntimeError, match="owned stop before"):
+            gates.check.main()
+        assert stages == ["lint"]
+    else:
+        with pytest.raises(SystemExit) as error:
+            gates.check.main()
+        assert error.value.code == 2
+        assert stages == []
     assert list(claimed.iterdir()) == []
 
 
 @pytest.mark.parametrize("value", [None, "node", "missing", "nonexecutable"])
-def test_missing_or_invalid_node_never_starts_a_gate(gates, tmp_path, monkeypatch, value):
+def test_default_gate_does_not_require_or_validate_program_environment(
+    gates, tmp_path, monkeypatch, value
+):
+    claimed = tmp_path / "caller"
+    claimed.mkdir()
+    monkeypatch.setenv("TMPDIR", str(claimed))
     monkeypatch.delenv("TELESCOPE_FIXTURE_NODE", raising=False)
-    calls = []
-    monkeypatch.setattr(gates.check, "Stages", lambda *args: calls.append(args))
-    args = ["check", "--artifacts", str(tmp_path / "artifacts")]
     if value is not None:
         selected = "node" if value == "node" else str(tmp_path / value)
         if value == "nonexecutable":
             write(tmp_path / value, b"owned", 0o644)
-        args += ["--node", selected]
-    monkeypatch.setattr(sys, "argv", args)
-    with pytest.raises((ValueError, FileNotFoundError)):
+        monkeypatch.setenv("TELESCOPE_FIXTURE_NODE", selected)
+    calls = []
+    monkeypatch.setattr(
+        gates.check, "source_identity", lambda root: {"head": "a" * 40, "tree": "b" * 40}
+    )
+
+    class StopBeforeBuild:
+        def __init__(self, output, root):
+            pass
+
+        def run(self, label, *args, **kwargs):
+            assert "TELESCOPE_FIXTURE_NODE" not in kwargs["env"]
+            calls.append(label)
+            raise RuntimeError("owned stop before any gate command")
+
+    monkeypatch.setattr(gates.check, "Stages", StopBeforeBuild)
+    monkeypatch.setattr(sys, "argv", ["check", "--artifacts", str(tmp_path / "artifacts")])
+    with pytest.raises(RuntimeError, match="owned stop before"):
         gates.check.main()
-    assert calls == [] and not (tmp_path / "artifacts").exists()
+    assert calls == ["lint"] and list(claimed.iterdir()) == []

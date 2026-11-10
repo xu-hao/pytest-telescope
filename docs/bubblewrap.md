@@ -1,8 +1,8 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 Tests without a scope declaration run as ordinary pytest every time. Tests with a
 declaration run in a Bubblewrap sandbox and can reuse a previous successful result.
@@ -17,8 +17,9 @@ baseline. See the
 
 ## Frozen Git checkout (development contract)
 
-This explicit interface is under development; it is not a claim that the published
-0.1.0a6 package supports it. `git="frozen-checkout-v1"` scopes a case and grants an
+This section preserves a deferred design contract. The current four-component candidate
+and published 0.1.0a6 do not implement the selector or frozen-checkout/history capture.
+Under the future contract, `git="frozen-checkout-v1"` would scope a case and grant an
 owned, integrity-verified read-only Git checkout at `/project` and the existing project
 host-path alias. The supported committed source tree, normalized index, HEAD and
 reachable local branch and tag history are visible. Untracked files require separate
@@ -97,7 +98,7 @@ unchanged. The snapshot does not claim full host-system, locale, NSS or network 
 
 ## Which route a case takes
 
-A case is *scoped* when it has an `inputs`, `bundles`, `distributions`, `env`, `tools` or `git` field in its
+A case is *scoped* when it has an `inputs`, `bundles`, `distributions`, `env` or `tools` field in its
 literal declarations. Declarations inherit from module `pytestmark`,
 class, function and `pytest.param(..., marks=...)` levels, and a literal empty list still
 counts. Every other case is *ordinary*.
@@ -151,7 +152,7 @@ invocation. Inside, the filesystem looks like this:
 | `/tmp`, `/dev/shm` | Private, empty, discarded scratch | writable |
 | Everything else, such as `/home` outside the environment and `/run` | Absent | read-only |
 
-Explicit frozen Git and tool declarations add only their documented views. A selected
+Explicit frozen tool declarations add only their documented views. A selected
 native tool replaces `/etc` and may also replace library-search directories with the
 narrower frozen view [below](#frozen-tools-and-runtime-files-development-contract);
 without it the table is unchanged.

@@ -123,4 +123,4 @@ def test_authenticated_helper_marker_cannot_be_borrowed_by_a_guarded_case(
     with pytest.raises(DeclarationError):
         controller.run(joint_project.root, fixture_guard="available-v1", timeout=20)
     assert modes and "collection" in modes
-    assert "batch" not in modes and "execution" not in modes
+    assert all(mode not in modes for mode in ("batch", "guard-batch", "execution"))

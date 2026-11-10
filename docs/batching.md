@@ -1,8 +1,8 @@
 # Optional identical-scope batches
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 Batch mode lets scoped tests share a pytest session and its fixtures. It can reduce
 startup and fixture setup time when tests in the same module need exactly the same
@@ -38,7 +38,7 @@ the host's CPUs. Batching does not change which source or metadata a test can re
 Cases share a batch only when they belong to the same suite and source module and have
 exactly equal readable files, declared absence, generated metadata, effective environment
 names and captured presence/value context, and cache policy.
-The development frozen Git declaration and its context also participate in equality;
+Under the deferred frozen Git design, its declaration and context would participate in equality;
 Git consumers and nonconsumers remain in separate groups.
 Frozen tools likewise require exactly equal selected names and complete closure identity:
 manifest/lock records, bytes/modes/links, original and logical aliases, command mappings,

@@ -204,8 +204,13 @@ python -m pytest -q benchmarks/frozen_runtime/test_programs.py \
   benchmarks/frozen_runtime/test_installed.py --basetemp "$TMPDIR/program-benchmark"
 ```
 
-Preparation inventories but does not run the programs or install a dependency. Existing
-bounded hash/profile checks remain required. Missing or changed prerequisites refuse;
+Preparation inventories but does not run the programs or install a dependency. Before
+reporting readiness, the existing preparation helper validates the exact selected profile
+set, each profile's required documents, the real strict tool-manifest schema and the
+recomputed declaration identity. Receipt reads are bounded to 4 MiB and reject duplicate
+keys, nonfinite values, wrong types and changed hashes. Consumers retain the exact
+selected-profile identity/hash check. These controls use the explicit preparation path;
+they are not coupled to the default candidate gate. Missing or changed prerequisites refuse;
 do not discover a replacement, install, download, skip a node or reuse stale readiness.
 Use owned scratch, explicit caller resources and finite deadlines. The default gate
 does not require these profiles or receipt and does not dispatch these nodes. A bounded
