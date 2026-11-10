@@ -167,7 +167,7 @@ class Projection:
             self.entries[empty] = ("file", info.st_dev, info.st_ino, 0o444, 0)
         for directory in sorted(self.directories, key=lambda path: len(path.parts), reverse=True):
             row = self.entries.get(directory)
-            directory.chmod(row[1] & 0o555 if row and row[0] == "directory" else 0o555)
+            self.capture.owned_directories.freeze(directory, row[1] & 0o555 if row and row[0] == "directory" else 0o555)
         self.directory.chmod(0o555)
 
     def planned_paths(self, originals):
@@ -226,17 +226,7 @@ class Projection:
         if self.directory.is_symlink() or not self.directory.is_dir() or self.directory.stat().st_mode & 0o222:
             raise InfrastructureError("owned tool projection root changed")
         expected = set(self.entries) | self.directories
-        actual = set()
-        pending = [self.directory]
-        while pending:
-            directory = pending.pop()
-            with os.scandir(directory) as children:
-                for child in children:
-                    budget.tick(visit=True)
-                    path = Path(child.path)
-                    actual.add(path)
-                    if child.is_dir(follow_symlinks=False):
-                        pending.append(path)
+        actual = {self.directory / name for name in self.capture.owned_directories.names(self.directory, budget) if name != "."}
         if actual != expected:
             raise InfrastructureError("owned tool projection membership changed")
         for filename, row in self.entries.items():

@@ -121,14 +121,17 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
         raise InfrastructureError("cannot capture or verify a frozen-tool input") from exc
 
 
-def _tree_names(source, budget):
+def _tree_names(source, budget, open_directory=None, *, owned=False):
     """Complete tree enumeration via owned descriptors; never follow directory links."""
+    if open_directory is None:
+        def open_directory(path, parent, leaf):
+            return os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
     found = {"."}
     with _parent(source) as (parent, leaf):
         info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
         if not stat.S_ISDIR(info.st_mode):
             return found
-        descriptor = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        descriptor = open_directory(source, parent, leaf)
     pending = [(descriptor, ".")]
     try:
         while pending:
@@ -139,16 +142,22 @@ def _tree_names(source, budget):
                     for entry in children:
                         budget.tick(visit=True)
                         name = str(Path(prefix) / entry.name)
-                        if len(found) >= declaration.MAX_ENTRIES:
+                        if len(found) >= (declaration.MAX_VISITS if owned else declaration.MAX_ENTRIES):
+                            if owned:
+                                raise InfrastructureError("owned frozen-tool tree exceeds its entry limit")
                             declaration.unsupported("bounds", "frozen-tool tree exceeds its entry limit")
                         if declaration.PROTECTED_PARTS.intersection(Path(name).parts):
+                            if owned:
+                                raise InfrastructureError("owned frozen-tool tree contains an unexpected namespace")
                             declaration.unsupported("layout", "frozen-tool tree contains a protected namespace")
                         found.add(name)
                         item = os.stat(entry.name, dir_fd=current, follow_symlinks=False)
                         if stat.S_ISDIR(item.st_mode):
-                            child = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current)
+                            child = open_directory(Path(source) / name, current, entry.name)
                             pending.append((child, name))
                         elif not (stat.S_ISREG(item.st_mode) or stat.S_ISLNK(item.st_mode)):
+                            if owned:
+                                raise InfrastructureError("owned frozen-tool tree contains an unsupported type")
                             raise DeclarationError("frozen-tool tree contains an unsupported type")
                 if _signature(os.fstat(current)) != before:
                     raise InfrastructureError("frozen-tool tree changed during enumeration")
@@ -158,6 +167,59 @@ def _tree_names(source, budget):
         for descriptor, _ in pending:
             os.close(descriptor)
     return found
+
+
+class OwnedDirectories:
+    """Read handles for owned directories whose final mode forbids reopening.
+
+    Never acquire these from declared source paths or pass them to workers. Keeping
+    the already-open handle avoids changing permissions while a view is in use.
+    """
+
+    def __init__(self):
+        self.handles = {}
+        self.lock = threading.RLock()
+
+    def freeze(self, path, mode):
+        path = Path(path)
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        retained = False
+        try:
+            opened = os.fstat(descriptor)
+            current = path.lstat()
+            if opened.st_uid != os.getuid() or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+                raise InfrastructureError("owned frozen-tool directory changed before freezing")
+            os.fchmod(descriptor, mode)
+            if not mode & 0o400:
+                if path in self.handles:
+                    raise InfrastructureError("owned frozen-tool directory frozen twice")
+                self.handles[path] = descriptor
+                retained = True
+        finally:
+            if not retained:
+                os.close(descriptor)
+
+    def open(self, path, parent, leaf):
+        held = self.handles.get(Path(path))
+        if held is None:
+            return os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        opened = os.fstat(held)
+        current = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(current.st_mode) or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+            raise InfrastructureError("owned frozen-tool directory moved after freezing")
+        # dup shares the directory offset; names() serializes complete scans.
+        os.lseek(held, 0, os.SEEK_SET)
+        return os.dup(held)
+
+    def names(self, path, budget):
+        with self.lock:
+            return _tree_names(path, budget, self.open, owned=True)
+
+    def close(self):
+        with self.lock:
+            while self.handles:
+                _, descriptor = self.handles.popitem()
+                os.close(descriptor)
 
 
 def _remove(directory):
@@ -181,12 +243,16 @@ def _remove(directory):
         if before.st_uid != os.getuid():
             raise CleanupError("frozen-tool cleanup encountered unowned material")
         if stat.S_ISDIR(before.st_mode):
-            descriptor = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            anchor = os.open(leaf, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            descriptor = None
             try:
-                opened = os.fstat(descriptor)
-                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                opened = os.fstat(anchor)
+                if opened.st_uid != os.getuid() or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
                     raise CleanupError("owned frozen-tool cleanup directory changed")
-                os.fchmod(descriptor, stat.S_IMODE(opened.st_mode) | 0o700)
+                # This proc reference identifies our held owned inode, not a
+                # mutable pathname or a declared-source/symlink target.
+                os.chmod(f"/proc/self/fd/{anchor}", stat.S_IMODE(opened.st_mode) | 0o700)
+                descriptor = os.open(".", os.O_RDONLY | os.O_DIRECTORY, dir_fd=anchor)
                 with os.scandir(descriptor) as children:
                     for entry in children:
                         remove(descriptor, entry.name)
@@ -196,7 +262,9 @@ def _remove(directory):
                     raise CleanupError("owned frozen-tool cleanup directory moved")
                 os.rmdir(leaf, dir_fd=parent)
             finally:
-                os.close(descriptor)
+                if descriptor is not None:
+                    os.close(descriptor)
+                os.close(anchor)
         elif stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
             check()
             os.unlink(leaf, dir_fd=parent)
@@ -236,6 +304,7 @@ class Capture:
         self.view_lock = threading.RLock()
         self.sandbox = sandbox
         self.materialized = set()
+        self.owned_directories = OwnedDirectories()
 
     def _budget(self, deadline=None):
         return Budget(time.monotonic() + self.timeout if deadline is None else deadline, self.cancellation)
@@ -266,6 +335,7 @@ class Capture:
         self._cleanup()
 
     def _cleanup(self):
+        self.owned_directories.close()
         _remove(self.directory)
         self.materialized.clear()
 
@@ -332,7 +402,7 @@ class Capture:
                     self.sources[name, root["id"], row["path"]] = _measure(filename, row, budget, frozen / row["path"])
                 for row in reversed(ordered):
                     if row["kind"] == "directory":
-                        (frozen / row["path"]).chmod(row["mode"] & 0o555)
+                        self.owned_directories.freeze(frozen / row["path"], row["mode"] & 0o555)
             target.chmod(0o555)
             graph_budget = self._budget(deadline)
             graph = Graph(tool, target, graph_budget)
@@ -357,7 +427,7 @@ class Capture:
                 for root in tool.document["roots"]:
                     if root["coverage"] == "tree" and _tree_names(Path(root["source"]), budget) != {row["path"] for row in root["entries"]}:
                         raise InfrastructureError("frozen-tool source tree changed after capture")
-                    if _tree_names(self.directory / name / root["id"], frozen_budget) != {row["path"] for row in root["entries"]}:
+                    if self.owned_directories.names(self.directory / name / root["id"], frozen_budget) != {row["path"] for row in root["entries"]}:
                         raise InfrastructureError("owned frozen-tool tree failed integrity verification")
                     for row in root["entries"]:
                         observed = _measure(Path(root["source"]) / row["path"], row, budget)
