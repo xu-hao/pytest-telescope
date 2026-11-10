@@ -6,15 +6,18 @@ import re
 from pathlib import PurePosixPath
 
 from . import markers
-from .model import DeclarationError, InfrastructureError, regular_bytes
+from .model import DeclarationError, InfrastructureError, fingerprint, regular_bytes
 
 
 class FrozenRegistry:
     """Parse each frozen Python import origin once, selecting each view separately."""
 
-    def __init__(self, root, records):
+    def __init__(self, root, records, tool_links):
         self.root = root
         self.records = {}
+        self.tool_links = {
+            name: (row["target"], fingerprint(row)) for name, row in tool_links.items()
+        }
         self.parsed = {}
         self.source_bytes = self.nodes = self.markers = 0
         fields = {
@@ -49,11 +52,22 @@ class FrozenRegistry:
             if record["kind"] == "symlink" and (
                 type(record["target"]) is not str
                 or not record["target"]
-                or record["target"].startswith("/")
+                or (record["target"].startswith("/") and name not in self.tool_links)
                 or "\x00" in record["target"]
             ):
                 raise InfrastructureError("invalid frozen declaration link")
             self.records[name] = dict(record)
+        for name, (target, _) in self.tool_links.items():
+            if self.records.get(name) != {"path": name, "kind": "symlink", "target": target}:
+                raise InfrastructureError("frozen tool link disagrees with its selected binding")
+
+    def verify_link(self, name):
+        try:
+            actual = (self.root / name).readlink().as_posix()
+        except OSError as exc:
+            raise InfrastructureError("cannot verify frozen declaration source link") from exc
+        if actual != self.records[name]["target"]:
+            raise InfrastructureError("frozen declaration source link changed")
 
     @staticmethod
     def canonical_path(name):
@@ -74,6 +88,13 @@ class FrozenRegistry:
             raise InfrastructureError("declaration view has no frozen source record")
         sources = {}
         for origin in sorted(selected):
+            if origin in self.tool_links:
+                binding = unit.tool_links.get(origin)
+                if binding is None or fingerprint(binding) != self.tool_links[origin][1]:
+                    raise InfrastructureError("frozen tool link is not selected by this view")
+                self.verify_link(origin)
+                # Tool targets are captured separately, never parsed as project helper origins.
+                continue
             if not origin.endswith(".py"):
                 continue
             name = origin
@@ -81,16 +102,11 @@ class FrozenRegistry:
             while self.records[name]["kind"] == "symlink":
                 if name in seen or len(seen) >= 64:
                     raise InfrastructureError("cyclic frozen declaration source link")
+                if name in self.tool_links:
+                    raise InfrastructureError("a tool link is not a project declaration source")
                 seen.add(name)
                 record = self.records[name]
-                try:
-                    actual = (self.root / name).readlink().as_posix()
-                except OSError as exc:
-                    raise InfrastructureError(
-                        "cannot verify frozen declaration source link"
-                    ) from exc
-                if actual != record["target"]:
-                    raise InfrastructureError("frozen declaration source link changed")
+                self.verify_link(name)
                 target = posixpath.normpath(
                     posixpath.join(posixpath.dirname(name), record["target"])
                 )
