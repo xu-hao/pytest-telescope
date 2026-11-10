@@ -35,6 +35,7 @@ def make_plan(root, *, suites=None, structural_files=None):
             for suite in manifest.suites
         ],
         "distributions": sorted(manifest.distributions),
+        "tools": {name: tool.registration for name, tool in sorted(manifest.tools.items())},
         "inputs": [] if manifest.pool is None else manifest.pool.inputs,
         "declarations": [
             {
@@ -44,6 +45,7 @@ def make_plan(root, *, suites=None, structural_files=None):
                 "route": "scoped" if scoping(row) else "ordinary",
                 "inputs": manifest.declarations[row["id"]].inputs,
                 "absent": manifest.declarations[row["id"]].absent,
+                "tools": manifest.declarations[row["id"]].tools,
                 "cache": manifest.declarations[row["id"]].cache,
                 "env": sorted(
                     set(manifest.env)

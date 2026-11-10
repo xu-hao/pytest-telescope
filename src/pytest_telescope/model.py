@@ -15,7 +15,22 @@ from pathlib import Path
 
 
 class DeclarationError(ValueError):
-    pass
+    def __init__(self, *args, accounting=None):
+        super().__init__(*args)
+        self._accounting = None
+        if accounting is not None:
+            self.attach_accounting(accounting)
+
+    @property
+    def accounting(self):
+        return self._accounting
+
+    def attach_accounting(self, value):
+        from .accounting import RefusalAccounting
+
+        if type(value) is not RefusalAccounting or self._accounting is not None:
+            raise TypeError("refusal accounting requires one validated immutable value")
+        self._accounting = value
 
 
 class UnsupportedCapability(DeclarationError):
@@ -29,7 +44,8 @@ class InfrastructureError(RuntimeError):
 
 
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
-SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env"})
+MAX_INPUT_PATHS = 100_000
+SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
 
 
 def render_json(value):
@@ -53,6 +69,8 @@ class Unit:
     cache: bool
     distributions: list[str] = field(default_factory=list)
     env: list[str] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
+    tool_links: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +91,7 @@ class Manifest:
     scoped_files: dict = field(default_factory=dict)
     ordinary_files: dict = field(default_factory=dict)
     pool: Unit | None = None
+    tools: dict = field(default_factory=dict)
 
     @cached_property
     def registry_by_id(self):
@@ -258,7 +277,7 @@ def glob_match(name, pattern):
     return match(0, 0)
 
 
-def expand(root, names, label, *, missing=False, excluded=(), budget=None):
+def expand(root, names, label, *, missing=False, excluded=(), budget=None, tool_links=None):
     found = set()
     if budget is None:
         budget = [0]
@@ -268,6 +287,13 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
             raise DeclarationError("metadata, cache and host environments are not project inputs")
         if name == ".":
             raise DeclarationError("declare project subdirectories or files, not the checkout root")
+        if not missing and tool_links:
+            from .tool_context import linked_input
+
+            linked = linked_input(name, tool_links)
+            if linked is not None:
+                found.add(linked)
+                continue
         if missing:
             if glob.has_magic(name):
                 raise DeclarationError("expected-absent paths cannot contain globs")
@@ -304,6 +330,9 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
                 rel = selected.relative_to(root).as_posix()
                 if excluded_path(rel, excluded):
                     raise DeclarationError("repository metadata and cache are not project inputs")
+                if tool_links and rel in tool_links:
+                    found.add(rel)
+                    continue
                 if not selected.resolve(strict=False).is_relative_to(root):
                     raise DeclarationError("input symlink escapes project root")
                 if any(
@@ -325,7 +354,7 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None):
                         "inputs must be regular files, directories, or leaf symlinks"
                     )
                 found.add(rel)
-                if len(found) > 100_000:
+                if len(found) > MAX_INPUT_PATHS:
                     raise DeclarationError("expanded declarations exceed 100000 paths")
     return sorted(found)
 
@@ -344,6 +373,7 @@ REMOVED_SETTINGS = {
 
 
 def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
+    from . import tool_context
     from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
@@ -372,8 +402,19 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     mapping(
         spec,
         "pytest_telescope",
-        {"defaults", "bundles", "test_roots", "env", "suites", "distributions", "execution"},
+        {
+            "defaults",
+            "bundles",
+            "test_roots",
+            "env",
+            "suites",
+            "distributions",
+            "execution",
+            "tools",
+        },
     )
+    tool_definitions = tool_context.registrations(spec.get("tools", {}))
+    tool_links = {}
     bundles = mapping(spec.get("bundles", {}), "bundles")
     if len(bundles) > 256 or any(not name or len(name) > 128 for name in bundles):
         raise DeclarationError("declare at most 256 bundles with names of 1 to 128 characters")
@@ -385,7 +426,13 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         key = (tuple(names), missing)
         if key not in expansions:
             expansions[key] = expand(
-                root, names, label, missing=missing, excluded=excluded, budget=budget
+                root,
+                names,
+                label,
+                missing=missing,
+                excluded=excluded,
+                budget=budget,
+                tool_links=tool_links,
             )
         return expansions[key]
 
@@ -429,38 +476,49 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     execution = spec.get("execution", {})
     worker_count(execution)
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
+    pending_inputs = []
 
     def declaration(item, label):
         item = mapping(
-            item, label, {"inputs", "bundles", "absent", "cache", "distributions", "env"}
+            item, label, {"inputs", "bundles", "absent", "cache", "distributions", "env", "tools"}
         )
-        inputs = set(expanded(item.get("inputs", []), label + " inputs"))
+        # Expand after structural discovery establishes the potential tool bindings.
+        # A function may inherit the tool owning one of its project directory links.
+        inputs = sorted(set(sequence(item.get("inputs", []), label + " inputs")))
+        dependencies = []
         absent = set(expanded(item.get("absent", []), label + " absence", missing=True))
         metadata = set(sequence(item.get("distributions", []), "distributions"))
+        selected_tools = set(sequence(item.get("tools", []), "tools"))
         env = set(environment_names(item.get("env", [])))
+        if selected_tools - tool_definitions.keys():
+            raise DeclarationError("unknown frozen tool")
         if metadata - distributions.keys():
             raise DeclarationError("unknown local distribution")
         for dependency in sequence(item.get("bundles", []), "bundle references"):
             child = bundle(dependency)
-            inputs.update(child.inputs)
+            dependencies.append(child)
             absent.update(child.absent)
             metadata.update(child.distributions)
+            selected_tools.update(child.tools)
             env.update(child.env)
-        for name in metadata:
-            inputs.update(distributions[name].inputs)
         if type(item.get("cache", True)) is not bool:
             raise DeclarationError("cache must be a boolean")
-        if len(inputs) + len(absent) > 100_000:
+        if len(inputs) + len(absent) > MAX_INPUT_PATHS:
             raise DeclarationError("effective declaration exceeds 100000 paths")
-        return Unit(
+        unit = Unit(
             label,
             [],
-            sorted(inputs),
+            [],
             sorted(absent),
             item.get("cache", True),
             sorted(metadata),
-            sorted(env),
+            env=sorted(env),
+            tools=sorted(selected_tools),
         )
+        # Dependencies are appended first by bundle(), so resolution below is
+        # topological. Only this declaration's own raw patterns are expanded.
+        pending_inputs.append((unit, inputs, dependencies))
+        return unit
 
     def bundle(name):
         if name not in bundles:
@@ -472,7 +530,9 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         if name not in resolved:
             active.add(name)
             mapping(
-                bundles[name], "bundle", {"inputs", "bundles", "absent", "distributions", "env"}
+                bundles[name],
+                "bundle",
+                {"inputs", "bundles", "absent", "distributions", "env", "tools"},
             )
             resolved[name] = declaration(bundles[name], "bundle " + name)
             depth = 1 + max((depths[dep] for dep in bundles[name].get("bundles", [])), default=0)
@@ -552,10 +612,51 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     for row in registry:
         rows_by_file.setdefault(row["file"], []).append(row)
 
+    potential_files = {
+        filename for filename, rows in rows_by_file.items() if any(scoping(row) for row in rows)
+    }
+    needed_tools = set(defaults.tools) if potential_files else set()
+    for row in registry:
+        if row["file"] in potential_files:
+            needed_tools.update(declarations[row["id"]].tools)
+    tools = tool_context.load_selected(root, tool_definitions, needed_tools)
+    tool_links = tool_context.project_links(tools, sorted(tools))
+    for unit, inputs, dependencies in pending_inputs:
+        effective = set(expanded(inputs, "inputs"))
+        for dependency in dependencies:
+            effective.update(dependency.inputs)
+        for name in unit.distributions:
+            effective.update(distributions[name].inputs)
+        if len(effective) + len(unit.absent) > MAX_INPUT_PATHS:
+            raise DeclarationError("effective declaration exceeds 100000 paths")
+        unit.inputs = sorted(effective)
+    for tool in tools.values():
+        hashes[tool.registration["manifest"]] = hashlib.sha256(tool.raw).hexdigest()
+
+    # Validate statically certain inheritance before an ordinary body can run.
+    # Parameter siblings are alternatives: only this parameter plus unconditional
+    # enclosing declarations are known to coexist before actual collection.
+    for row in registry:
+        selected_tools = set(defaults.tools)
+        env = set(global_env) | set(defaults.env)
+        scoped = False
+        for ancestor in rows_by_file[row["file"]]:
+            if ancestor is row or (
+                ancestor["kind"] in {"scope", "decorator"}
+                and row["owner"][: len(ancestor["owner"])] == ancestor["owner"]
+            ):
+                unit = declarations[ancestor["id"]]
+                selected_tools.update(unit.tools)
+                env.update(unit.env)
+                scoped = scoped or scoping(ancestor)
+        if scoped:
+            tool_context.validate_environment(sorted(env), sorted(selected_tools))
+
     def support(files):
         """Every file a scoped case of these files could see, plus its expected absence."""
         inputs = set(files) | set(defaults.inputs)
         absent, metadata = set(defaults.absent), set(defaults.distributions)
+        selected_tools = set(defaults.tools)
         env = set(global_env) | set(defaults.env)
         cache = defaults.cache
         for filename in files:
@@ -564,14 +665,17 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
                 inputs.update(unit.inputs)
                 absent.update(unit.absent)
                 metadata.update(unit.distributions)
+                selected_tools.update(unit.tools)
                 env.update(unit.env)
                 cache = cache and unit.cache
         for name in metadata:
             inputs.update(distributions[name].inputs)
-        return inputs, absent, metadata, cache, env
+        inputs.update(tool_context.project_inputs(tools, sorted(selected_tools)))
+        return inputs, absent, metadata, cache, selected_tools, env
 
     collections, scoped_files, ordinary_files = [], {}, {}
     pool_inputs, pool_absent = set(), set()
+    pool_tools = set()
     for suite in configured_suites:
         wholly = [name for name in suite.inventory if module_scoped(rows_by_file.get(name, []))]
         scoped_files[suite.name] = wholly
@@ -583,13 +687,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         ]
         configuration = {"pyproject.toml", suite.config}
         if with_scope:
-            inputs, absent, _, _, _ = support(with_scope)
+            inputs, absent, _, _, selected_tools, _ = support(with_scope)
             pool_inputs.update(inputs | configuration)
             pool_absent.update(absent)
+            pool_tools.update(selected_tools)
         if not wholly:
             collections.append(None)
             continue
-        inputs, absent, metadata, cache, env = support(wholly)
+        inputs, absent, metadata, cache, selected_tools, env = support(wholly)
         collection = Unit(
             suite.name,
             wholly,
@@ -597,11 +702,25 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             sorted(absent),
             cache,
             sorted(metadata),
-            sorted(env),
+            env=sorted(env),
+            tools=sorted(selected_tools),
+            tool_links=tool_context.project_links(tools, sorted(selected_tools)),
         )
         validate_scope(root, collection)
         collections.append(collection)
-    pool = Unit("pool", [], sorted(pool_inputs), sorted(pool_absent), True) if pool_inputs else None
+    pool = (
+        Unit(
+            "pool",
+            [],
+            sorted(pool_inputs),
+            sorted(pool_absent),
+            True,
+            tools=sorted(pool_tools),
+            tool_links=tool_context.project_links(tools, sorted(pool_tools)),
+        )
+        if pool_inputs
+        else None
+    )
     return Manifest(
         root,
         raw,
@@ -619,10 +738,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         scoped_files,
         ordinary_files,
         pool,
+        tools,
     )
 
 
 def validate_scope(root, unit):
+    from .tool_context import validate_environment
+
+    validate_environment(unit.env, unit.tools)
     inputs, absent = set(unit.inputs), set(unit.absent)
     for test in unit.tests:
         for parent in (root / test).parents:
@@ -633,8 +756,16 @@ def validate_scope(root, unit):
                 raise DeclarationError("declare every applicable conftest.py before execution")
     for name in inputs:
         path = root / name
+        if name in unit.tool_links:
+            from .tool_context import validate_project_link
+
+            validate_project_link(root, unit.tool_links[name])
+            continue
         if path.is_symlink():
-            target = path.resolve().relative_to(root).as_posix()
+            resolved = path.resolve()
+            if not resolved.is_relative_to(root):
+                raise DeclarationError("project link requires its selected frozen tool")
+            target = resolved.relative_to(root).as_posix()
             if target not in inputs and target not in absent:
                 raise DeclarationError(
                     "declare a symlink's target or its expected absence explicitly"
@@ -652,6 +783,8 @@ def scoped_item(manifest, item):
 
 
 def case_unit(manifest, item, suite):
+    from . import tool_context
+
     origins = item["origins"]
     if not scoped_item(manifest, item):
         raise InfrastructureError("an ordinary case has no scoped execution unit")
@@ -660,15 +793,18 @@ def case_unit(manifest, item, suite):
     absent = set(manifest.defaults.absent)
     env = set(manifest.env) | set(manifest.defaults.env)
     cache = manifest.defaults.cache
+    selected_tools = set(manifest.defaults.tools)
     for origin in origins:
         declaration = manifest.declarations[origin]
         inputs.update(declaration.inputs)
         absent.update(declaration.absent)
         metadata.update(declaration.distributions)
+        selected_tools.update(declaration.tools)
         env.update(declaration.env)
         cache = cache and declaration.cache
     for name in metadata:
         inputs.update(manifest.distributions[name].inputs)
+    inputs.update(tool_context.project_inputs(manifest.tools, sorted(selected_tools)))
     unit = Unit(
         item["case_id"],
         [item["file"]],
@@ -676,7 +812,9 @@ def case_unit(manifest, item, suite):
         sorted(absent),
         cache,
         sorted(metadata),
-        sorted(env),
+        env=sorted(env),
+        tools=sorted(selected_tools),
+        tool_links=tool_context.project_links(manifest.tools, sorted(selected_tools)),
     )
     validate_scope(manifest.root, unit)
     return unit
@@ -699,12 +837,19 @@ def snapshot(manifest, unit, destination):
                 before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
                 if stat.S_ISLNK(before.st_mode):
                     text = os.readlink(leaf, dir_fd=directory)
-                    if Path(text).is_absolute():
+                    bound = unit.tool_links.get(name)
+                    if bound is not None:
+                        from .tool_context import validate_project_link
+
+                        validate_project_link(manifest.root, bound)
+                    if bound is None and Path(text).is_absolute():
                         raise InfrastructureError("leaf symlink changed to an absolute target")
                     resolved = source.resolve(strict=False)
-                    if not resolved.is_relative_to(manifest.root) or resolved.relative_to(
-                        manifest.root
-                    ).as_posix() not in {*unit.inputs, *unit.absent}:
+                    if bound is None and (
+                        not resolved.is_relative_to(manifest.root)
+                        or resolved.relative_to(manifest.root).as_posix()
+                        not in {*unit.inputs, *unit.absent}
+                    ):
                         raise InfrastructureError("symlink target changed outside its declaration")
                     target.symlink_to(text)
                     after = os.stat(leaf, dir_fd=directory, follow_symlinks=False)

@@ -27,7 +27,7 @@ from .model import (
     environment_names,
     fingerprint,
 )
-from .result import validate_batch, validate_collection, validate_result
+from .result import validate_batch, validate_collection, validate_guarded_batch, validate_result
 
 try:
     import fcntl
@@ -113,6 +113,17 @@ print(json.dumps({
         for dist in metadata.distributions()
     ),
     "references": references(sys.argv[1]),
+    "startup": {
+        "prefix": sys.prefix, "exec_prefix": sys.exec_prefix,
+        "base_prefix": sys.base_prefix, "base_exec_prefix": sys.base_exec_prefix,
+        "base_executable": getattr(sys, "_base_executable", sys.executable),
+        "stdlib": sysconfig.get_path("stdlib"),
+        "platstdlib": sysconfig.get_path("platstdlib"),
+        "purelib": sysconfig.get_path("purelib"),
+        "platlib": sysconfig.get_path("platlib"),
+        "platlibdir": sys.platlibdir,
+        "sites": site.getsitepackages(),
+    },
 }, sort_keys=True))
 """
 
@@ -157,7 +168,7 @@ def _terminate(process):
             stream.close()
 
 
-def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None):
+def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None, on_start=None):
     """Run one child with bounded merged output; never retain more than the limit.
 
     A timeout of None sets no deadline: the caller's own job bounds that session.
@@ -176,6 +187,8 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
             env=env,
             cwd=cwd,
         )
+        if on_start is not None:
+            on_start()
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
@@ -278,6 +291,13 @@ def recover(root):
             except BlockingIOError:
                 continue
             if directory.exists():
+                # Restore only abandoned captures, under their owner lock. Normal
+                # invocation exit must not retry a terminal Capture cleanup failure.
+                tools = directory / "tools"
+                if os.path.lexists(tools):
+                    from .tool_capture import _remove as remove_tools
+
+                    remove_tools(tools)
                 _remove(directory)
         finally:
             os.close(descriptor)
@@ -337,7 +357,15 @@ def _probe(executable, project):
         valid = (
             type(data) is dict
             and set(data)
-            == {"executable", "prefixes", "path", "identity", "distributions", "references"}
+            == {
+                "executable",
+                "prefixes",
+                "path",
+                "identity",
+                "distributions",
+                "references",
+                "startup",
+            }
             and type(data["executable"]) is str
             and all(
                 type(data[key]) is list and all(type(entry) is str for entry in data[key])
@@ -350,6 +378,7 @@ def _probe(executable, project):
                 for row in data["distributions"]
             )
             and type(data["references"]) is list
+            and type(data["startup"]) is dict
             and all(
                 type(row) is list and len(row) == 3 and all(type(value) is str for value in row)
                 for row in data["references"]
@@ -455,13 +484,21 @@ def _project_paths(description, project):
     return sorted(found)
 
 
-def _base_arguments(box, project=None):
+def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False):
     """System directories, scratch and the environment, except binds inside `project`."""
     arguments = [box.bwrap, *NAMESPACES]
     for directory in SYSTEM_DIRECTORIES:
-        arguments += ["--ro-bind", directory, directory]
+        if directory != "/etc" or not native:
+            arguments += ["--ro-bind", directory, directory]
+    prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
-        if os.path.islink(link):
+        if link in prefixes:
+            row = prefixes[link]
+            if row["kind"] == "symlink":
+                arguments += ["--symlink", row["target"], link]
+            elif row["kind"] == "directory":
+                arguments += ["--ro-bind", link, link]
+        elif os.path.islink(link):
             arguments += ["--symlink", os.readlink(link), link]
         elif os.path.isdir(link):
             arguments += ["--ro-bind", link, link]
@@ -646,7 +683,9 @@ def execute(
     suite_cwd=".",
     suite="default",
     metadata_directory=None,
+    tool_view=None,
     cancellation=None,
+    on_session_start=None,
     selection_disabled=False,
     allow_unknown_selectors=False,
 ):
@@ -656,14 +695,46 @@ def execute(
     scratch = _state(root) / "scratch"
     if directory.parent != scratch or view.parent.parent != scratch or view.name != "project":
         raise InfrastructureError("worker requires an owned frozen view")
-    # An effective environment may combine multiple bounded declarations.
+    # Validate each effective user name before adding trusted worker controls.
     for name in environment:
         environment_names([name])
-    if type(request) is not dict or request.get("mode") not in ("collection", "execution", "batch"):
+    if type(request) is not dict or request.get("mode") not in (
+        "collection",
+        "execution",
+        "batch",
+        "guard-capture",
+        "guard-inspection",
+        "guard-batch",
+    ):
         raise InfrastructureError("worker requires an explicit request protocol")
+    guarded = request["mode"] in ("guard-capture", "guard-inspection", "guard-batch")
     required = (
         {"mode", "registry", "selectors", "context_id"}
         if request["mode"] == "collection"
+        else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id"}
+        if request["mode"] == "guard-capture"
+        else {
+            "mode",
+            "registry",
+            "group_id",
+            "case_ids",
+            "expected_digest",
+            "context_id",
+            "registry_id",
+        }
+        if request["mode"] == "guard-inspection"
+        else {
+            "mode",
+            "registry",
+            "group_id",
+            "case_ids",
+            "expected_digest",
+            "context_id",
+            "registry_id",
+            "graph_id",
+            "guard_protocol",
+        }
+        if request["mode"] == "guard-batch"
         else {"mode", "registry", "group_id", "case_ids", "expected_digest", "context_id"}
         if request["mode"] == "batch"
         else {"mode", "registry", "case_id", "expected_digest", "context_id"}
@@ -673,14 +744,61 @@ def execute(
     if (
         type(request["context_id"]) is not str
         or not re.fullmatch(r"[0-9a-f]{64}", request["context_id"])
-        or (request["mode"] == "batch" and request["context_id"] != request["group_id"])
+        or (
+            request["mode"] in ("batch", "guard-capture", "guard-inspection", "guard-batch")
+            and request["context_id"] != request["group_id"]
+        )
     ):
         raise InfrastructureError("worker request context does not match its protocol")
+    if guarded and (
+        type(request["case_ids"]) is not list
+        or not 0 < len(request["case_ids"]) <= 4096
+        or any(
+            type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case)
+            for case in request["case_ids"]
+        )
+        or len(set(request["case_ids"])) != len(request["case_ids"])
+        or type(request["expected_digest"]) is not str
+        or not re.fullmatch(r"[0-9a-f]{64}", request["expected_digest"])
+        or (
+            request["mode"] in ("guard-inspection", "guard-batch")
+            and (
+                type(request["registry_id"]) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", request["registry_id"])
+            )
+        )
+        or (
+            request["mode"] == "guard-batch"
+            and (
+                request["guard_protocol"] != "batch-guard-v1"
+                or type(request["graph_id"]) is not str
+                or not re.fullmatch(r"[0-9a-f]{64}", request["graph_id"])
+            )
+        )
+    ):
+        raise InfrastructureError("invalid guarded worker request")
     if metadata_directory is not None:
         metadata_directory = Path(metadata_directory).resolve()
         if metadata_directory.parent != directory or metadata_directory.name != "metadata":
             raise InfrastructureError("metadata requires an owned worker directory")
-    nonce = uuid.uuid4().hex
+    nonce = uuid.uuid4().hex + uuid.uuid4().hex if guarded else uuid.uuid4().hex
+    guard_envelope = None
+    if request["mode"] == "guard-capture":
+        guard_envelope = {
+            "protocol": "fixture-capture-v1",
+            "nonce": nonce,
+            "base_context_id": request["context_id"],
+            "case_ids": request["case_ids"],
+        }
+    elif request["mode"] == "guard-inspection":
+        guard_envelope = {
+            "protocol": "fixture-inspection-v1",
+            "nonce": nonce,
+            "context_id": request["context_id"],
+            "group_id": request["group_id"],
+            "case_ids": request["case_ids"],
+            "registry_id": request["registry_id"],
+        }
     control = directory / "control"
     control.mkdir(exist_ok=True)
     request_path = control / "request.json"
@@ -696,6 +814,7 @@ def execute(
                 "metadata": metadata_directory is not None,
                 "selection_disabled": selection_disabled,
                 "allow_unknown_selectors": allow_unknown_selectors,
+                **({"guard_envelope": guard_envelope} if guard_envelope is not None else {}),
             }
         ):
             encoded = chunk.encode()
@@ -705,9 +824,67 @@ def execute(
             stream.write(encoded)
     request_path.chmod(0o444)
     project = Path(root).resolve()
-    argv = [*_base_arguments(box, project), *_project_arguments(box, view, project)]
+    prefixes = ()
+    native = False
+    if tool_view is not None:
+        from .tool_capture import ToolView
+
+        if (
+            type(tool_view) is not ToolView
+            or tool_view.directory.parent.parent != scratch
+            or tool_view.directory.name != "tools"
+        ):
+            raise InfrastructureError("tools require an owned frozen invocation")
+        if tool_view.names and (
+            _inside(project, Path("/tools"))
+            or _inside(Path("/tools"), project)
+            or any(
+                _inside(Path(destination), Path("/tools"))
+                or _inside(Path("/tools"), Path(destination))
+                for _, destination in box.binds
+            )
+        ):
+            raise UnsupportedCapability(
+                "tool:layout", "frozen-tool namespace overlaps the invoking environment or project"
+            )
+        for source, destination in tool_view.bindings:
+            if not source.is_relative_to(tool_view.directory) or source.is_symlink():
+                raise InfrastructureError("tool binding is outside its owned frozen material")
+        prefixes = tool_view.prefixes
+        native = tool_view.native
+        if type(native) is not bool:
+            raise InfrastructureError("tool view has an invalid native profile")
+        if native:
+            from .tool_startup import environment as startup_environment
+            from .tool_startup import signature
+
+            if signature(box) != tool_view.startup_identity:
+                raise InfrastructureError("native startup environment changed after projection")
+            destinations = {destination: source for source, destination in tool_view.bindings}
+            if "/etc" not in tool_view.closed or any(
+                name not in destinations for name in tool_view.closed
+            ):
+                raise InfrastructureError("native view lacks its closed startup projections")
+            for destination in tool_view.closed:
+                if not destinations[destination].is_dir():
+                    raise InfrastructureError("native closed projection is not an owned directory")
+            box = replace(box, binds=startup_environment(box, tool_view.closed))
+        from .tool_context import validate_environment
+
+        validate_environment(environment, tool_view.names)
+    argv = [
+        *_base_arguments(box, project, frozen_prefixes=prefixes, native=native),
+        *_project_arguments(box, view, project),
+    ]
+    if tool_view is not None:
+        for source, destination in tool_view.bindings:
+            argv += ["--ro-bind", str(source), destination]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
+    controlled = box
+    if tool_view is not None and tool_view.command_path is not None:
+        controlled = replace(box, path=tool_view.command_path + ":" + box.path)
+    startup = [box.executable, "-I", "-B", WORKER_PATH]
     argv += [
         "--ro-bind",
         str(WORKER),
@@ -719,19 +896,20 @@ def execute(
         "/",
         "--chdir",
         "/project/" + suite_cwd,
-        *_environment(box, {**environment, "TELESCOPE_REQUEST": REQUEST}),
+        *_environment(controlled, {**environment, "TELESCOPE_REQUEST": REQUEST}),
         "--",
-        box.executable,
-        "-I",
-        "-B",
-        WORKER_PATH,
+        *startup,
     ]
     code, output = capture(
         argv,
         timeout,
         env=_host_environment(),
-        limit=MAX_COLLECTION if request["mode"] in {"collection", "batch"} else MAX_OUTPUT,
+        limit=MAX_COLLECTION
+        if request["mode"]
+        in {"collection", "batch", "guard-capture", "guard-inspection", "guard-batch"}
+        else MAX_OUTPUT,
         cancellation=cancellation,
+        on_start=on_session_start,
     )
     try:
         unsupported = [
@@ -748,6 +926,14 @@ def execute(
                 "project-metadata:runtime-conflict",
                 "local metadata conflicts with a distribution installed in the environment",
             )
+        if (
+            code == 4
+            and len(unsupported) == 1
+            and json.loads(unsupported[0]) == {"capability": "execution:fixture-metadata"}
+        ):
+            raise UnsupportedCapability(
+                "execution:fixture-metadata", "fixture metadata cannot be validated"
+            )
         reports = [
             line[len(b"TELESCOPE_RESULT ") :]
             for line in output.splitlines()
@@ -755,12 +941,54 @@ def execute(
         ]
         if len(reports) != 1:
             message = _bwrap_message(output)
+            if tool_view is not None and tool_view.names and message:
+                message = "the frozen tool filesystem view could not start"
             raise InfrastructureError(
                 "sandbox startup failed: " + message
                 if message
                 else "worker exited without one complete result"
             )
         result = json.loads(reports[0])
+        if request["mode"] in ("guard-capture", "guard-inspection"):
+            if type(result) is dict and result.get("protocol") == "fixture-refusal-v1":
+                if code != 4 or result != {
+                    "protocol": "fixture-refusal-v1",
+                    "nonce": nonce,
+                    "context_id": request["context_id"],
+                    "mode": request["mode"],
+                    "reason": "declaration",
+                }:
+                    raise InfrastructureError("invalid fixture declaration refusal")
+                raise DeclarationError(
+                    "case collection or declarations differ from validated inventory"
+                )
+            from importlib.metadata import version
+
+            from .fixture_guard import (
+                framework_definition_ids,
+                validate_capture,
+                validate_inspection,
+            )
+
+            if code != 0:
+                raise InfrastructureError("fixture inspection worker failed")
+            expected_framework = framework_definition_ids(version("pytest"))
+            if request["mode"] == "guard-capture":
+                return validate_capture(
+                    result,
+                    nonce=nonce,
+                    base_context_id=request["context_id"],
+                    case_ids=request["case_ids"],
+                    framework_ids=expected_framework,
+                )
+            return validate_inspection(
+                result,
+                nonce=nonce,
+                group_id=request["group_id"],
+                case_ids=request["case_ids"],
+                registry_id=request["registry_id"],
+                framework_ids=expected_framework,
+            )
         if type(result) is dict and result.get("leaked_descendants") is True:
             raise InfrastructureError("worker left descendant processes running")
         valid = (
@@ -774,6 +1002,15 @@ def execute(
                 context_id=request["context_id"],
             )
             if request["mode"] == "batch"
+            else validate_guarded_batch(
+                result,
+                nonce=nonce,
+                group_id=request["group_id"],
+                case_ids=request["case_ids"],
+                registry_id=request["registry_id"],
+                graph_id=request["graph_id"],
+            )
+            if request["mode"] == "guard-batch"
             else validate_result(
                 result, nonce=nonce, case_id=request["case_id"], context_id=request["context_id"]
             )

@@ -26,6 +26,7 @@ from .model import (
     InfrastructureError,
     UnsupportedCapability,
     case_unit,
+    environment_names,
     fingerprint,
     load,
     materialize,
@@ -34,10 +35,14 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 7
+SCHEMA = 8
 RESULT_SCHEMA = 4
 OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
 ROUTES = ("ordinary", "scoped")
+
+
+class _FixtureDrift(InfrastructureError):
+    """A guarded execution cannot safely continue or publish results."""
 
 
 def suite_directories(snapshot, suite):
@@ -73,8 +78,18 @@ def lock(path, timeout):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def read_record(path, key, *, kind="execution", case_id=None, group_id=None, case_ids=None):
-    limit = 64 * 1024 * 1024 if kind in {"collection", "batch"} else 1_048_576
+def read_record(
+    path,
+    key,
+    *,
+    kind="execution",
+    case_id=None,
+    group_id=None,
+    case_ids=None,
+    registry_id=None,
+    graph_id=None,
+):
+    limit = 64 * 1024 * 1024 if kind in {"collection", "batch", "guarded-batch"} else 1_048_576
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor, "rb") as stream:
@@ -94,11 +109,25 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
             or record["checksum"] != fingerprint(result)
         ):
             return None
-        from .result import validate_batch, validate_collection, validate_result
+        from .result import (
+            validate_batch,
+            validate_collection,
+            validate_guarded_batch,
+            validate_result,
+        )
 
         valid = (
             validate_collection(result, successful_only=True, context_id=key)
             if kind == "collection"
+            else validate_guarded_batch(
+                result,
+                successful_only=True,
+                group_id=group_id,
+                case_ids=case_ids,
+                registry_id=registry_id,
+                graph_id=graph_id,
+            )
+            if kind == "guarded-batch"
             else validate_batch(
                 result, successful_only=True, group_id=group_id, case_ids=case_ids, context_id=key
             )
@@ -113,8 +142,17 @@ def read_record(path, key, *, kind="execution", case_id=None, group_id=None, cas
 
 
 def write_record(path, key, result, *, kind="execution"):
-    limit = 64 * 1024 * 1024 if kind == "collection" or result["protocol"] == 6 else 1_048_576
-    record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
+    limit = (
+        64 * 1024 * 1024
+        if kind in {"collection", "guarded-batch"} or result["protocol"] == 10
+        else 1_048_576
+    )
+    record = {
+        "schema": SCHEMA,
+        "key": key,
+        "result": result,
+        "checksum": fingerprint(result),
+    }
     content = json.dumps(record, sort_keys=True).encode()
     if len(content) > limit:
         raise InfrastructureError("successful result exceeds record size limit")
@@ -197,9 +235,9 @@ class PendingRecords:
     def __enter__(self):
         return self
 
-    def stage(self, final, key, result, *, kind="execution"):
+    def stage(self, final, key, result, *, kind="execution", guarded=False):
         path = final.with_name(key + "." + self.token + ".pending")
-        write_record(path, key, result, kind=kind)
+        write_record(path, key, result, kind="guarded-batch" if guarded else kind)
         size = path.stat().st_size
         self.paths[path] = (final, kind, size)
         self.sequence += 1
@@ -425,6 +463,48 @@ def _ordinary_group(suite, files, result, effective, attempt_seconds):
     )
 
 
+def _guard_conditions(fixture_guard, condition_checks):
+    """Validate transient caller predicates without rendering their values."""
+    if fixture_guard not in (None, "available-v1") or (
+        fixture_guard is not None and type(fixture_guard) is not str
+    ):
+        raise DeclarationError("invalid fixture guard")
+    if type(condition_checks) not in (tuple, list) or len(condition_checks) > 4096:
+        raise DeclarationError("invalid fixture guard conditions")
+    if fixture_guard is None and condition_checks:
+        raise DeclarationError("fixture guard conditions require the fixture guard")
+    seen, total = set(), 0
+    for row in condition_checks:
+        if type(row) is not dict:
+            raise DeclarationError("invalid fixture guard condition")
+        op = row.get("op")
+        keys = {"case_id", "name", "op", "value"} if op == "equals" else {"case_id", "name", "op"}
+        if set(row) != keys or type(op) is not str or op not in ("absent", "present", "equals"):
+            raise DeclarationError("invalid fixture guard condition")
+        case, name = row["case_id"], row["name"]
+        if type(case) is not str or not re.fullmatch(r"[0-9a-f]{64}", case):
+            raise DeclarationError("invalid fixture guard condition")
+        if type(name) is not str or environment_names([name]) != [name]:
+            raise DeclarationError("invalid fixture guard condition")
+        if (case, name, op) in seen:
+            raise DeclarationError("duplicate fixture guard condition")
+        seen.add((case, name, op))
+        if op == "equals":
+            value = row["value"]
+            if type(value) is not str:
+                raise DeclarationError("invalid fixture guard condition")
+            try:
+                size = len(value.encode("utf-8"))
+            except UnicodeError:
+                size = None
+            if size is None:
+                raise DeclarationError("invalid fixture guard condition")
+            total += size
+            if size > 4096 or total > 1_048_576:
+                raise DeclarationError("fixture guard condition limit exceeded")
+    return condition_checks
+
+
 def run(
     root,
     *,
@@ -438,6 +518,8 @@ def run(
     suites=None,
     execution_mode=None,
     structural_files=None,
+    fixture_guard=None,
+    condition_checks=(),
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -449,7 +531,10 @@ def run(
     from .execution import worker_count
     from .model import Unit, scoped_item
     from .project_metadata import materialize_metadata, metadata_records
+    from .tool_capture import Capture
+    from .tool_context import validate_environment
 
+    condition_checks = _guard_conditions(fixture_guard, condition_checks)
     started = time.monotonic()
     if not math.isfinite(timeout) or not 0.1 <= timeout <= 3600:
         raise DeclarationError("timeout must be between 0.1 and 3600 seconds")
@@ -460,8 +545,16 @@ def run(
     )
     manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
     mode = choose_mode(manifest.execution, execution_mode)
+    if fixture_guard is not None:
+        if mode != "batch" or any(manifest.ordinary_files[suite.name] for suite in manifest.suites):
+            raise UnsupportedCapability(
+                "execution:fixture-profile", "fixture guard requires scoped batch execution"
+            )
+        from .fixture_guard import framework_definition_ids
+
+        framework_definition_ids(version("pytest"))
     concurrency = worker_count(manifest.execution, workers)
-    profile = mode + "-v2"
+    profile = "batch-available-v1" if fixture_guard else mode + "-v2"
     configured = list(zip(manifest.suites, manifest.units))
     all_tests = set().union(*(set(suite.inventory) for suite, _ in configured))
     all_unit = Unit("all", sorted(all_tests), [], [], True)
@@ -481,6 +574,7 @@ def run(
     environment = {name: os.environ.get(name) for name in sorted(declared_environment)}
 
     def unit_environment(unit):
+        validate_environment(unit.env, unit.tools)
         return {name: environment[name] for name in unit.env}
 
     observations = [
@@ -513,6 +607,7 @@ def run(
     progress = dict(
         grouping_complete=False, published=False, setup=None, scoped_rows=False, parked=0
     )
+    guard_state = {"admitted": False, "conditions": []}
 
     def observation(suite, route):
         return next(
@@ -527,9 +622,9 @@ def run(
             progress["setup"] = time.monotonic() - started
 
     def summary():
-        if not progress["scoped_rows"]:
-            # Known scoped cases stay accounted when planning stopped before their groups.
-            for suite, item, _ in scoped:
+        represented = {(row["suite"], row["case_id"]) for row in results}
+        for suite, item, _ in scoped:
+            if (suite.name, item["case_id"]) not in represented:
                 results.append(
                     _row(item, suite, "scoped", "not-selected")
                     if not item["selected"]
@@ -537,8 +632,13 @@ def run(
                         item, suite, "scoped", "infrastructure_error", "execution not started"
                     )
                 )
-                progress["parked"] += item["selected"]
-            progress["scoped_rows"] = True
+        progress["parked"] = sum(
+            row["selected"]
+            and row["group_id"] is None
+            and row["attempts"] == 0
+            and row["outcome"] == "infrastructure_error"
+            for row in results
+        )
         if mode == "batch":
             for row in results:
                 if row["route"] == "scoped":
@@ -596,8 +696,8 @@ def run(
                 for skip in row["skips"]
             ],
         )
-        return dict(
-            schema=RESULT_SCHEMA,
+        report = dict(
+            schema=5 if fixture_guard else RESULT_SCHEMA,
             kind="run",
             status=status,
             execution=dict(mode=mode, profile=profile, workers=concurrency),
@@ -633,6 +733,34 @@ def run(
             if progress["setup"] is not None
             else time.monotonic() - started,
         )
+        if fixture_guard:
+            report["fixture_guard"] = {
+                "profile": fixture_guard,
+                "state": "admitted" if guard_state["admitted"] else "unavailable",
+                "conditions": guard_state["conditions"],
+            }
+        return report
+
+    def retain_refusal(error):
+        if progress["setup"] is not None:
+            from . import model
+            from .accounting import FIELDS, RefusalAccounting
+
+            observed = summary()
+            metadata = error_result(error, fixture_guard=fixture_guard)
+            fields = FIELDS
+            if fixture_guard:
+                metadata["fixture_guard"] = observed["fixture_guard"]
+                fields = fields | {"fixture_guard"}
+            try:
+                accounting = RefusalAccounting(
+                    {name: observed[name] for name in fields},
+                    metadata=metadata,
+                    maximum=model.MAX_OUTPUT_BYTES,
+                )
+                error.attach_accounting(accounting)
+            except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as exc:
+                raise InfrastructureError("cannot retain valid bounded refusal accounting") from exc
 
     def ordinary_sessions(scoped):
         """Run each suite's ordinary session once; False when its inventory failed."""
@@ -652,12 +780,8 @@ def run(
                 row["outcome"] = "infrastructure_error"
                 stop("infrastructure_error", str(exc))
                 return False
-            if result["declaration_error"]:
-                raise DeclarationError(
-                    "unsupported or changed declarations during ordinary collection"
-                )
             row["skips"] = [{**skip, "phase": "collect"} for skip in result["collection_skips"]]
-            if not result["inventory_complete"]:
+            if not result["inventory_complete"] and not result["declaration_error"]:
                 # Includes pytest's own startup errors, such as a failing conftest import.
                 row["outcome"] = "failed"
                 stop(
@@ -698,6 +822,13 @@ def run(
                         )
                     )
                     continue
+                if item["case_id"] not in outcomes:
+                    if result["declaration_error"] and not result["dispatch_started"]:
+                        # Collection observed this selection, but no execution
+                        # membership was established before its typed refusal.
+                        results.append(_row(item, suite, "ordinary", "infrastructure_error"))
+                        continue
+                    raise InfrastructureError("ordinary result omitted an execution member")
                 status = outcomes[item["case_id"]]["outcome"]
                 unit = _row(
                     item,
@@ -725,21 +856,37 @@ def run(
                 results.append(unit)
             groups.append(group)
             row.update(
-                outcome="executed",
+                outcome="failed" if result["declaration_error"] else "executed",
                 collected=len(result["items"]),
-                inventory_digest=fingerprint(
+                inventory_digest=None
+                if result["declaration_error"]
+                else fingerprint(
                     sorted([suite.name, item["case_id"], item["file"]] for item in result["items"])
                 ),
             )
+            if result["declaration_error"]:
+                # A strict incomplete inventory can still carry genuine member
+                # reports. Retain them before raising; never plan or replay it.
+                raise DeclarationError(
+                    "unsupported or changed declarations during ordinary collection"
+                )
         return True
 
     if not manifest.scope_possible:
+        if fixture_guard and condition_checks:
+            from .fixture_guard import evaluate_conditions
+
+            evaluate_conditions(condition_checks, [])
         # All-ordinary: no sandbox, frozen copy, cache directory or lock.
-        if ordinary_sessions(scoped):
-            if requested_selectors - seen_aliases - seen_files:
-                raise DeclarationError("selector does not identify a collected case")
-            progress["grouping_complete"] = True
-        return summary()
+        try:
+            if ordinary_sessions(scoped):
+                if requested_selectors - seen_aliases - seen_files:
+                    raise DeclarationError("selector does not identify a collected case")
+                progress["grouping_complete"] = True
+            return summary()
+        except DeclarationError as error:
+            retain_refusal(error)
+            raise
 
     try:
         box = sandbox.prepare(manifest.root)
@@ -773,13 +920,17 @@ def run(
                 inventory_state, count=max(8, len(configured)), size=64 * 1024 * 1024
             )
             with PendingRecords(store, inventory_store) as pending:
-                with sandbox.invocation(manifest.root) as pool_directory:
+                with (
+                    sandbox.invocation(manifest.root) as pool_directory,
+                    Capture(manifest, pool_directory, timeout, cancellation, sandbox=box) as tools,
+                ):
                     pool = pool_directory / "project"
                     records = snapshot(manifest, manifest.pool, pool)
                     frozen_registry = FrozenRegistry(pool, records)
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
+                    tools.verify_project(record_map)
                     frozen_scope_hashes, metadata_hashes = {}, {}
 
                     def metadata_identity(names):
@@ -794,6 +945,7 @@ def run(
                         row = observation(suite, "scoped")
                         effective, options, selectors, disabled = invocations[suite.name]
                         registry = frozen_registry.for_view(collection_unit)
+                        collection_tools = tools.view(collection_unit.tools)
                         collection_environment = unit_environment(collection_unit)
                         inventory_key = fingerprint(
                             {
@@ -806,6 +958,11 @@ def run(
                                 "metadata": metadata_identity(collection_unit.distributions),
                                 "files": collection_unit.tests,
                                 "registry": registry,
+                                **(
+                                    {"tools": collection_tools.identity}
+                                    if collection_unit.tools
+                                    else {}
+                                ),
                                 "environment": fingerprint(collection_environment),
                             }
                         )
@@ -854,6 +1011,7 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        tool_view=tools.view(collection_unit.tools),
                                         selection_disabled=disabled,
                                         allow_unknown_selectors=True,
                                         request={
@@ -872,7 +1030,7 @@ def run(
                         row["skips"] = [
                             {**skip, "phase": "collect"} for skip in collected["collection_skips"]
                         ]
-                        if collected["exit_code"] == 4:
+                        if collected["declaration_error"]:
                             raise DeclarationError(
                                 "unsupported or changed declarations during sandboxed collection"
                             )
@@ -937,6 +1095,7 @@ def run(
                         signature = (suite.name, item["file"], tuple(item["origins"]))
                         if signature not in scopes:
                             unit = case_unit(manifest, item, suite)
+                            tool_view = tools.view(unit.tools)
                             inputs = tuple(unit.inputs)
                             if inputs not in frozen_scope_hashes:
                                 frozen_scope_hashes[inputs] = fingerprint(
@@ -951,6 +1110,7 @@ def run(
                                         "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
                                         "registry": frozen_registry.for_view(unit),
+                                        **({"tools": tool_view.identity} if unit.tools else {}),
                                         "environment": fingerprint(unit_environment(unit)),
                                     }
                                 ),
@@ -995,6 +1155,84 @@ def run(
                         )
 
                     candidates = group_jobs(jobs, mode, state)
+                    if fixture_guard:
+                        from .fixture_guard import (
+                            evaluate_conditions,
+                            guarded_group_id,
+                            require_capture_match,
+                            require_conservation,
+                        )
+
+                        def inspect_candidate(candidate, inspection_mode):
+                            suite, unit = candidate["suite"], candidate["unit"]
+                            for attempt in range(2):
+                                try:
+                                    with sandbox.invocation(manifest.root) as directory:
+                                        frozen = directory / "project"
+                                        materialize(pool, unit, frozen, record_map)
+                                        suite_directories(frozen, suite)
+                                        metadata = directory / "metadata"
+                                        materialize_metadata(
+                                            manifest.distributions, unit.distributions, metadata
+                                        )
+                                        request = {
+                                            "mode": inspection_mode,
+                                            "registry": candidate["registry"],
+                                            "expected_digest": candidate["digest"],
+                                            "group_id": candidate["key"],
+                                            "case_ids": candidate["case_ids"],
+                                            "context_id": candidate["key"],
+                                        }
+                                        if inspection_mode == "guard-inspection":
+                                            request["registry_id"] = candidate["capture"][
+                                                "registry_id"
+                                            ]
+                                        return sandbox.execute(
+                                            box,
+                                            frozen,
+                                            _session_arguments(
+                                                suite,
+                                                candidate["options"],
+                                                ["/project/" + candidate["item"]["file"]],
+                                            ),
+                                            candidate["environment"],
+                                            timeout,
+                                            root=manifest.root,
+                                            invocation_directory=directory,
+                                            suite_root=suite.root,
+                                            suite_cwd=suite.cwd,
+                                            suite=suite.name,
+                                            metadata_directory=metadata,
+                                            request=request,
+                                        )
+                                except (InfrastructureError, OSError) as exc:
+                                    if attempt == 1 or isinstance(exc, sandbox.CleanupError):
+                                        if isinstance(exc, OSError):
+                                            raise InfrastructureError(
+                                                "fixture inspection storage failed"
+                                            ) from exc
+                                        raise
+
+                        inspections = []
+                        for candidate in candidates:
+                            candidate["capture"] = inspect_candidate(candidate, "guard-capture")
+                            candidate["key"] = guarded_group_id(
+                                candidate["key"],
+                                candidate["capture"]["registry_id"],
+                                candidate["capture"]["content_id"],
+                            )
+                            candidate["path"] = state / (candidate["key"] + ".json")
+                            candidate["profile"] = profile
+                            candidate["inspection"] = inspect_candidate(
+                                candidate, "guard-inspection"
+                            )
+                            require_capture_match(candidate["capture"], candidate["inspection"])
+                            inspections.append(candidate["inspection"])
+                        require_conservation(inspections, candidates)
+                        guard_state["conditions"] = evaluate_conditions(
+                            condition_checks, candidates
+                        )
+                        guard_state["admitted"] = True
                     jobs = []
                     for candidate in candidates:
                         candidate["group_index"] = len(groups)
@@ -1004,14 +1242,25 @@ def run(
                             results[index] = row
                     progress["grouping_complete"] = True
                     for candidate in candidates:
+                        tools.verify(candidate["unit"].tools)
                         previous = (
                             read_record(
                                 candidate["path"],
                                 candidate["key"],
-                                kind="batch" if mode == "batch" else "execution",
+                                kind="guarded-batch"
+                                if fixture_guard
+                                else "batch"
+                                if mode == "batch"
+                                else "execution",
                                 case_id=candidate["case_ids"][0],
                                 group_id=candidate["key"],
                                 case_ids=candidate["case_ids"],
+                                registry_id=candidate["inspection"]["registry_id"]
+                                if fixture_guard
+                                else None,
+                                graph_id=candidate["inspection"]["graph_id"]
+                                if fixture_guard
+                                else None,
                             )
                             if candidate["enabled"] and not force
                             else None
@@ -1036,7 +1285,14 @@ def run(
                             else "no valid successful group record"
                         )
                         attempt_started = time.monotonic()
+                        sessions_started = 0
+
+                        def session_started():
+                            nonlocal sessions_started
+                            sessions_started += 1
+
                         for attempt in range(2):
+                            result = None
                             try:
                                 if cancellation.is_set():
                                     raise sandbox.InvocationInterrupted(
@@ -1053,7 +1309,11 @@ def run(
                                     if frozen_registry.for_view(unit) != job["registry"]:
                                         raise InfrastructureError("frozen case registry changed")
                                     request = dict(
-                                        mode="batch" if mode == "batch" else "execution",
+                                        mode="guard-batch"
+                                        if fixture_guard
+                                        else "batch"
+                                        if mode == "batch"
+                                        else "execution",
                                         registry=job["registry"],
                                         expected_digest=job["digest"],
                                         context_id=job["key"],
@@ -1062,6 +1322,12 @@ def run(
                                         request.update(
                                             group_id=job["key"], case_ids=job["case_ids"]
                                         )
+                                        if fixture_guard:
+                                            request.update(
+                                                guard_protocol="batch-guard-v1",
+                                                registry_id=job["inspection"]["registry_id"],
+                                                graph_id=job["inspection"]["graph_id"],
+                                            )
                                     else:
                                         request["case_id"] = item["case_id"]
                                     result = sandbox.execute(
@@ -1078,10 +1344,12 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        tool_view=tools.view(unit.tools),
                                         cancellation=cancellation,
+                                        on_session_start=session_started,
                                         request=request,
                                     )
-                                if result["exit_code"] == 4:
+                                if result["declaration_error"]:
                                     raise DeclarationError(
                                         "case collection or declarations differ from validated inventory"
                                     )
@@ -1089,13 +1357,28 @@ def run(
                                     job,
                                     result,
                                     mode,
-                                    attempts=attempt + 1,
+                                    attempts=sessions_started,
                                     reason=reason if explain else "",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
-                                return projected, group, result, False
+                                return projected, group, result, False, None
+                            except DeclarationError as exc:
+                                cancellation.set()
+                                projected, group = project_result(
+                                    job,
+                                    result,
+                                    mode,
+                                    attempts=sessions_started,
+                                    reason=str(exc),
+                                    attempt_seconds=time.monotonic() - attempt_started,
+                                )
+                                if result is None:
+                                    group["timing_complete"] = False
+                                return projected, group, None, False, exc
                             except (InfrastructureError, OSError) as exc:
-                                terminal = isinstance(exc, sandbox.CleanupError)
+                                terminal = isinstance(
+                                    exc, (sandbox.CleanupError, _FixtureDrift)
+                                ) or (bool(fixture_guard) and attempt == 1)
                                 if terminal:
                                     cancellation.set()
                                 if attempt == 1 or terminal:
@@ -1103,7 +1386,7 @@ def run(
                                         job,
                                         None,
                                         mode,
-                                        attempts=attempt + 1,
+                                        attempts=sessions_started,
                                         reason=str(exc)
                                         if isinstance(exc, InfrastructureError)
                                         else "owned storage operation failed",
@@ -1112,12 +1395,24 @@ def run(
                                     group["timing_complete"] = False
                                     if isinstance(exc, sandbox.InvocationInterrupted):
                                         group["stop_reason"] = "cancelled"
-                                    return projected, group, None, terminal
+                                    return projected, group, None, terminal, None
 
-                    def accept(job, projected, group):
+                    refusal = None
+
+                    def accept(job, projected, group, terminal, error):
+                        nonlocal blocked, refusal
                         groups[job["group_index"]] = group
                         for index, row in projected:
                             results[index] = row
+                        if error is not None and refusal is None:
+                            refusal = error
+                            cancellation.set()
+                        if terminal:
+                            blocked = (
+                                "run stopped after infrastructure failure or cancellation"
+                                if fixture_guard
+                                else "run stopped after owned cleanup failure or cancellation"
+                            )
 
                     active, cursor = {}, 0
                     executor = ThreadPoolExecutor(max_workers=concurrency)
@@ -1136,19 +1431,17 @@ def run(
                             completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
                             for future in completed:
                                 job = active.pop(future)
-                                projected, group, result, terminal = future.result()
-                                accept(job, projected, group)
-                                if terminal:
-                                    blocked = (
-                                        "run stopped after owned cleanup failure or cancellation"
-                                    )
+                                projected, group, result, terminal, error = future.result()
+                                accept(job, projected, group, terminal, error)
                                 if (
                                     result is not None
                                     and result["exit_code"] == 0
                                     and job["enabled"]
                                     and not cancellation.is_set()
                                 ):
-                                    pending.stage(job["path"], job["key"], result)
+                                    pending.stage(
+                                        job["path"], job["key"], result, guarded=bool(fixture_guard)
+                                    )
                                     eligible_groups.add(job["key"])
                     except (sandbox.InvocationInterrupted, KeyboardInterrupt):
                         blocked = (
@@ -1162,24 +1455,26 @@ def run(
                         executor.shutdown(wait=True, cancel_futures=False)
                         for future, job in active.items():
                             if future.done() and not future.cancelled():
-                                projected, group, _, terminal = future.result()
-                                accept(job, projected, group)
-                                if terminal:
-                                    blocked = (
-                                        "run stopped after owned cleanup failure or cancellation"
-                                    )
+                                projected, group, _, terminal, error = future.result()
+                                accept(job, projected, group, terminal, error)
                         if cancellation.is_set():
                             blocked = blocked or "run cancelled"
                             for job in jobs[cursor:]:
                                 groups[job["group_index"]]["stop_reason"] = "cancelled"
                                 for index, _ in job["members"]:
                                     results[index]["reason"] = blocked
+                    if refusal is not None:
+                        raise refusal
+                    tools.verify(tuple(manifest.tools))
                 if blocked is None:
                     pending.publish()
                     progress["published"] = True
                 else:
                     # A completed success is not reusable until every owned copy is removed.
                     stop("infrastructure_error", blocked)
+    except DeclarationError as error:
+        retain_refusal(error)
+        raise
     except (InfrastructureError, OSError) as exc:
         stop(
             "infrastructure_error",
@@ -1210,8 +1505,12 @@ def split_arguments(arguments):
     return options, selectors
 
 
-def error_result(error):
-    """Versioned refusal envelope when no complete inventory can be established."""
+def error_result(error, *, fixture_guard=None):
+    """Versioned typed refusal, retaining established inventory and observations."""
+    if fixture_guard is not None and (
+        type(fixture_guard) is not str or fixture_guard != "available-v1"
+    ):
+        raise DeclarationError("invalid fixture guard")
     result = {
         "schema": RESULT_SCHEMA,
         "kind": "refusal",
@@ -1226,6 +1525,23 @@ def error_result(error):
     }
     if isinstance(error, UnsupportedCapability):
         result["capability"] = error.capability
+    if fixture_guard is not None:
+        result["schema"] = 5
+        result["fixture_guard"] = {
+            "profile": "available-v1",
+            "state": "unavailable",
+            "conditions": [],
+        }
+    if isinstance(error, DeclarationError) and error.accounting is not None:
+        result["inventory_complete"] = error.accounting.inventory_complete
+        result["inventory_digest"] = error.accounting.inventory_digest
+        result["accounting"] = error.accounting.render()
+        if fixture_guard is not None:
+            if error.accounting.fixture_guard is None:
+                raise InfrastructureError("guarded refusal accounting profile mismatch")
+            result["fixture_guard"] = error.accounting.fixture_guard
+        elif error.accounting.fixture_guard is not None:
+            raise InfrastructureError("unguarded refusal accounting profile mismatch")
     return result
 
 
@@ -1246,11 +1562,15 @@ def main(argv=None):
     execution.add_argument("--cache-dir", type=Path)
     execution.add_argument("--timeout", type=float, default=60)
     execution.add_argument("--execution-mode", choices=("case", "batch"))
+    execution.add_argument("--fixture-guard", choices=("available-v1",))
     execution.add_argument("--workers", type=int)
     execution.add_argument("--suite", action="append", dest="suites")
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
+    guard_context = None
     try:
         options = parser.parse_args(argv)
+        if options.command == "run":
+            guard_context = options.fixture_guard
         if options.command == "plan":
             from .plan import make_plan
 
@@ -1270,6 +1590,7 @@ def main(argv=None):
                 workers=options.workers,
                 suites=options.suites,
                 execution_mode=options.execution_mode,
+                fixture_guard=options.fixture_guard,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":
@@ -1282,19 +1603,26 @@ def main(argv=None):
             else 0
         )
     except KeyboardInterrupt:
-        print(json.dumps(error_result(InfrastructureError("invocation interrupted"))))
+        print(
+            render_json(
+                error_result(
+                    InfrastructureError("invocation interrupted"), fixture_guard=guard_context
+                )
+            )
+        )
         return 3
     except DeclarationError as exc:
-        print(json.dumps(error_result(exc)))
+        print(render_json(error_result(exc, fixture_guard=guard_context)))
         return 4
     except InfrastructureError as exc:
-        print(json.dumps(error_result(exc)))
+        print(render_json(error_result(exc, fixture_guard=guard_context)))
         return 3
     except (OSError, RecursionError, MemoryError):
         print(
-            json.dumps(
+            render_json(
                 error_result(
-                    InfrastructureError("bounded project storage or parsing operation failed")
+                    InfrastructureError("bounded project storage or parsing operation failed"),
+                    fixture_guard=guard_context,
                 )
             )
         )

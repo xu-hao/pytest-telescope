@@ -10,6 +10,7 @@ COMMON = {
     "protocol",
     "nonce",
     "exit_code",
+    "declaration_error",
     "complete",
     "leaked_descendants",
     "worker_seconds",
@@ -211,7 +212,7 @@ def _failure_phases(result, rows):
     )
 
 
-def _common(result, nonce, codes, context_id=None):
+def _common(result, nonce, codes, context_id=None, *, nonce_length=32):
     if not _digest(result["context_id"]) or (
         context_id is not None and result["context_id"] != context_id
     ):
@@ -227,13 +228,19 @@ def _common(result, nonce, codes, context_id=None):
             or not _reason(skip["reason"], collection=True)
         ):
             return False
-    if type(result["nonce"]) is not str or not re.fullmatch(r"[0-9a-f]{32}", result["nonce"]):
+    if type(result["nonce"]) is not str or not re.fullmatch(
+        rf"[0-9a-f]{{{nonce_length}}}", result["nonce"]
+    ):
         return False
     if nonce is not None and result["nonce"] != nonce:
         return False
     if type(result["exit_code"]) is not int or result["exit_code"] not in codes:
         return False
     if type(result["complete"]) is not bool or type(result["leaked_descendants"]) is not bool:
+        return False
+    if type(result["declaration_error"]) is not bool or (
+        result["declaration_error"] and (result["exit_code"] != 4 or result["complete"])
+    ):
         return False
     if result["leaked_descendants"]:
         return False
@@ -276,9 +283,9 @@ def validate_result(result, nonce=None, successful_only=False, case_id=None, con
     """Return False for an incompatible or malformed execution record."""
     if type(result) is not dict or set(result) != FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 5:
+    if type(result["protocol"]) is not int or result["protocol"] != 9:
         return False
-    if not _common(result, nonce, (0, 1, 2, 4, 5), context_id):
+    if not _common(result, nonce, (0, 1, 2, 3, 4, 5), context_id):
         return False
     for field in ("collected", "passed", "failed", "skipped"):
         if type(result[field]) is not int or not 0 <= result[field] <= 1:
@@ -335,9 +342,9 @@ def validate_collection(result, nonce=None, successful_only=False, context_id=No
     """Validate real item inventory without interpreting it as executed test success."""
     if type(result) is not dict or set(result) != COLLECTION_FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 8:
+    if type(result["protocol"]) is not int or result["protocol"] != 11:
         return False
-    if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5), context_id):
+    if result["kind"] != "collection" or not _common(result, nonce, (0, 1, 2, 3, 4, 5), context_id):
         return False
     items = result["items"]
     if not _inventory(items):
@@ -424,13 +431,12 @@ def validate_ordinary(result, nonce=None, context_id=None):
         "items",
         "case_results",
         "dispatch_started",
-        "declaration_error",
     }
     if type(result) is not dict or set(result) != fields:
         return False
     if (
         type(result["protocol"]) is not int
-        or result["protocol"] != 3
+        or result["protocol"] != 4
         or result["kind"] != "ordinary"
     ):
         return False
@@ -439,8 +445,7 @@ def validate_ordinary(result, nonce=None, context_id=None):
     if (
         type(result["inventory_complete"]) is not bool
         or type(result["dispatch_started"]) is not bool
-        or type(result["declaration_error"]) is not bool
-        or (result["declaration_error"] and result["exit_code"] != 4)
+        or (result["declaration_error"] and result["inventory_complete"])
         or not _inventory(result["items"])
     ):
         return False
@@ -479,14 +484,21 @@ def validate_ordinary(result, nonce=None, context_id=None):
 
 
 def validate_batch(
-    result, nonce=None, successful_only=False, group_id=None, case_ids=None, context_id=None
+    result,
+    nonce=None,
+    successful_only=False,
+    group_id=None,
+    case_ids=None,
+    context_id=None,
+    *,
+    _nonce_length=32,
 ):
     """Validate one atomic ordered session, including honest partial pytest stops."""
     if type(result) is not dict or set(result) != FIELDS | {"group_id"}:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 6:
+    if type(result["protocol"]) is not int or result["protocol"] != 10:
         return False
-    if not _common(result, nonce, (0, 1, 2, 4, 5), context_id):
+    if not _common(result, nonce, (0, 1, 2, 3, 4, 5), context_id, nonce_length=_nonce_length):
         return False
     identity = result["group_id"]
     if type(identity) is not str or not re.fullmatch(r"[0-9a-f]{64}", identity):
@@ -536,3 +548,31 @@ def validate_batch(
     ):
         return False
     return not successful_only or result["exit_code"] == 0
+
+
+def validate_guarded_batch(
+    result, *, nonce=None, successful_only=False, group_id, case_ids, registry_id, graph_id
+):
+    """Validate the guarded batch protocol without relaxing legacy nonce rules."""
+    extra = {"guard_protocol", "registry_id", "graph_id"}
+    if (
+        type(result) is not dict
+        or set(result) != FIELDS | {"group_id"} | extra
+        or result["guard_protocol"] != "batch-guard-v1"
+        or not _digest(registry_id)
+        or not _digest(graph_id)
+        or result["registry_id"] != registry_id
+        or result["graph_id"] != graph_id
+        or (nonce is not None and not _digest(nonce))
+    ):
+        return False
+    ordinary_fields = {key: value for key, value in result.items() if key not in extra}
+    return validate_batch(
+        ordinary_fields,
+        nonce=nonce,
+        successful_only=successful_only,
+        group_id=group_id,
+        case_ids=case_ids,
+        context_id=group_id,
+        _nonce_length=64,
+    )
