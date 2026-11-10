@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-telescope"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "Declared inputs. Isolated tests. Focused reruns."
 readme = "README.md"
 license = "MIT"
@@ -46,6 +46,9 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
+markers = [
+  "requires_fixture_guard: real fixture-adapter admission, capture, inspection or execution requires supported invoking pytest",
+]
 
 [tool.ruff]
 target-version = "py311"

@@ -17,7 +17,10 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
             return dict(
-                protocol=4,
+                protocol=11,
+                declaration_error=False,
+                context_id=request["context_id"],
+                collection_skips=[],
                 kind="collection",
                 nonce="a" * 32,
                 exit_code=0,
@@ -27,9 +30,15 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
                 worker_seconds=0.1,
                 failures=[],
             )
+        # This stand-in models a successfully started worker, including an
+        # unavailable result after that start. Pre-start faults use other doubles.
+        kwargs["on_session_start"]()
         behavior(request["case_id"], kwargs)
         return dict(
-            protocol=1,
+            protocol=9,
+            declaration_error=False,
+            context_id=request["context_id"],
+            collection_skips=[],
             nonce="a" * 32,
             exit_code=0,
             complete=True,
@@ -39,6 +48,17 @@ def install(root, sandbox_double, module_rows, behavior, *, count=4, fail_outer=
             failed=0,
             skipped=0,
             case_ids=[request["case_id"]],
+            case_results=[
+                dict(
+                    case_id=request["case_id"],
+                    outcome="passed",
+                    complete=True,
+                    reports=[
+                        dict(phase=phase, outcome="passed", skip_reason=None)
+                        for phase in ("setup", "call", "teardown")
+                    ],
+                )
+            ],
             worker_seconds=0.1,
             failures=[],
         )
@@ -179,7 +199,10 @@ def test_failed_collection_is_a_failure_even_with_parked_scoped_cases(
     def execute(*args, request, **kwargs):
         assert request["mode"] == "collection", "no scoped case may run after a failed collection"
         return dict(
-            protocol=4,
+            protocol=11,
+            declaration_error=False,
+            context_id=request["context_id"],
+            collection_skips=[],
             kind="collection",
             nonce="a" * 32,
             exit_code=0,

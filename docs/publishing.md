@@ -28,15 +28,23 @@ package version, and the package must have a license in its metadata and a `LICE
 file.
 
 Each release must document its execution and cache rules and include results from real
-sandbox tests and benchmarks. Version `0.1.0a6` uses ordinary pytest and Bubblewrap
-filesystem views.
+sandbox tests and benchmarks. For the release introducing the explicitly declared frozen Git context, the maintainer
+has waived a new performance campaign. Real sandbox functional tests and
+benchmark-harness correctness checks remain required. Historical timings remain historical; fresh performance
+is unmeasured. Future releases retain the benchmark requirement unless separately waived.
+Version `0.1.0a6` uses ordinary pytest and Bubblewrap filesystem views.
 
 Before each release:
 
 1. Verify the MIT license text, package metadata, README rendering, source, wheel,
-   sdist, and qualification results.
+   sdist, and qualification results. Full qualification uses the default
+   `--functional-profile all`, including supported fixture-guard positives and complete
+   selected/deselected membership evidence. An explicit `core` compatibility result is
+   never a full, release or guarded-landing verdict; the publishing workflow requires `all`.
 2. Retain the GitHub `pypi` environment's release-tag restrictions. This project's
-   release policy has no required-reviewer gate.
+   release policy has no required-reviewer gate. Publication still follows the
+   maintainer's applicable delivery authorization; a build or merge is not that
+   authorization, and the environment setting adds no separate approval step.
 3. Use the configured encrypted GitHub secret `PYPI_API_TOKEN` authorized to publish
    `pytest-telescope`. Never put credentials in source, build artifacts, or logs.
 4. Publish the intended GitHub Release with the exact version tag and describe

@@ -15,7 +15,10 @@ from pytest_telescope.result import validate_batch, validate_collection
 def result_for(request):
     ids = request["case_ids"]
     return dict(
-        protocol=2,
+        protocol=10,
+        declaration_error=False,
+        context_id=request["group_id"],
+        collection_skips=[],
         nonce="a" * 32,
         group_id=request["group_id"],
         case_ids=ids,
@@ -28,7 +31,18 @@ def result_for(request):
         leaked_descendants=False,
         worker_seconds=0.2,
         failures=[],
-        case_results=[dict(case_id=case, outcome="passed", complete=True) for case in ids],
+        case_results=[
+            dict(
+                case_id=case,
+                outcome="passed",
+                complete=True,
+                reports=[
+                    dict(phase=phase, outcome="passed", skip_reason=None)
+                    for phase in ("setup", "call", "teardown")
+                ],
+            )
+            for case in ids
+        ],
     )
 
 
@@ -39,7 +53,10 @@ def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=
     def execute(*args, request, **kwargs):
         if request["mode"] == "collection":
             return dict(
-                protocol=4,
+                protocol=11,
+                declaration_error=False,
+                context_id=request["context_id"],
+                collection_skips=[],
                 kind="collection",
                 nonce="a" * 32,
                 exit_code=0,
@@ -50,6 +67,8 @@ def backend(root, sandbox_double, module_rows, behavior, *, count=3, fail_outer=
                 failures=[],
             )
         assert request["mode"] == "batch"
+        # A successful synthetic launch precedes behavior/result faults.
+        kwargs["on_session_start"]()
         result = result_for(request)
         behavior(request, kwargs, result)
         assert validate_batch(result, group_id=request["group_id"], case_ids=request["case_ids"])
@@ -153,7 +172,8 @@ def test_execution_collection_failure_remains_distinct_from_pytest_stop(
             ],
         )
         result["case_results"] = [
-            dict(case_id=case, outcome="not-run", complete=False) for case in request["case_ids"]
+            dict(case_id=case, outcome="not-run", complete=False, reports=[])
+            for case in request["case_ids"]
         ]
 
     _, active = backend(tmp_path, sandbox_double, module_rows, behavior, count=1)
@@ -203,7 +223,7 @@ def test_malformed_atomic_evidence_cannot_become_a_success(batch_result, mutatio
 
 def test_partial_batch_retains_observed_outcomes_but_is_never_reusable(batch_result):
     batch_result.update(exit_code=2, complete=False, passed=1)
-    batch_result["case_results"][1].update(outcome="not-run", complete=False)
+    batch_result["case_results"][1].update(outcome="not-run", complete=False, reports=[])
     assert validate_batch(batch_result)
     assert not validate_batch(batch_result, successful_only=True)
 
@@ -215,6 +235,8 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
             case_id=case,
             file="test_one.py",
             origins=[],
+            owners=[hashlib.sha256(b"test_one.py").hexdigest()],
+            parameters=[],
             selected=True,
             order=index,
             aliases=sorted([case, hashlib.sha256(b"test_one.py").hexdigest()]),
@@ -222,7 +244,10 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
         for index, case in enumerate(ids)
     ]
     report = dict(
-        protocol=4,
+        protocol=11,
+        declaration_error=False,
+        context_id="e" * 64,
+        collection_skips=[],
         kind="collection",
         nonce="a" * 32,
         exit_code=0,

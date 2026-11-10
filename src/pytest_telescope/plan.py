@@ -1,7 +1,7 @@
 """Static route and scope preview; actual case enumeration belongs to real collection."""
 
 from .execution import execution_mode, worker_count
-from .model import DeclarationError, InfrastructureError, load, render_json
+from .model import DeclarationError, InfrastructureError, load, render_json, scoping
 from .sandbox import BACKEND, POLICY
 
 PlanError = DeclarationError
@@ -14,7 +14,7 @@ def make_plan(root, *, suites=None, structural_files=None):
         "mode": "plan-only",
         "execution": {
             "mode": mode,
-            "profile": mode + "-v1",
+            "profile": mode + "-v2",
             "workers": worker_count(manifest.execution),
         },
         "sandbox": {
@@ -35,18 +35,23 @@ def make_plan(root, *, suites=None, structural_files=None):
             for suite in manifest.suites
         ],
         "distributions": sorted(manifest.distributions),
+        "tools": {name: tool.registration for name, tool in sorted(manifest.tools.items())},
         "inputs": [] if manifest.pool is None else manifest.pool.inputs,
         "declarations": [
             {
                 "file": row["file"],
                 "line": row["position"][0],
                 "scope": row["owner"],
-                "route": "scoped"
-                if {"inputs", "bundles", "distributions"}.intersection(row["kwargs"])
-                else "ordinary",
+                "route": "scoped" if scoping(row) else "ordinary",
                 "inputs": manifest.declarations[row["id"]].inputs,
                 "absent": manifest.declarations[row["id"]].absent,
+                "tools": manifest.declarations[row["id"]].tools,
                 "cache": manifest.declarations[row["id"]].cache,
+                "env": sorted(
+                    set(manifest.env)
+                    | set(manifest.defaults.env)
+                    | set(manifest.declarations[row["id"]].env)
+                ),
             }
             for row in manifest.registry
         ],

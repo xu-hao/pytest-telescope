@@ -43,6 +43,8 @@ def validate_kwargs(kwargs):
         "absent",
         "cache",
         "distributions",
+        "tools",
+        "env",
     }:
         raise MarkerError("unsupported telescope marker fields")
     for name, value in kwargs.items():
@@ -89,7 +91,7 @@ def discover(content, filename):
         parent = parents[call]
         if isinstance(parent, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             if call in parent.decorator_list:
-                return "decorator", [*owner(parent), parent.name]
+                return "decorator", [*owner(parent), parent.name], None
         current = call
         while isinstance(parents.get(current), (ast.List, ast.Tuple)):
             current = parents[current]
@@ -105,7 +107,7 @@ def discover(content, filename):
                 and targets[0].id == "pytestmark"
                 and isinstance(container, (ast.Module, ast.ClassDef))
             ):
-                return "scope", owner(assignment)
+                return "scope", owner(assignment), None
         keyword = parents.get(current)
         param = parents.get(keyword)
         if (
@@ -126,7 +128,20 @@ def discover(content, filename):
                     and isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
                     and parametrization in function.decorator_list
                 ):
-                    return "parameter", [*owner(function), function.name]
+                    return (
+                        "parameter",
+                        [*owner(function), function.name],
+                        {
+                            "position": [
+                                parametrization.lineno,
+                                parametrization.end_lineno,
+                                parametrization.col_offset,
+                                parametrization.end_col_offset,
+                            ],
+                            "index": values.elts.index(param),
+                            "count": len(values.elts),
+                        },
+                    )
         raise MarkerError(
             "literal telescope markers belong in decorators, module/class pytestmark, or inline pytest.param marks"
         )
@@ -151,13 +166,14 @@ def discover(content, filename):
                 )
             kwargs[keyword.arg] = literal(keyword.value)
         validate_kwargs(kwargs)
-        kind, names = placement(node)
+        kind, names, parameter = placement(node)
         record = {
             "file": filename,
             "position": [node.lineno, node.end_lineno, node.col_offset, node.end_col_offset],
             "kwargs": kwargs,
             "kind": kind,
             "owner": names,
+            "parameter": parameter,
         }
         record["id"] = hashlib.sha256(canonical(record).encode()).hexdigest()
         registry.append(record)

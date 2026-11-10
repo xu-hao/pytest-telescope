@@ -24,7 +24,7 @@ class Project:
 
     def cli(self, command, *arguments, expected=0):
         completed = subprocess.run(
-            [sys.executable, "-I", "-m", "pytest_telescope", command, *arguments],
+            [sys.executable, "-I", "-B", "-m", "pytest_telescope", command, *arguments],
             cwd=self.root,
             env={**os.environ, "PYTEST_ADDOPTS": ""},
             text=True,
@@ -69,6 +69,43 @@ def assert_outcomes(summary, *, executed=0, reused=0, failed=0, unselected=0):
     }
     assert len(summary["units"]) == executed + reused + failed + unselected
     assert summary["collection"]["collected"] == executed + reused + failed + unselected
+
+
+def prime_owned_rewrite_cache(project, scratch):
+    """Create real pytest bytecode only inside this fixture, even under a -B driver."""
+    program = """
+import os
+from pathlib import Path
+import sys
+import pytest
+
+root = Path.cwd().resolve()
+
+def owned_bytecode_only(event, arguments):
+    if event == "open":
+        filename, mode, flags = arguments
+        if isinstance(filename, (str, bytes)) and flags & (os.O_WRONLY | os.O_RDWR):
+            path = Path(os.fsdecode(filename)).resolve()
+            if "__pycache__" in path.parts and not path.is_relative_to(root):
+                raise PermissionError("bytecode writes belong to the owned fixture")
+
+sys.addaudithook(owned_bytecode_only)
+sys.dont_write_bytecode = False
+raise SystemExit(pytest.main([
+    "tests/test_subject.py", "-q", "-p", "no:cacheprovider",
+    "-o", "markers=telescope: owned literal declaration",
+    "--basetemp", sys.argv[1],
+]))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", program, str(scratch)],
+        cwd=project.root,
+        env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTEST_ADDOPTS": ""},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_same_file_literal_markers_are_independent_case_cache_units(project):
@@ -174,6 +211,7 @@ def test_case(): pass
     first = project.run()
     assert_outcomes(first, executed=1)
     assert first["units"][0]["route"] == route
+    prime_owned_rewrite_cache(project, project.root.parent / "rewrite-prime")
     source_stat = original.stat()
     caches = list(original.parent.glob("__pycache__/test_subject.*-pytest-*.pyc"))
     assert len(caches) == 1

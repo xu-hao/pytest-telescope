@@ -14,7 +14,21 @@ from pytest_telescope.model import DeclarationError, fingerprint, load
 
 def success():
     return {
-        "protocol": 1,
+        "protocol": 9,
+        "declaration_error": False,
+        "context_id": "d" * 64,
+        "collection_skips": [],
+        "case_results": [
+            {
+                "case_id": "a" * 64,
+                "outcome": "passed",
+                "complete": True,
+                "reports": [
+                    {"phase": phase, "outcome": "passed", "skip_reason": None}
+                    for phase in ("setup", "call", "teardown")
+                ],
+            }
+        ],
         "nonce": "b" * 32,
         "failures": [],
         "exit_code": 0,
@@ -48,10 +62,10 @@ def test_semantically_corrupt_records_are_misses(tmp_path, changes):
     path = tmp_path / "record.json"
     path.write_text(
         json.dumps(
-            {"schema": SCHEMA, "key": "key", "result": result, "checksum": fingerprint(result)}
+            {"schema": SCHEMA, "key": "d" * 64, "result": result, "checksum": fingerprint(result)}
         )
     )
-    assert read_record(path, "key") is None
+    assert read_record(path, "d" * 64) is None
 
 
 def test_protocol_environment_cannot_be_declared(tmp_path):
@@ -65,14 +79,16 @@ def test_protocol_environment_cannot_be_declared(tmp_path):
 
 def test_controller_import_without_fcntl_is_clean():
     code = "import sys; sys.modules['fcntl'] = None; import pytest_telescope.controller"
-    completed = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, timeout=10)
+    completed = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code], capture_output=True, timeout=10
+    )
     assert completed.returncode == 0, completed.stderr
 
 
 def test_fifo_manifest_is_rejected_without_blocking(tmp_path):
     os.mkfifo(tmp_path / "pyproject.toml")
     completed = subprocess.run(
-        [sys.executable, "-I", "-m", "pytest_telescope", "plan"],
+        [sys.executable, "-I", "-B", "-m", "pytest_telescope", "plan"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -87,16 +103,16 @@ def test_complete_success_record_is_accepted(tmp_path):
     path = tmp_path / "record.json"
     path.write_text(
         json.dumps(
-            {"schema": SCHEMA, "key": "key", "result": result, "checksum": fingerprint(result)}
+            {"schema": SCHEMA, "key": "d" * 64, "result": result, "checksum": fingerprint(result)}
         )
     )
-    assert read_record(path, "key") == result
+    assert read_record(path, "d" * 64) == result
 
 
 def test_deep_json_record_is_a_cache_miss(tmp_path):
     path = tmp_path / "record.json"
     path.write_text("[" * 20000 + "0" + "]" * 20000)
-    assert read_record(path, "key") is None
+    assert read_record(path, "d" * 64) is None
 
 
 def test_nan_timeout_is_rejected_before_project_access(tmp_path):
@@ -115,7 +131,10 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
         calls.append(request["mode"])
         if request["mode"] == "collection":
             return dict(
-                protocol=4,
+                protocol=11,
+                declaration_error=False,
+                context_id=request["context_id"],
+                collection_skips=[],
                 kind="collection",
                 nonce="b" * 32,
                 exit_code=0,
@@ -126,6 +145,7 @@ def test_cleanup_failure_cannot_publish_success_or_retry(tmp_path, sandbox_doubl
                 failures=[],
             )
         # The worker's own scratch fails to clean after this attempt.
+        kwargs["on_session_start"]()  # The stand-in models a started session.
         raise sandbox.CleanupError("owned cleanup failed")
 
     sandbox_double(execute)
@@ -173,7 +193,10 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     rows = module_rows(tmp_path, [("test_unit.py", ["unit"])])
     collected = {
-        "protocol": 4,
+        "protocol": 11,
+        "declaration_error": False,
+        "context_id": "d" * 64,
+        "collection_skips": [],
         "kind": "collection",
         "nonce": "b" * 32,
         "exit_code": 0,
@@ -187,11 +210,14 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
 
     def execute(*args, request, **kwargs):
         calls.append(request["mode"])
-        return (
-            collected
-            if request["mode"] == "collection"
-            else success() | {"case_ids": [rows[0]["case_id"]]}
-        )
+        if request["mode"] == "collection":
+            return collected | {"context_id": request["context_id"]}
+        kwargs["on_session_start"]()  # The stand-in models a started session.
+        result = success()
+        result["context_id"] = request["context_id"]
+        result["case_ids"] = [rows[0]["case_id"]]
+        result["case_results"][0]["case_id"] = rows[0]["case_id"]
+        return result
 
     sandbox_double(execute, fail_outer=True)
     report = controller.run(tmp_path)
@@ -208,11 +234,11 @@ def test_outer_pool_cleanup_failure_publishes_no_new_inventory_or_case(
 def test_summary_output_budget_rejects_before_partial_json(monkeypatch, capsys):
     from pytest_telescope import controller, model
 
-    monkeypatch.setattr(model, "MAX_OUTPUT_BYTES", 128)
+    monkeypatch.setattr(model, "MAX_OUTPUT_BYTES", 1024)
     monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": []})
     assert controller.main(["run"]) == 0
     assert json.loads(capsys.readouterr().out) == {"units": []}
-    monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": ["a" * 100] * 3})
+    monkeypatch.setattr(controller, "run", lambda *args, **kwargs: {"units": ["a" * 1024] * 3})
     assert controller.main(["run"]) == 3
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "infrastructure_error"
