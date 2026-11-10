@@ -5,6 +5,8 @@ import hashlib
 import json
 from threading import Event
 
+import pytest
+
 from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError, fingerprint
 from pytest_telescope.result import validate_guarded_batch
@@ -140,18 +142,22 @@ def check_failed_session(root, monkeypatch, code, workers):
     assert [name for name, _, _ in records[before:]] == ["b"]
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_false_exit_four_keeps_pass_and_independent_sibling_serial(tmp_path, monkeypatch):
     check_failed_session(tmp_path, monkeypatch, code=4, workers=1)
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_false_exit_four_keeps_pass_and_independent_sibling_parallel(tmp_path, monkeypatch):
     check_failed_session(tmp_path, monkeypatch, code=4, workers=2)
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_false_exit_three_keeps_pass_and_independent_sibling(tmp_path, monkeypatch):
     check_failed_session(tmp_path, monkeypatch, code=3, workers=1)
 
 
+@pytest.mark.requires_fixture_guard
 def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkeypatch):
     project(tmp_path, 0)
     monkeypatch.setenv("GUARD_ACCOUNTING_PRESENT", "synthetic-value")
@@ -250,6 +256,7 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
     assert "synthetic-value" not in json.dumps(envelope)
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path, monkeypatch):
     project(tmp_path, 0)
     records = observe(monkeypatch)

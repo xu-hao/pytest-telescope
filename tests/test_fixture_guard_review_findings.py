@@ -58,6 +58,7 @@ def test_unguarded_narrow_inventory_mismatch_is_declaration_error(tmp_path):
     assert type(plain.value) is DeclarationError
 
 
+@pytest.mark.requires_fixture_guard
 def test_narrow_inventory_mismatch_is_declaration_error_before_body(tmp_path, monkeypatch):
     narrow_project(tmp_path)
     modes = []
@@ -74,6 +75,7 @@ def test_narrow_inventory_mismatch_is_declaration_error_before_body(tmp_path, mo
     assert "guard-capture" in modes and "guard-batch" not in modes
 
 
+@pytest.mark.requires_fixture_guard
 def test_unrepresentable_package_fixture_stays_fixture_metadata_refusal(tmp_path):
     configure(tmp_path)
     put(
@@ -92,6 +94,7 @@ def test_item(package_fixture): assert package_fixture is not None
     assert controller.run(tmp_path)["status"] == "passed"
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize("action", ["exit"])
 def test_post_body_exit_code_four_does_not_claim_pre_dispatch(tmp_path, monkeypatch, action):
     configure(tmp_path)
@@ -160,6 +163,7 @@ def test_item():
     assert calls == []
 
 
+@pytest.mark.requires_fixture_guard
 def test_class_fixture_visible_to_function_is_plain_pytest_compatible_but_guard_refuses(tmp_path):
     configure(tmp_path)
     put(
@@ -209,6 +213,7 @@ def test_item(class_fixture): class_fixture.append("used")
     assert refusal.value.capability == "execution:fixture-metadata"
 
 
+@pytest.mark.requires_fixture_guard
 def test_invalid_unicode_expectation_is_not_retained_by_public_exception_chain(
     tmp_path, monkeypatch
 ):

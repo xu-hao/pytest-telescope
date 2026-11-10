@@ -28,6 +28,7 @@ def case_id(node):
     return hashlib.sha256(json.dumps(["default", node], separators=(",", ":")).encode()).hexdigest()
 
 
+@pytest.mark.requires_fixture_guard
 def test_direct_and_indirect_parameters_preserve_actual_fixture_lifetimes(
     tmp_path, monkeypatch, capsys
 ):
@@ -74,6 +75,7 @@ def test_item(indirect, direct):
     assert b"synthetic-param-Q723-beta" not in evidence
 
 
+@pytest.mark.requires_fixture_guard
 def test_skipped_setup_and_call_keep_real_phase_reports_and_group_reuse(tmp_path):
     configure(tmp_path)
     put(
@@ -101,6 +103,7 @@ def test_call(): pytest.skip("synthetic call skip")
     assert controller.run(tmp_path, fixture_guard="available-v1")["counts"]["reused"] == 2
 
 
+@pytest.mark.requires_fixture_guard
 def test_session_nonzero_after_passing_report_cannot_publish(tmp_path):
     configure(tmp_path)
     put(
@@ -127,6 +130,7 @@ def test_item(request): request.config._synthetic_body_finished = True
     assert again["counts"]["reused"] == 0
 
 
+@pytest.mark.requires_fixture_guard
 def test_condition_uses_selected_case_and_exact_absence_empty_presence(tmp_path, monkeypatch):
     configure(tmp_path)
     monkeypatch.delenv("SYNTHETIC_ABSENT", raising=False)

@@ -24,6 +24,7 @@ def configure(root):
     )
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize(
     "mode,field",
     [

@@ -54,7 +54,11 @@ def test_nonconsumer():
 
 @pytest.mark.parametrize(
     ("kind", "guard", "literal_suffix"),
-    [("file", None, ""), ("directory", "available-v1", ""), ("directory", None, "/./")],
+    [
+        ("file", None, ""),
+        pytest.param("directory", "available-v1", "", marks=pytest.mark.requires_fixture_guard),
+        ("directory", None, "/./"),
+    ],
 )
 def test_py_named_tool_links_remain_data_in_exact_consumer_views(
     tmp_path, kind, guard, literal_suffix

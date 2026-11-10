@@ -29,6 +29,7 @@ def case_id(node):
     return hashlib.sha256(json.dumps(["default", node], separators=(",", ":")).encode()).hexdigest()
 
 
+@pytest.mark.requires_fixture_guard
 def test_parameterized_class_and_autouse_fixture_lifecycle_is_shared(tmp_path):
     configure(tmp_path)
     put(
@@ -63,6 +64,7 @@ class TestCases:
     assert controller.run(tmp_path, fixture_guard="available-v1")["counts"]["reused"] == 2
 
 
+@pytest.mark.requires_fixture_guard
 def test_dynamic_available_but_unrequested_module_fixture_refuses_split(tmp_path, monkeypatch):
     configure(tmp_path)
     put(tmp_path, "a.txt", "a")
@@ -94,6 +96,7 @@ def test_b(): pass
     assert "guard-inspection" in modes and "guard-batch" not in modes
 
 
+@pytest.mark.requires_fixture_guard
 def test_session_fixture_available_across_files_refuses_split(tmp_path):
     configure(tmp_path)
     put(
@@ -118,6 +121,7 @@ def test_item(shared): assert shared is not None
     assert exc.value.capability == "execution:fixture-sharing"
 
 
+@pytest.mark.requires_fixture_guard
 def test_package_fixture_owner_is_conservatively_refused(tmp_path):
     configure(tmp_path)
     put(
@@ -135,6 +139,7 @@ def test_item(package_owner): assert package_owner is not None
     assert exc.value.capability == "execution:fixture-metadata"
 
 
+@pytest.mark.requires_fixture_guard
 def test_same_name_fixture_override_is_user_owned(tmp_path):
     configure(tmp_path)
     put(tmp_path, "a.txt", "a")
@@ -157,6 +162,7 @@ def test_b(doctest_namespace): pass
     assert exc.value.capability == "execution:fixture-sharing"
 
 
+@pytest.mark.requires_fixture_guard
 def test_guarded_cache_corruption_is_not_reused(tmp_path):
     configure(tmp_path)
     put(
@@ -183,6 +189,7 @@ def test_item(): pass
     assert controller.run(tmp_path)["counts"]["reused"] == 0
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_conditions_reject_invalid_shapes_and_keep_value_private(
     tmp_path, monkeypatch, capsys
 ):
@@ -240,6 +247,7 @@ def test_item(): assert os.environ["GUARD_SYNTHETIC"]
     assert hashlib.sha256(secret.encode()).hexdigest().encode() not in evidence
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize(
     "corruption",
     [
@@ -308,6 +316,7 @@ def test_item(): pass
     assert not any(group["cache_eligible"] for group in report["groups"])
 
 
+@pytest.mark.requires_fixture_guard
 def test_unguarded_record_is_not_a_guarded_hit(tmp_path):
     configure(tmp_path)
     put(

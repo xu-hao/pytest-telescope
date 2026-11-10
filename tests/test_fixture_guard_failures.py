@@ -29,6 +29,7 @@ def records(root):
     return [json.loads(path.read_text()) for path in cache.glob("*.json")]
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize("failure_phase", ["setup", "teardown"])
 def test_actual_fixture_failure_is_not_reused(tmp_path, failure_phase):
     configure(tmp_path)
@@ -61,6 +62,7 @@ def broken():
     assert not any(record["schema"] == 8 for record in records(tmp_path))
 
 
+@pytest.mark.requires_fixture_guard
 def test_retry_then_success_and_exhaustion_are_bounded(tmp_path, monkeypatch):
     configure(tmp_path)
     put(
@@ -100,6 +102,7 @@ def test_retry_then_success_and_exhaustion_are_bounded(tmp_path, monkeypatch):
     assert exhausted["groups"][0]["attempts"] == 2 and not exhausted["groups"][0]["cache_eligible"]
 
 
+@pytest.mark.requires_fixture_guard
 def test_cancellation_drains_and_does_not_dispatch_next_group(tmp_path, monkeypatch):
     configure(tmp_path)
     for name in ("a", "b"):
@@ -127,6 +130,7 @@ def test_cancellation_drains_and_does_not_dispatch_next_group(tmp_path, monkeypa
     assert not any(record["schema"] == 8 for record in records(tmp_path))
 
 
+@pytest.mark.requires_fixture_guard
 def test_outer_cleanup_failure_preserves_observed_pass_without_publication(tmp_path, monkeypatch):
     configure(tmp_path)
     put(
@@ -162,6 +166,7 @@ def test_outer_cleanup_failure_preserves_observed_pass_without_publication(tmp_p
     assert resumed["status"] == "passed" and resumed["counts"]["executed"] == 1
 
 
+@pytest.mark.requires_fixture_guard
 def test_real_descendant_process_is_bounded_and_not_cached(tmp_path):
     configure(tmp_path)
     put(

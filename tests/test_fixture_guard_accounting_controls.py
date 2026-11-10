@@ -51,6 +51,7 @@ def metadata(observations):
     return result
 
 
+@pytest.mark.requires_fixture_guard
 def test_prior_guarded_cache_survives_real_late_refusal(tmp_path, monkeypatch):
     changing_project(tmp_path)
     monkeypatch.delenv("GUARD_DECL_CHANGE", raising=False)
@@ -82,6 +83,7 @@ def test_prior_guarded_cache_survives_real_late_refusal(tmp_path, monkeypatch):
     )
 
 
+@pytest.mark.requires_fixture_guard
 def test_real_active_sibling_is_drained_before_typed_refusal(tmp_path, monkeypatch):
     changing_project(tmp_path, extra=True)
     monkeypatch.setenv("GUARD_DECL_CHANGE", "synthetic-present")
@@ -139,6 +141,7 @@ def test_real_active_sibling_is_drained_before_typed_refusal(tmp_path, monkeypat
     assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
 
 
+@pytest.mark.requires_fixture_guard
 @pytest.mark.parametrize("started", [False, True])
 def test_simulated_typed_refusal_without_worker_result_keeps_start_truth(
     tmp_path, monkeypatch, started
@@ -187,6 +190,7 @@ def sample_accounting(root, monkeypatch):
     return captured.value.accounting.render()["observations"]
 
 
+@pytest.mark.requires_fixture_guard
 def test_accounting_strict_guard_relations_and_immutable_copies(tmp_path, monkeypatch):
     observations = sample_accounting(tmp_path, monkeypatch)
     meta = metadata(observations)
@@ -240,6 +244,7 @@ def test_accounting_strict_guard_relations_and_immutable_copies(tmp_path, monkey
             RefusalAccounting(bad, metadata=badmeta, maximum=1024 * 1024)
 
 
+@pytest.mark.requires_fixture_guard
 def test_guard_bounds_unavailable_and_default_unavailable_refusal(tmp_path, monkeypatch):
     observations = sample_accounting(tmp_path, monkeypatch)
     meta = metadata(observations)
@@ -294,6 +299,7 @@ def test_unguarded_late_typed_refusal_retains_version_one(tmp_path, monkeypatch)
     assert "fixture_guard" not in envelope
 
 
+@pytest.mark.requires_fixture_guard
 def test_distinct_matching_conditions_can_have_identical_public_rows(tmp_path, monkeypatch):
     project(tmp_path, 0)
     put(
@@ -338,6 +344,7 @@ def test_distinct_matching_conditions_can_have_identical_public_rows(tmp_path, m
     )
 
 
+@pytest.mark.requires_fixture_guard
 def test_outer_inventory_metadata_types_are_not_silently_repaired(tmp_path, monkeypatch):
     observations = sample_accounting(tmp_path, monkeypatch)
     reserved = metadata(observations)

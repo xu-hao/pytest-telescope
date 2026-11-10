@@ -36,6 +36,7 @@ def test_real_capture_failed_popen_never_signals_start(tmp_path):
     assert not starts
 
 
+@pytest.mark.requires_fixture_guard
 def test_simulated_prestart_worker_failure_reports_no_session(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'

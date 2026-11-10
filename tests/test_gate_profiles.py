@@ -94,6 +94,8 @@ def test_gate_records_explicit_full_or_compatibility_dispatch(
 def profile_session(gates, tmp_path, monkeypatch):
     """Actual tiny collection; wheel/origin/interpreter qualification is explicitly doubled."""
     root, scratch = tmp_path / "toy", tmp_path / "scratch"
+    preexisting = dict(sys.modules)
+    monkeypatch.setattr(sys, "path", list(sys.path))
     (root / "tests").mkdir(parents=True)
     scratch.mkdir()
     (root / "pyproject.toml").write_text(
@@ -158,7 +160,16 @@ def profile_session(gates, tmp_path, monkeypatch):
         )
         return gates.functional.main()
 
-    return types.SimpleNamespace(root=root, membership=membership, run=run, verified=verified)
+    try:
+        yield types.SimpleNamespace(root=root, membership=membership, run=run, verified=verified)
+    finally:
+        for name, module in tuple(sys.modules.items()):
+            filename = getattr(module, "__file__", None)
+            if isinstance(filename, str) and Path(filename).resolve().is_relative_to(root):
+                if name in preexisting:
+                    sys.modules[name] = preexisting[name]
+                else:
+                    sys.modules.pop(name, None)
 
 
 @pytest.mark.parametrize(("profile", "version"), [("all", "9.2.0"), ("core", "8.3.5")])

@@ -45,6 +45,7 @@ def verify_two_groups(report):
     assert all(unit["result_status"] == "passed" for unit in report["units"])
 
 
+@pytest.mark.requires_fixture_guard
 def test_same_module_owner_split_across_scopes_refuses_before_dispatch(tmp_path, monkeypatch):
     configure(tmp_path)
     put(tmp_path, "a.txt", "a")
@@ -78,6 +79,7 @@ def test_b(owned): owned.append("b")
     assert "guard-batch" not in observed
 
 
+@pytest.mark.requires_fixture_guard
 def test_distinct_module_fixtures_have_independent_lifetime_owners(tmp_path):
     configure(tmp_path)
     for name in ("a", "b"):
@@ -100,6 +102,7 @@ def test_owner(owned):
     verify_two_groups(report)
 
 
+@pytest.mark.requires_fixture_guard
 def test_imported_fixture_definition_has_distinct_module_lifetime_owners(tmp_path):
     configure(tmp_path)
     put(
@@ -129,6 +132,7 @@ def test_owner(owned):
     verify_two_groups(report)
 
 
+@pytest.mark.requires_fixture_guard
 def test_distinct_classes_in_one_module_may_refuse_conservatively(tmp_path):
     configure(tmp_path)
     put(tmp_path, "a.txt", "a")

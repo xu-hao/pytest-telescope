@@ -47,6 +47,7 @@ def admitted(report):
     }
 
 
+@pytest.mark.requires_fixture_guard
 def test_function_fixtures_with_distinct_inputs_execute_separately_and_reuse(tmp_path):
     configure(tmp_path)
     put(tmp_path, "left.txt", "left-v1")
@@ -90,6 +91,7 @@ def test_right(per_case):
     assert selected(changed, right)["outcome"] == "reused"
 
 
+@pytest.mark.requires_fixture_guard
 def test_shared_user_fixture_is_one_ordered_atomic_group(tmp_path):
     configure(tmp_path)
     put(
@@ -132,6 +134,7 @@ def test_shared(number, shared):
     assert warm["groups"][0]["outcome"] == "reused"
 
 
+@pytest.mark.requires_fixture_guard
 def test_split_possible_shared_user_fixture_refuses(tmp_path):
     configure(tmp_path)
     put(tmp_path, "left.txt", "left")
@@ -223,6 +226,7 @@ def test_cli_parser_failure_before_context_remains_schema4(capsys):
     assert refusal["schema"] == 4 and "fixture_guard" not in refusal
 
 
+@pytest.mark.requires_fixture_guard
 def test_conditions_bind_selected_case_and_current_captured_environment(tmp_path, monkeypatch):
     configure(tmp_path)
     monkeypatch.setenv("SYNTHETIC_GUARD_OPTION", "fixture-guard-synthetic-value")

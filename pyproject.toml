@@ -46,6 +46,9 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
+markers = [
+  "requires_fixture_guard: real fixture-adapter admission, capture, inspection or execution requires supported invoking pytest",
+]
 
 [tool.ruff]
 target-version = "py311"

@@ -80,6 +80,7 @@ def corrupt_b(monkeypatch, *, guarded, ready=None):
     return modes
 
 
+@pytest.mark.requires_fixture_guard
 def test_concurrent_active_worker_is_drained_after_other_exhausts(tmp_path, monkeypatch):
     project(tmp_path, ("a", "b", "c"))
     ready = Event()
@@ -118,6 +119,7 @@ def test_concurrent_active_worker_is_drained_after_other_exhausts(tmp_path, monk
     assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
 
 
+@pytest.mark.requires_fixture_guard
 def test_existing_guarded_cache_survives_other_group_exhaustion(tmp_path, monkeypatch):
     project(tmp_path, ("a", "b"))
     options = {"fixture_guard": "available-v1", "workers": 1, "arguments": ["-s"]}
@@ -142,6 +144,7 @@ def test_existing_guarded_cache_survives_other_group_exhaustion(tmp_path, monkey
     assert not b_path.exists() and not list(cache.rglob("*.pending"))
 
 
+@pytest.mark.requires_fixture_guard
 def test_k_deselection_condition_rejects_zero_selected(tmp_path, monkeypatch):
     project(tmp_path, ("a",))
     (tmp_path / "tests/test_a.py").write_text(
