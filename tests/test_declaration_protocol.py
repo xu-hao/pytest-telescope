@@ -22,10 +22,9 @@ def project(root, *, code=0, collection=False, changed=False):
         session.exitstatus = {code}
 """
     if changed:
-        hook += """import pytest
-def pytest_collection_modifyitems(items):
+        hook += """def pytest_collection_modifyitems(items):
     for item in items:
-        item.add_marker(pytest.mark.telescope(inputs=['unexpected.txt']))
+        item.get_closest_marker('telescope').kwargs['inputs'] = ['unexpected.txt']
 """
     put(root, "conftest.py", hook)
     put(
@@ -170,6 +169,7 @@ def test_valid_collection_exit_four_is_failed_collection(tmp_path, monkeypatch):
 def test_actual_changed_declaration_sets_true_and_keeps_typed_refusal(tmp_path, monkeypatch):
     project(tmp_path, changed=True)
     report, records = observed_run(tmp_path, monkeypatch)
+    assert records, report
     request, actual = records[-1]
     assert actual["declaration_error"] is True and actual["exit_code"] == 4
     assert not actual["complete"] and validate(request, actual)

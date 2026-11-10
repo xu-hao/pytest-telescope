@@ -165,12 +165,11 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
     put(
         tmp_path,
         "tests/conftest.py",
-        "import pytest\n"
         "def pytest_collection_modifyitems(session, config, items):\n"
         "    if not config.option.collectonly:\n"
         "        for item in items:\n"
         "            if item.nodeid.startswith('tests/test_b.py::'):\n"
-        "                item.add_marker(pytest.mark.telescope(inputs=[]))\n",
+        "                item.get_closest_marker('telescope').kwargs['inputs'] = []\n",
     )
     starts = []
     records = observe(monkeypatch, started=starts)
@@ -196,7 +195,7 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
         )
     except DeclarationError as error:
         refusal = error
-    assert [name for name, _, _ in records] == ["a", "b"]
+    assert [name for name, _, _ in records] == ["a", "b"], (returned, refusal)
     a_request, a = records[0][1:]
     b_request, b = records[1][1:]
     assert starts == [case_id("a"), case_id("b")]
