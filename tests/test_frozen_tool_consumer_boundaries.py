@@ -28,10 +28,15 @@ def test_two_native_consumers_do_not_inherit_discovery_union_configuration(tmp_p
         config["entries"] = [row for row in config["entries"] if row["path"] != "selected.txt"]
         config["entries"].append(worker.row(worker.config / (name + ".txt"), name + ".txt"))
         project.documents[name] = document
-        project.definitions[name] = {"format": "frozen-tool-v1", "manifest": "tool-locks/" + name + ".json"}
+        project.definitions[name] = {
+            "format": "frozen-tool-v1",
+            "manifest": "tool-locks/" + name + ".json",
+        }
         project.save(name)
     project.configure()
-    project.module("test_union.py", """from pathlib import Path
+    project.module(
+        "test_union.py",
+        """from pathlib import Path
 import pytest
 @pytest.mark.telescope(tools=['first'])
 def test_first():
@@ -43,17 +48,24 @@ def test_second():
     assert Path('/etc/second.txt').read_bytes() == b'second selected\\n'
     assert not Path('/etc/first.txt').exists()
     assert not Path('/tools/first').exists()
-""")
+""",
+    )
     assert_counts(project.run(timeout=120), executed=2)
     assert_counts(project.run(timeout=120), reused=2)
 
 
 def test_final_environment_bind_mutation_refuses_before_child_launch(tmp_path, monkeypatch):
     worker = WorkerConfiguration(tmp_path, monkeypatch)
-    worker.project.module("test_control.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['worker'])\ndef test_control(): pass\n")
+    worker.project.module(
+        "test_control.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['worker'])\ndef test_control(): pass\n",
+    )
     assert_counts(worker.project.run(timeout=60), executed=1)
     previous = cache_bytes(worker.project.root)
-    worker.project.module("test_new.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['worker'])\ndef test_new(): pass\n")
+    worker.project.module(
+        "test_new.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['worker'])\ndef test_new(): pass\n",
+    )
     source = tmp_path / "owned-late-overlay"
     source.mkdir()
     put(source, "value", "unselected late input")
@@ -92,13 +104,16 @@ def test_data_only_consumer_retains_owned_baseline_environment_bind(tmp_path, mo
         return replace(box, binds=(*box.binds, (str(baseline), "/owned-baseline")))
 
     monkeypatch.setattr(sandbox, "prepare", with_owned_baseline)
-    project.module("test_data.py", """from pathlib import Path
+    project.module(
+        "test_data.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['data'])
 def test_data():
     assert Path('/owned-baseline/value.txt').read_bytes() == b'baseline unchanged\\n'
     assert Path('/tools/data/install/value.txt').read_bytes() == b'data'
-""")
+""",
+    )
     assert_counts(project.run(), executed=1)
     assert_counts(project.run(), reused=1)
 
@@ -108,11 +123,14 @@ def test_ordinary_native_default_stays_fresh_without_tool_capture(tmp_path, monk
     baseline = tmp_path / "owned-ordinary-value"
     baseline.write_text("first")
     worker.project.configure('[tool.pytest_telescope.defaults]\ntools = ["worker"]\n')
-    worker.project.module("test_ordinary.py", f"""from pathlib import Path
+    worker.project.module(
+        "test_ordinary.py",
+        f"""from pathlib import Path
 def test_ordinary():
     assert Path({str(baseline)!r}).read_text() in ('first', 'second')
     assert Path.cwd() == Path({str(worker.project.root)!r})
-""")
+""",
+    )
 
     def no_sandbox(*args, **kwargs):
         raise AssertionError("an ordinary-only native default must not prepare a sandbox")

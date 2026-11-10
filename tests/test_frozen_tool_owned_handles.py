@@ -36,7 +36,12 @@ def decoy(tmp_path, records):
 
 
 def assert_decoy(target, before):
-    assert (identity(target), mode(target), (target / "value").read_bytes(), mode(target / "value")) == before
+    assert (
+        identity(target),
+        mode(target),
+        (target / "value").read_bytes(),
+        mode(target / "value"),
+    ) == before
 
 
 @pytest.mark.parametrize("replacement", ["directory", "symlink"])
@@ -92,12 +97,20 @@ def test_frozen_copy_replacement_refuses_without_reading_replacement(tmp_path, r
 
                 def scandir(path):
                     current = os.fstat(path) if isinstance(path, int) else Path(path).lstat()
-                    assert inode(current) not in {inode(target.lstat()), inode(copied.lstat())}, "replacement directory was enumerated"
+                    assert inode(current) not in {inode(target.lstat()), inode(copied.lstat())}, (
+                        "replacement directory was enumerated"
+                    )
                     scanned.append(inode(current))
                     return original_scan(path)
 
-                with patch.object(capture.owned_directories, "open", opened), patch.object(os, "scandir", scandir):
-                    with pytest.raises(InfrastructureError, match="^owned frozen-tool directory moved after freezing$") as caught:
+                with (
+                    patch.object(capture.owned_directories, "open", opened),
+                    patch.object(os, "scandir", scandir),
+                ):
+                    with pytest.raises(
+                        InfrastructureError,
+                        match="^owned frozen-tool directory moved after freezing$",
+                    ) as caught:
                         try:
                             capture.verify(["owned"])
                         except BaseException as error:
@@ -124,15 +137,23 @@ def test_cleanup_rejects_labelled_foreign_owner_before_chmod_or_traversal(tmp_pa
                 actual = original(*args, **kwargs)
                 if inode(actual) == expected:
                     labelled.append(expected)
-                    return SimpleNamespace(st_dev=actual.st_dev, st_ino=actual.st_ino,
-                                           st_mode=actual.st_mode, st_uid=os.getuid() + 1)
+                    return SimpleNamespace(
+                        st_dev=actual.st_dev,
+                        st_ino=actual.st_ino,
+                        st_mode=actual.st_mode,
+                        st_uid=os.getuid() + 1,
+                    )
                 return actual
 
             def forbidden(*args, **kwargs):
                 pytest.fail("cleanup changed permissions or traversed after ownership refusal")
 
             before = mode(capture.directory / "owned/install/inner")
-            with patch.object(os, "stat", ownership_stat), patch.object(os, "chmod", forbidden), patch.object(os, "scandir", forbidden):
+            with (
+                patch.object(os, "stat", ownership_stat),
+                patch.object(os, "chmod", forbidden),
+                patch.object(os, "scandir", forbidden),
+            ):
                 with pytest.raises(sandbox.CleanupError, match="unowned"):
                     capture.__exit__(None, None, None)
             assert labelled == [expected]
@@ -187,11 +208,19 @@ def test_cleanup_anchor_swap_restores_only_held_owned_inode_and_refuses(tmp_path
 
             def scandir(path):
                 current = os.fstat(path) if isinstance(path, int) else Path(path).lstat()
-                assert inode(current) != inode(target.lstat()), "cleanup followed replacement target"
+                assert inode(current) != inode(target.lstat()), (
+                    "cleanup followed replacement target"
+                )
                 return original_scan(path)
 
-            with patch.object(os, "open", opened), patch.object(os, "chmod", chmod), patch.object(os, "scandir", scandir):
-                with pytest.raises(sandbox.CleanupError, match="^owned frozen-tool cleanup directory moved$") as caught:
+            with (
+                patch.object(os, "open", opened),
+                patch.object(os, "chmod", chmod),
+                patch.object(os, "scandir", scandir),
+            ):
+                with pytest.raises(
+                    sandbox.CleanupError, match="^owned frozen-tool cleanup directory moved$"
+                ) as caught:
                     try:
                         capture.__exit__(None, None, None)
                     except BaseException as error:
@@ -248,7 +277,11 @@ def test_owned_read_handles_close_on_retry_exhaustion_and_cancel(tmp_path, failu
                         capture.verify(["owned"])
                     assert attempts == [1, 2] and faults == [1]
                 else:
-                    expected = sandbox.InvocationInterrupted if failure == "cancel" else InfrastructureError
+                    expected = (
+                        sandbox.InvocationInterrupted
+                        if failure == "cancel"
+                        else InfrastructureError
+                    )
                     with pytest.raises(expected):
                         with capture:
                             pytest.fail("failed capture was admitted")
@@ -258,7 +291,9 @@ def test_owned_read_handles_close_on_retry_exhaustion_and_cancel(tmp_path, failu
             reads.assert_closed()
 
 
-def test_concurrent_repeated_verification_keeps_sparse_projection_modes_and_closes_handles(tmp_path):
+def test_concurrent_repeated_verification_keeps_sparse_projection_modes_and_closes_handles(
+    tmp_path,
+):
     with owned_capture(tmp_path, projection=True) as owned:
         capture = owned.capture
         reads = DirectoryReads(capture.directory)
@@ -268,9 +303,15 @@ def test_concurrent_repeated_verification_keeps_sparse_projection_modes_and_clos
                 projection = capture.views[("owned",)]
                 mapped = dict((destination, source) for source, destination in view.bindings)
                 closed = mapped[str(owned.fixture.protected)]
-                paths = (capture.directory / "owned/install", capture.directory / "owned/install/inner", closed)
+                paths = (
+                    capture.directory / "owned/install",
+                    capture.directory / "owned/install/inner",
+                    closed,
+                )
                 assert all(mode(path) == 0o111 for path in paths)
-                assert (closed / "alias").is_symlink() and (closed / "alias").read_bytes() == b"owned readable bytes\n"
+                assert (closed / "alias").is_symlink() and (
+                    closed / "alias"
+                ).read_bytes() == b"owned readable bytes\n"
                 barrier = threading.Barrier(2, timeout=5)
                 stop = threading.Event()
                 completed, errors = [], []
@@ -284,7 +325,9 @@ def test_concurrent_repeated_verification_keeps_sparse_projection_modes_and_clos
                         barrier.wait()
                         for _ in range(4):
                             if stop.is_set() or time.monotonic() >= end:
-                                raise AssertionError("bounded concurrent verification did not finish")
+                                raise AssertionError(
+                                    "bounded concurrent verification did not finish"
+                                )
                             capture.verify(["owned"])
                             projection.verify()
                             assert all(mode(path) == 0o111 for path in paths)

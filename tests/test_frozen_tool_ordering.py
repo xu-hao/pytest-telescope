@@ -26,8 +26,12 @@ def test_own_ordered_slot_shadows_different_fallback(ordered, tag):
     ordered.object("a/libchoice.so", soname="libchoice.so")
     ordered.object("fallback/libchoice.so", soname="libchoice.so")
     ordered.fallback("libchoice.so", "fallback/libchoice.so")
-    ordered.entry("bin/python3.12", needed=["libchoice.so"], libraries=["a/libchoice.so"],
-                  **{tag: "$ORIGIN/../a"})
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libchoice.so"],
+        libraries=["a/libchoice.so"],
+        **{tag: "$ORIGIN/../a"},
+    )
     ordered.finish()
     captured = ordered.capture()
     with captured as actual:
@@ -39,8 +43,12 @@ def test_empty_earlier_slot_selects_later_before_fallback(ordered):
     ordered.object("b/libchoice.so", soname="libchoice.so")
     ordered.object("fallback/libchoice.so", soname="libchoice.so")
     ordered.fallback("libchoice.so", "fallback/libchoice.so")
-    ordered.entry("bin/python3.12", needed=["libchoice.so"], libraries=["b/libchoice.so"],
-                  rpath="$ORIGIN/../empty:$ORIGIN/../b")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libchoice.so"],
+        libraries=["b/libchoice.so"],
+        rpath="$ORIGIN/../empty:$ORIGIN/../b",
+    )
     ordered.finish()
     with ordered.capture() as actual:
         assert ordered.targets(actual) == {str(ordered.prefix / "b/libchoice.so")}
@@ -59,7 +67,9 @@ def test_all_inherited_blocks_must_miss_or_agree(ordered, conflict):
         refusal(ordered)
     else:
         with ordered.capture() as actual:
-            assert ordered.targets(actual, "resources/extension.so") == {str(ordered.prefix / "fallback/libchoice.so")}
+            assert ordered.targets(actual, "resources/extension.so") == {
+                str(ordered.prefix / "fallback/libchoice.so")
+            }
 
 
 def test_ancestry_only_dependency_is_not_admitted(ordered):
@@ -83,23 +93,36 @@ def test_diamond_and_cycle_keep_exact_transitive_membership(ordered):
     ordered.object("a/libleft.so", needed=["libshared.so"], soname="libleft.so", rpath="$ORIGIN")
     ordered.object("a/libright.so", needed=["libshared.so"], soname="libright.so", rpath="$ORIGIN")
     ordered.object("a/libshared.so", needed=["libleft.so"], soname="libshared.so", rpath="$ORIGIN")
-    ordered.entry("bin/python3.12", needed=["libleft.so", "libright.so"],
-                  libraries=["a/libleft.so", "a/libright.so", "a/libshared.so"], rpath="$ORIGIN/../a")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libleft.so", "libright.so"],
+        libraries=["a/libleft.so", "a/libright.so", "a/libshared.so"],
+        rpath="$ORIGIN/../a",
+    )
     ordered.finish()
     with ordered.capture() as actual:
-        assert ordered.targets(actual) == {str(ordered.prefix / "a" / name) for name in ("libleft.so", "libright.so")}
+        assert ordered.targets(actual) == {
+            str(ordered.prefix / "a" / name) for name in ("libleft.so", "libright.so")
+        }
         assert ordered.targets(actual, "a/libshared.so") == {str(ordered.prefix / "a/libleft.so")}
 
 
 def two_contexts(ordered, same=False):
     for directory in ("a", "b"):
         ordered.object(directory + "/libchoice.so", soname="libchoice.so")
-    ordered.entry("bin/python3.12", needed=["libchoice.so"], libraries=["a/libchoice.so"],
-                  resources=["resources"] if same else [], rpath="$ORIGIN/../a")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libchoice.so"],
+        libraries=["a/libchoice.so"],
+        resources=["resources"] if same else [],
+        rpath="$ORIGIN/../a",
+    )
     if same:
         ordered.object("resources/extension.so", needed=["libchoice.so"], rpath="$ORIGIN/../b")
     else:
-        ordered.entry("bin/other", needed=["libchoice.so"], libraries=["b/libchoice.so"], rpath="$ORIGIN/../b")
+        ordered.entry(
+            "bin/other", needed=["libchoice.so"], libraries=["b/libchoice.so"], rpath="$ORIGIN/../b"
+        )
     ordered.finish()
 
 
@@ -118,8 +141,12 @@ def test_one_resource_context_refuses_conflicting_needed_name(ordered):
 def test_one_context_refuses_distinct_files_with_same_soname(ordered):
     ordered.object("a/libleft.so", soname="shared-name.so")
     ordered.object("a/libright.so", soname="shared-name.so")
-    ordered.entry("bin/python3.12", needed=["libleft.so", "libright.so"],
-                  libraries=["a/libleft.so", "a/libright.so"], rpath="$ORIGIN/../a")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libleft.so", "libright.so"],
+        libraries=["a/libleft.so", "a/libright.so"],
+        rpath="$ORIGIN/../a",
+    )
     ordered.finish()
     refusal(ordered)
 
@@ -139,14 +166,28 @@ def test_same_executable_across_tools_combines_resource_context(ordered):
 
 def test_original_logical_search_drift_refuses(ordered):
     ordered.object("a/libchoice.so", soname="libchoice.so")
-    ordered.entry("bin/python3.12", needed=["libchoice.so"], libraries=["a/libchoice.so"],
-                  rpath="$ORIGIN/../a")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libchoice.so"],
+        libraries=["a/libchoice.so"],
+        rpath="$ORIGIN/../a",
+    )
     ordered.finish()
     from frozen_tool_fixtures import entries
+
     root = ordered.document["roots"][0]
-    root["entries"] = [row for row in root["entries"] if not (row["path"] == "a" or row["path"].startswith("a/"))]
-    ordered.document["roots"].append({"id": "separate", "source": str(ordered.prefix / "a"),
-                                       "coverage": "tree", "preserve_source": True, "entries": entries(ordered.prefix / "a")})
+    root["entries"] = [
+        row for row in root["entries"] if not (row["path"] == "a" or row["path"].startswith("a/"))
+    ]
+    ordered.document["roots"].append(
+        {
+            "id": "separate",
+            "source": str(ordered.prefix / "a"),
+            "coverage": "tree",
+            "preserve_source": True,
+            "entries": entries(ordered.prefix / "a"),
+        }
+    )
     ordered.document["executables"][0]["libraries"] = [{"root": "separate", "path": "libchoice.so"}]
     ordered.project.save("native")
     refusal(ordered)
@@ -155,7 +196,12 @@ def test_original_logical_search_drift_refuses(ordered):
 def test_differing_hardware_descendant_refuses(ordered):
     ordered.object("a/libchoice.so", soname="libchoice.so")
     ordered.object("a/glibc-hwcaps/x86-64-v3/libchoice.so", soname="libchoice.so")
-    ordered.entry("bin/python3.12", needed=["libchoice.so"], libraries=["a/libchoice.so"], rpath="$ORIGIN/../a")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libchoice.so"],
+        libraries=["a/libchoice.so"],
+        rpath="$ORIGIN/../a",
+    )
     ordered.finish()
     refusal(ordered)
 
@@ -164,8 +210,12 @@ def test_differing_hardware_descendant_refuses(ordered):
 def test_union_reproves_winner_and_allows_shadowed_entry(ordered, changed):
     ordered.object("a/libchoice.so", soname="libchoice.so")
     ordered.object("b/libchoice.so", soname="libchoice.so")
-    ordered.entry("bin/python3.12", needed=["libchoice.so"], libraries=["b/libchoice.so" if changed else "a/libchoice.so"],
-                  rpath="$ORIGIN/../a:$ORIGIN/../b")
+    ordered.entry(
+        "bin/python3.12",
+        needed=["libchoice.so"],
+        libraries=["b/libchoice.so" if changed else "a/libchoice.so"],
+        rpath="$ORIGIN/../a:$ORIGIN/../b",
+    )
     ordered.finish()
     selected = "b/libchoice.so" if changed else "a/libchoice.so"
     added = "a/libchoice.so" if changed else "b/libchoice.so"
@@ -177,8 +227,11 @@ def test_union_reproves_winner_and_allows_shadowed_entry(ordered, changed):
     ordered.project.documents["addition"]["loader"] = None
     addition = ordered.project.documents["addition"]
     addition["roots"] = [addition["roots"][0]]
-    addition["roots"][0]["entries"] = [row for row in addition["roots"][0]["entries"]
-                                        if row["path"] in {".", added.split('/')[0], added}]
+    addition["roots"][0]["entries"] = [
+        row
+        for row in addition["roots"][0]["entries"]
+        if row["path"] in {".", added.split("/")[0], added}
+    ]
     ordered.project.save("addition")
     with ordered.capture(("subject",)) as actual:
         import time
@@ -187,17 +240,23 @@ def test_union_reproves_winner_and_allows_shadowed_entry(ordered, changed):
         from pytest_telescope.tool_context import load_selected
         from pytest_telescope.tool_graph import Graph
 
-        tool = load_selected(ordered.project.root, ordered.project.definitions, ["addition"])["addition"]
+        tool = load_selected(ordered.project.root, ordered.project.definitions, ["addition"])[
+            "addition"
+        ]
         destination = ordered.project.external / "union-copy"
         destination.mkdir()
         budget = Budget(time.monotonic() + 10, None)
         for row in addition["roots"][0]["entries"]:
-            _measure(ordered.prefix / row["path"], row, budget, destination / "prefix" / row["path"])
+            _measure(
+                ordered.prefix / row["path"], row, budget, destination / "prefix" / row["path"]
+            )
         for row in reversed(addition["roots"][0]["entries"]):
             if row["kind"] == "directory":
                 (destination / "prefix" / row["path"]).chmod(row["mode"] & 0o555)
         graph = Graph(tool, destination, Budget(time.monotonic() + 10, None))
-        originals = {g.original(key): (g, key) for g in (actual.graphs["subject"], graph) for key in g.nodes}
+        originals = {
+            g.original(key): (g, key) for g in (actual.graphs["subject"], graph) for key in g.nodes
+        }
         runtime = actual.runtimes["subject"]
         try:
             if changed:
@@ -219,10 +278,14 @@ def test_runpath_does_not_inherit_other_resource_rpath(ordered):
     ordered.entry("bin/python3.12", resources=["resources"])
     ordered.finish()
     with ordered.capture() as actual:
-        assert ordered.targets(actual, "resources/requester.so") == {str(ordered.prefix / "fallback/libchoice.so")}
+        assert ordered.targets(actual, "resources/requester.so") == {
+            str(ordered.prefix / "fallback/libchoice.so")
+        }
 
 
-@pytest.mark.parametrize("tags", ["duplicate_rpath", "duplicate_runpath", "duplicate_soname", "dual"])
+@pytest.mark.parametrize(
+    "tags", ["duplicate_rpath", "duplicate_runpath", "duplicate_soname", "dual"]
+)
 def test_duplicate_or_dual_tags_refuse(ordered, tags):
     values = {"rpath": "$ORIGIN/../a"}
     if tags == "duplicate_rpath":

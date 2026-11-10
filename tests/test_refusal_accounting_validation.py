@@ -34,33 +34,38 @@ def set_field(value, path, replacement):
     target[path[-1]] = replacement
 
 
-@pytest.mark.parametrize("path,replacement", [
-    pytest.param(("version",), 999, id="foreign-version"),
-    pytest.param(("raw_environment",), {"DUMMY_SECRET": "synthetic-only"}, id="raw-map"),
-    pytest.param(("execution", "profile"), "case-future", id="unknown-profile"),
-    pytest.param(("execution", "workers"), True, id="boolean-worker-count"),
-    pytest.param(("units", 0, "file"), "../dummy-private-file", id="outside-path"),
-    pytest.param(("units", 0, "case_id"), "NOT-A-DIGEST", id="malformed-digest"),
-    pytest.param(("units", 0, "route"), "future", id="unknown-route"),
-    pytest.param(("units", 0, "reports", 0, "phase"), "future", id="unknown-phase"),
-    pytest.param(("units", 0, "complete"), False, id="phase-completeness"),
-    pytest.param(("units", 0, "result_status"), "skipped", id="phase-status"),
-    pytest.param(("units", 0, "attempts"), True, id="boolean-attempts"),
-    pytest.param(("units", 0, "captured_output"), "synthetic-only", id="raw-unit-output"),
-    pytest.param(("counts", "executed"), -1, id="negative-count"),
-    pytest.param(("counts", "executed"), True, id="boolean-count"),
-    pytest.param(("route_counts", "ordinary", "executed"), 0, id="route-conservation"),
-    pytest.param(("cases", "passed"), 0, id="case-conservation"),
-    pytest.param(("case_outcomes", "fresh_passed"), 0, id="outcome-conservation"),
-    pytest.param(("elapsed_seconds",), float("nan"), id="nan-time"),
-    pytest.param(("elapsed_seconds",), float("inf"), id="infinite-time"),
-    pytest.param(("setup_seconds",), -1, id="negative-time"),
-    pytest.param(("groups", 0, "case_ids"), ["f" * 64], id="foreign-group-member"),
-    pytest.param(("groups", 0, "suite"), "unknown-suite", id="foreign-suite"),
-    pytest.param(("groups", 0, "case_ids"), [], id="missing-group-member"),
-    pytest.param(("collection", "suites", 0, "files"), ["/outside/dummy"], id="absolute-collection-path"),
-    pytest.param(("inventory_digest",), "f" * 64, id="membership-digest-mismatch"),
-])
+@pytest.mark.parametrize(
+    "path,replacement",
+    [
+        pytest.param(("version",), 999, id="foreign-version"),
+        pytest.param(("raw_environment",), {"DUMMY_SECRET": "synthetic-only"}, id="raw-map"),
+        pytest.param(("execution", "profile"), "case-future", id="unknown-profile"),
+        pytest.param(("execution", "workers"), True, id="boolean-worker-count"),
+        pytest.param(("units", 0, "file"), "../dummy-private-file", id="outside-path"),
+        pytest.param(("units", 0, "case_id"), "NOT-A-DIGEST", id="malformed-digest"),
+        pytest.param(("units", 0, "route"), "future", id="unknown-route"),
+        pytest.param(("units", 0, "reports", 0, "phase"), "future", id="unknown-phase"),
+        pytest.param(("units", 0, "complete"), False, id="phase-completeness"),
+        pytest.param(("units", 0, "result_status"), "skipped", id="phase-status"),
+        pytest.param(("units", 0, "attempts"), True, id="boolean-attempts"),
+        pytest.param(("units", 0, "captured_output"), "synthetic-only", id="raw-unit-output"),
+        pytest.param(("counts", "executed"), -1, id="negative-count"),
+        pytest.param(("counts", "executed"), True, id="boolean-count"),
+        pytest.param(("route_counts", "ordinary", "executed"), 0, id="route-conservation"),
+        pytest.param(("cases", "passed"), 0, id="case-conservation"),
+        pytest.param(("case_outcomes", "fresh_passed"), 0, id="outcome-conservation"),
+        pytest.param(("elapsed_seconds",), float("nan"), id="nan-time"),
+        pytest.param(("elapsed_seconds",), float("inf"), id="infinite-time"),
+        pytest.param(("setup_seconds",), -1, id="negative-time"),
+        pytest.param(("groups", 0, "case_ids"), ["f" * 64], id="foreign-group-member"),
+        pytest.param(("groups", 0, "suite"), "unknown-suite", id="foreign-suite"),
+        pytest.param(("groups", 0, "case_ids"), [], id="missing-group-member"),
+        pytest.param(
+            ("collection", "suites", 0, "files"), ["/outside/dummy"], id="absolute-collection-path"
+        ),
+        pytest.param(("inventory_digest",), "f" * 64, id="membership-digest-mismatch"),
+    ],
+)
 def test_actual_seed_rejects_one_malformed_record(seed, path, replacement):
     value = copy.deepcopy(seed)
     set_field(value, path, replacement)
@@ -144,7 +149,11 @@ def test_attachment_accepts_exact_immutable_type_once(seed):
         pass
 
     with pytest.raises(TypeError):
-        DeclarationError("owned refusal", accounting=Subclass(
-            copy.deepcopy(seed), metadata=controller.error_result(DeclarationError("owned refusal")),
-            maximum=65536,
-        ))
+        DeclarationError(
+            "owned refusal",
+            accounting=Subclass(
+                copy.deepcopy(seed),
+                metadata=controller.error_result(DeclarationError("owned refusal")),
+                maximum=65536,
+            ),
+        )

@@ -18,7 +18,10 @@ from pytest_telescope.model import DeclarationError
 def project_with_tool(tmp_path, files=None):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
     source = project.add_tree("first", files=files)
-    project.module("test_scoped.py", "import pytest\npytestmark=pytest.mark.telescope(tools=['first'])\ndef test_scoped(): pass\n")
+    project.module(
+        "test_scoped.py",
+        "import pytest\npytestmark=pytest.mark.telescope(tools=['first'])\ndef test_scoped(): pass\n",
+    )
     return project, source
 
 
@@ -57,7 +60,10 @@ def test_capture_searchable_unlistable_source_ancestor(tmp_path):
     ancestor.mkdir()
     project = ToolProject(tmp_path / "project", ancestor / "external")
     source = project.add_tree("first")
-    project.module("test_scoped.py", "import pytest\npytestmark=pytest.mark.telescope(tools=['first'])\ndef test_scoped(): pass\n")
+    project.module(
+        "test_scoped.py",
+        "import pytest\npytestmark=pytest.mark.telescope(tools=['first'])\ndef test_scoped(): pass\n",
+    )
     manifest = model.load(project.root)
     before = entries(source)
     stage = tmp_path / "staging"
@@ -84,9 +90,12 @@ def test_capture_searchable_unlistable_source_ancestor(tmp_path):
 def test_recover_abrupt_real_capture_preserves_source(tmp_path, selected):
     project, source = project_with_tool(tmp_path)
     if not selected:
-        project.module("test_scoped.py", "import pytest\npytestmark=pytest.mark.telescope(inputs=[])\ndef test_scoped(): pass\n")
+        project.module(
+            "test_scoped.py",
+            "import pytest\npytestmark=pytest.mark.telescope(inputs=[])\ndef test_scoped(): pass\n",
+        )
     before = entries(source)
-    code = '''import json, os, sys
+    code = """import json, os, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from pytest_telescope import model, sandbox, tool_capture
@@ -95,11 +104,21 @@ with sandbox.invocation(root) as directory:
     with tool_capture.Capture(model.load(root), directory, 10, None):
         print(json.dumps({'directory': str(directory), 'pid': os.getpid()}), flush=True)
         os._exit(19)
-'''
+"""
     child = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", code,
-         str(Path(pytest_telescope.__file__).parent.parent), str(project.root)],
-        capture_output=True, text=True, timeout=10, check=False,
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            code,
+            str(Path(pytest_telescope.__file__).parent.parent),
+            str(project.root),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert child.returncode == 19, child.stderr
     assert len(child.stdout) < 4096
@@ -117,7 +136,10 @@ with sandbox.invocation(root) as directory:
         with sandbox.invocation(project.root) as later:
             with tool_capture.Capture(model.load(project.root), later, 10, None):
                 pass
-        project.module("test_scoped.py", "import pytest\npytestmark=pytest.mark.telescope(inputs=[])\ndef test_scoped(): pass\n")
+        project.module(
+            "test_scoped.py",
+            "import pytest\npytestmark=pytest.mark.telescope(inputs=[])\ndef test_scoped(): pass\n",
+        )
         project.module("test_ordinary.py", "def test_ordinary(): pass\n")
         assert_counts(project.run(), executed=2)
     finally:

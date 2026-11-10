@@ -13,7 +13,10 @@ from frozen_tool_fixtures import ToolProject, cache_bytes, put
 def project(tmp_path):
     fixture = ToolProject(tmp_path / "project", tmp_path / "installed")
     fixture.add_tree("first")
-    fixture.module("test_tool.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_tool(): pass\n")
+    fixture.module(
+        "test_tool.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_tool(): pass\n",
+    )
     return fixture
 
 
@@ -23,7 +26,10 @@ def test_invalid_manifest_encoding_is_a_private_declaration_refusal(project, kin
     encoding = {
         "duplicate": valid.replace('"schema": 1', '"schema": 1, "schema": 1').encode(),
         "nonfinite": valid.replace('"schema": 1', '"schema": NaN').encode(),
-        "utf8": b'\xff', "array": b'[]', "null": b'null', "truncated": b'{',
+        "utf8": b"\xff",
+        "array": b"[]",
+        "null": b"null",
+        "truncated": b"{",
     }[kind]
     put(project.root, "tool-locks/first.json", encoding)
     report = project.run()
@@ -32,11 +38,25 @@ def test_invalid_manifest_encoding_is_a_private_declaration_refusal(project, kin
     assert not cache_bytes(project.root)
 
 
-@pytest.mark.parametrize("change", [
-    "unknown-top", "missing-top", "schema-bool", "unknown-root", "coverage",
-    "preserve-type", "mode-bool", "size-float", "hash", "unknown-entry",
-    "duplicate-entry", "duplicate-root", "entry-parent", "entry-absolute",
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "unknown-top",
+        "missing-top",
+        "schema-bool",
+        "unknown-root",
+        "coverage",
+        "preserve-type",
+        "mode-bool",
+        "size-float",
+        "hash",
+        "unknown-entry",
+        "duplicate-entry",
+        "duplicate-root",
+        "entry-parent",
+        "entry-absolute",
+    ],
+)
 def test_manifest_records_have_exact_types_keys_and_paths(project, change):
     document = project.documents["first"]
     root = document["roots"][0]
@@ -120,7 +140,9 @@ def test_files_mode_cannot_claim_a_complete_lock_tree(project):
 
 
 def test_declared_oversize_file_refuses_before_reading_a_giant_fixture(project):
-    record = next(row for row in project.documents["first"]["roots"][0]["entries"] if row["kind"] == "file")
+    record = next(
+        row for row in project.documents["first"]["roots"][0]["entries"] if row["kind"] == "file"
+    )
     record["size"] = 536_870_913
     project.save("first")
     report = project.run()
@@ -131,7 +153,8 @@ def test_declared_oversize_file_refuses_before_reading_a_giant_fixture(project):
 def test_too_many_registered_tools_refuses_before_capture(project):
     for number in range(65):
         project.definitions[f"tool{number}"] = {
-            "format": "frozen-tool-v1", "manifest": f"tool-locks/tool{number}.json",
+            "format": "frozen-tool-v1",
+            "manifest": f"tool-locks/tool{number}.json",
         }
     project.configure()
     report = project.run()
@@ -144,13 +167,16 @@ def test_files_mode_exposes_only_explicit_entries_and_ignores_unselected_sibling
     put(source, "unselected.txt", "unselected")
     project.documents["first"]["roots"][0]["coverage"] = "files"
     project.save("first")
-    project.module("test_tool.py", """from pathlib import Path
+    project.module(
+        "test_tool.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 def test_tool():
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
     assert not Path('/tools/first/install/unselected.txt').exists()
-""")
+""",
+    )
     first = project.run()
     assert first["status"] == "passed" and first["counts"]["executed"] == 1, first
     put(source, "unselected.txt", "changed unrelated sibling")

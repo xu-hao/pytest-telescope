@@ -44,15 +44,18 @@ def sparse_pair(tmp_path):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
     sources = []
     for name in ("first", "second"):
-        source = project.add_tree(name, preserve=True, files={
-            "bin/value" + str(index): b"owned\n" for index in range(8)
-        })
+        source = project.add_tree(
+            name, preserve=True, files={"bin/value" + str(index): b"owned\n" for index in range(8)}
+        )
         (source / "bin").chmod(0o755)
         (source / "bin/alias").symlink_to("value0")
         project.documents[name]["roots"][0]["coverage"] = "files"
         project.refresh(name)
         sources.append(source)
-    project.module("test_scoped.py", "import pytest\npytestmark=pytest.mark.telescope(tools=['first','second'])\ndef test_scoped(): pass\n")
+    project.module(
+        "test_scoped.py",
+        "import pytest\npytestmark=pytest.mark.telescope(tools=['first','second'])\ndef test_scoped(): pass\n",
+    )
     before = [entries(source) for source in sources]
     stage = tmp_path / "staging"
     stage.mkdir()
@@ -73,10 +76,19 @@ def two_views(capture, sources):
     assert len([row for row in actual.values() if stat.S_ISDIR(row[2])]) == 12
     for name, source, view in zip(("first", "second"), sources, (first, second), strict=True):
         copy = capture.directory / name / "install/bin/value0"
-        closed = dict((destination, path) for path, destination in view.bindings)[str(source / "bin")]
-        original_info, copy_info, projected_info = (source / "bin/value0").stat(), copy.stat(), (closed / "value0").stat()
+        closed = dict((destination, path) for path, destination in view.bindings)[
+            str(source / "bin")
+        ]
+        original_info, copy_info, projected_info = (
+            (source / "bin/value0").stat(),
+            copy.stat(),
+            (closed / "value0").stat(),
+        )
         assert (original_info.st_dev, original_info.st_ino) != (copy_info.st_dev, copy_info.st_ino)
-        assert (copy_info.st_dev, copy_info.st_ino) == (projected_info.st_dev, projected_info.st_ino)
+        assert (copy_info.st_dev, copy_info.st_ino) == (
+            projected_info.st_dev,
+            projected_info.st_ino,
+        )
         assert stat.S_IMODE(projected_info.st_mode) == 0o444
         assert os.readlink(closed / "alias") == "value0"
     return actual
@@ -104,7 +116,11 @@ def test_union_reservation_refuses_before_creating_over_bound_paths(sparse_pair,
         except UnsupportedCapability as error:
             refusal = error
         actual = owned_paths(capture.directory)
-        print("OWNED_MATERIALIZATION", {"before": len(previous), "after": len(actual), "limit": 64}, flush=True)
+        print(
+            "OWNED_MATERIALIZATION",
+            {"before": len(previous), "after": len(actual), "limit": 64},
+            flush=True,
+        )
         assert refusal is not None and refusal.capability == "tool:bounds"
         assert actual == previous, "rejected reservation created projection members"
     assert not (stage / "tools").exists()

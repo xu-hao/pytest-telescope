@@ -63,7 +63,8 @@ def elf(path):
             mappings = [
                 segment[2] + address[0] - segment[3]
                 for segment in segments
-                if segment[0] == 1 and segment[3] <= address[0]
+                if segment[0] == 1
+                and segment[3] <= address[0]
                 and address[0] + lengths[0] <= segment[3] + segment[5]
             ]
             if len(mappings) != 1:
@@ -81,20 +82,28 @@ def elf(path):
                 raise ValueError("fixture ELF string is invalid or oversized")
             return strings[offset:end].decode("utf-8", errors="strict")
 
-        tags = {tag: [string(value) for actual, value in dynamic if actual == tag] for tag in (14, 15, 29)}
+        tags = {
+            tag: [string(value) for actual, value in dynamic if actual == tag]
+            for tag in (14, 15, 29)
+        }
         if any(len(value) > 1 for value in tags.values()) or (tags[15] and tags[29]):
             raise ValueError("fixture requires distinct single SONAME/RPATH/RUNPATH tags")
         return {
             "interpreter": interpreter,
             "needed": [string(value) for tag, value in dynamic if tag == 1],
             "search": [string(value) for tag, value in dynamic if tag in (15, 29)],
-            "soname": tags[14], "rpath": tags[15], "runpath": tags[29],
+            "soname": tags[14],
+            "rpath": tags[15],
+            "runpath": tags[29],
         }
 
 
 SYSTEM_SEARCH = (
-    Path("/usr/lib/x86_64-linux-gnu"), Path("/usr/lib64"), Path("/usr/lib"),
-    Path("/usr/local/lib"), Path("/usr/local/lib64"),
+    Path("/usr/lib/x86_64-linux-gnu"),
+    Path("/usr/lib64"),
+    Path("/usr/lib"),
+    Path("/usr/local/lib"),
+    Path("/usr/local/lib64"),
 )
 
 
@@ -127,7 +136,9 @@ def native_relations(entrypoints, extra_search=(), library_pins=None, *, ordered
         directories = []
         for encoded in info["search"]:
             for item in encoded.split(":"):
-                item = item.replace("${ORIGIN}", str(actual.parent)).replace("$ORIGIN", str(actual.parent))
+                item = item.replace("${ORIGIN}", str(actual.parent)).replace(
+                    "$ORIGIN", str(actual.parent)
+                )
                 if not item or "$" in item or not Path(item).is_absolute():
                     raise ValueError("fixture native search syntax is unsupported")
                 directory = Path(item).resolve(strict=False)

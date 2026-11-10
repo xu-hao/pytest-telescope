@@ -50,8 +50,11 @@ def entries(source):
             pending.extend(sorted(path.iterdir(), reverse=True))
         elif stat.S_ISREG(info.st_mode):
             row = {
-                "path": name, "kind": "file", "mode": stat.S_IMODE(info.st_mode),
-                "size": info.st_size, "sha256": file_digest(path),
+                "path": name,
+                "kind": "file",
+                "mode": stat.S_IMODE(info.st_mode),
+                "size": info.st_size,
+                "sha256": file_digest(path),
             }
         else:
             raise ValueError("fixture inventory accepts only regular files, directories and links")
@@ -61,8 +64,14 @@ def entries(source):
 
 def manifest(root_records=()):
     return {
-        "schema": 1, "roots": list(root_records), "executables": [], "python": [],
-        "links": [], "locks": [], "commands": [], "loader": None,
+        "schema": 1,
+        "roots": list(root_records),
+        "executables": [],
+        "python": [],
+        "links": [],
+        "locks": [],
+        "commands": [],
+        "loader": None,
     }
 
 
@@ -91,10 +100,17 @@ class ToolProject:
         source.chmod(0o755)
         for filename, content in ({"value.txt": name} if files is None else files).items():
             put(source, filename, content)
-        document = manifest([{
-            "id": "install", "source": str(source), "coverage": "tree",
-            "preserve_source": preserve, "entries": entries(source),
-        }])
+        document = manifest(
+            [
+                {
+                    "id": "install",
+                    "source": str(source),
+                    "coverage": "tree",
+                    "preserve_source": preserve,
+                    "entries": entries(source),
+                }
+            ]
+        )
         self.documents[name] = document
         self.definitions[name] = {"format": "frozen-tool-v1", "manifest": f"tool-locks/{name}.json"}
         self.save(name)
@@ -113,19 +129,28 @@ class ToolProject:
         source = self.documents[name]["roots"][0]["source"]
         self.documents[name]["roots"][0]["preserve_source"] = True
         (self.root / path).symlink_to(source, target_is_directory=True)
-        self.documents[name]["links"] = [{
-            "path": path, "target": source, "root": "install", "subpath": ".",
-        }]
+        self.documents[name]["links"] = [
+            {
+                "path": path,
+                "target": source,
+                "root": "install",
+                "subpath": ".",
+            }
+        ]
         self.save(name)
 
     def pin_lock(self, name, path="package-lock.json", content="fixture-lock\n"):
         put(self.root, path, content)
         roots = self.documents[name]["roots"]
         trees = sorted([root["id"], digest(canonical(root["entries"]))] for root in roots)
-        self.documents[name]["locks"] = [{
-            "path": path, "sha256": digest((self.root / path).read_bytes()),
-            "roots": sorted(root["id"] for root in roots), "tree_sha256": digest(canonical(trees)),
-        }]
+        self.documents[name]["locks"] = [
+            {
+                "path": path,
+                "sha256": digest((self.root / path).read_bytes()),
+                "roots": sorted(root["id"] for root in roots),
+                "tree_sha256": digest(canonical(trees)),
+            }
+        ]
         self.save(name)
 
     def module(self, name, source):
@@ -150,7 +175,8 @@ def assert_counts(report, *, executed=0, reused=0, failed=0):
 
 def cache_bytes(root):
     cache = root / ".pytest-telescope" / "cache"
-    return {
-        path.relative_to(cache).as_posix(): path.read_bytes()
-        for path in cache.rglob("*.json")
-    } if cache.exists() else {}
+    return (
+        {path.relative_to(cache).as_posix(): path.read_bytes() for path in cache.rglob("*.json")}
+        if cache.exists()
+        else {}
+    )

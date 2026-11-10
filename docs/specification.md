@@ -68,12 +68,13 @@ Environment names compose in the same places. For example:
 ```python
 pytestmark = pytest.mark.telescope(env=["MODULE_FEATURE"])
 
+
 @pytest.mark.telescope(env=["CLASS_FEATURE"])
 class TestVariants:
     @pytest.mark.telescope(env=["FUNCTION_FEATURE"])
-    @pytest.mark.parametrize("value", [
-        pytest.param("a", marks=pytest.mark.telescope(env=["PARAM_FEATURE"]))
-    ])
+    @pytest.mark.parametrize(
+        "value", [pytest.param("a", marks=pytest.mark.telescope(env=["PARAM_FEATURE"]))]
+    )
     def test_variant(self, value): ...
 ```
 
@@ -170,8 +171,7 @@ tools = ["frontend"]
 
 ```python
 @pytest.mark.telescope(tools=["frontend"])
-def test_frontend():
-    ...
+def test_frontend(): ...
 ```
 
 `tools` is a literal list of registered names. Module, class, function and parameter
@@ -213,8 +213,7 @@ The following interface is under development and is not a claim about the publis
 
 ```python
 @pytest.mark.telescope(git="frozen-checkout-v1")
-def test_revision():
-    ...
+def test_revision(): ...
 ```
 
 The same literal string may appear in project defaults or bundles. Module, class,

@@ -10,9 +10,20 @@ from pytest_telescope import controller, model, tool_capture
 from pytest_telescope.model import DeclarationError, UnsupportedCapability
 
 FIELDS = {
-    "execution", "suites", "inventory_complete", "inventory_digest", "grouping_complete",
-    "counts", "route_counts", "cases", "case_outcomes", "collection", "units", "groups",
-    "elapsed_seconds", "setup_seconds",
+    "execution",
+    "suites",
+    "inventory_complete",
+    "inventory_digest",
+    "grouping_complete",
+    "counts",
+    "route_counts",
+    "cases",
+    "case_outcomes",
+    "collection",
+    "units",
+    "groups",
+    "elapsed_seconds",
+    "setup_seconds",
 }
 
 
@@ -20,7 +31,10 @@ def deferred_project(tmp_path, monkeypatch, *, after=1, extra_case=False):
     project, counter = mixed_project(tmp_path)
     if extra_case:
         module = project.root / "tests/test_mixed.py"
-        module.write_text(module.read_text() + "\n@pytest.mark.telescope(tools=['first'])\ndef test_second_scoped(): pass\n")
+        module.write_text(
+            module.read_text()
+            + "\n@pytest.mark.telescope(tools=['first'])\ndef test_second_scoped(): pass\n"
+        )
     original = tool_capture.Capture.view
     requests = []
 
@@ -63,10 +77,13 @@ def retained(report, known):
     return observed
 
 
-@pytest.mark.parametrize("error", [
-    DeclarationError("owned early declaration"),
-    UnsupportedCapability("tool:layout", "owned early layout"),
-])
+@pytest.mark.parametrize(
+    "error",
+    [
+        DeclarationError("owned early declaration"),
+        UnsupportedCapability("tool:layout", "owned early layout"),
+    ],
+)
 def test_early_typed_exception_declares_no_started_accounting(error):
     assert error.accounting is None
     report = controller.error_result(error)

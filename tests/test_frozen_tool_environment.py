@@ -23,29 +23,38 @@ def test_selected_tool_refuses_declared_runtime_controls_even_absent_or_empty(
         monkeypatch.delenv(name, raising=False)
     else:
         monkeypatch.setenv(name, value)
-    project.module("test_conflict.py", f"""import pytest
+    project.module(
+        "test_conflict.py",
+        f"""import pytest
 pytestmark = pytest.mark.telescope(tools=['first'], env=[{name!r}])
 def test_conflict(): pass
-""")
+""",
+    )
     report = project.run()
     assert report["status"] == "declaration_error", report
 
 
 def test_omitted_tools_preserve_existing_environment_forwarding(project, monkeypatch):
     monkeypatch.setenv("OWNED_TEST_SETTING", "exact owned value")
-    project.module("test_environment.py", """import os
+    project.module(
+        "test_environment.py",
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(env=['OWNED_TEST_SETTING'])
 def test_environment():
     assert os.environ['OWNED_TEST_SETTING'] == 'exact owned value'
-""")
+""",
+    )
     assert_counts(project.run(), executed=1)
     assert_counts(project.run(), reused=1)
 
 
 def test_omitted_tools_still_refuse_reserved_home(project, monkeypatch):
     monkeypatch.setenv("HOME", str(project.external))
-    project.module("test_home.py", "import pytest\npytestmark=pytest.mark.telescope(env=['HOME'])\ndef test_home(): pass\n")
+    project.module(
+        "test_home.py",
+        "import pytest\npytestmark=pytest.mark.telescope(env=['HOME'])\ndef test_home(): pass\n",
+    )
     report = project.run()
     assert report["kind"] == "refusal" and report["status"] == "declaration_error", report
 
@@ -53,7 +62,9 @@ def test_omitted_tools_still_refuse_reserved_home(project, monkeypatch):
 def test_tool_and_user_environment_values_remain_exact_and_consumer_local(project, monkeypatch):
     project.add_tree("first")
     monkeypatch.setenv("OWNED_TOOL_MODE", "1")
-    project.module("test_environment.py", """import os
+    project.module(
+        "test_environment.py",
+        """import os
 import pytest
 pytestmark = pytest.mark.telescope(tools=[])
 @pytest.mark.telescope(tools=['first'], env=['OWNED_TOOL_MODE'])
@@ -61,7 +72,8 @@ def test_consumer():
     assert int(os.environ['OWNED_TOOL_MODE']) > 0
 def test_unrelated():
     assert 'OWNED_TOOL_MODE' not in os.environ
-""")
+""",
+    )
     assert_counts(project.run(), executed=2)
     assert_counts(project.run(), reused=2)
     monkeypatch.setenv("OWNED_TOOL_MODE", "2")
@@ -72,13 +84,17 @@ def test_unrelated():
 
 def test_default_only_tool_runs_ordinary_without_preparing_a_sandbox(project, monkeypatch):
     project.definitions["unused"] = {
-        "format": "frozen-tool-v1", "manifest": "tool-locks/not-present.json",
+        "format": "frozen-tool-v1",
+        "manifest": "tool-locks/not-present.json",
     }
     project.configure('[tool.pytest_telescope.defaults]\ntools = ["unused"]\n')
-    project.module("test_ordinary.py", f"""from pathlib import Path
+    project.module(
+        "test_ordinary.py",
+        f"""from pathlib import Path
 def test_ordinary():
     assert Path.cwd() == Path({str(project.root)!r})
-""")
+""",
+    )
 
     def unexpected_prepare(*args, **kwargs):
         raise AssertionError("ordinary-only run must not prepare a sandbox")
@@ -95,7 +111,10 @@ def test_cli_tool_refusal_has_exact_public_envelope_without_raw_paths(project, m
     source = project.add_tree("first")
     project.documents["first"]["schema"] = 999
     project.save("first")
-    project.module("test_invalid.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_invalid(): pass\n")
+    project.module(
+        "test_invalid.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_invalid(): pass\n",
+    )
     monkeypatch.chdir(project.root)
     assert controller.main(["run"]) == 4
     output = capsys.readouterr()
@@ -110,12 +129,15 @@ def test_cli_tool_refusal_has_exact_public_envelope_without_raw_paths(project, m
 
 def test_no_cache_tool_execution_does_not_publish_new_records(project):
     project.add_tree("first")
-    project.module("test_value.py", """from pathlib import Path
+    project.module(
+        "test_value.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 def test_value():
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
-""")
+""",
+    )
     for _ in range(2):
         report = project.run(no_cache=True)
         assert_counts(report, executed=1)

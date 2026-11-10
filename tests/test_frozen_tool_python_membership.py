@@ -28,7 +28,9 @@ def installed_metadata(tmp_path, monkeypatch, mutation):
     for path in (source, meta):
         content = path.read_bytes()
         digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
-        rows.append([path.relative_to(project.external).as_posix(), "sha256=" + digest, str(len(content))])
+        rows.append(
+            [path.relative_to(project.external).as_posix(), "sha256=" + digest, str(len(content))]
+        )
     rows.append([metadata.name + "/RECORD", "", ""])
     if mutation == "hash":
         rows[0][1] = "sha256=" + "A" * 43
@@ -45,16 +47,28 @@ def installed_metadata(tmp_path, monkeypatch, mutation):
     content = io.StringIO(newline="")
     csv.writer(content).writerows(rows)
     put(metadata, "RECORD", content.getvalue())
-    document = manifest([
-        {"id": name, "source": str(path), "coverage": "tree", "preserve_source": True,
-         "entries": entries(path)}
-        for name, path in (("package", package), ("metadata", metadata), ("runtime", runtime))
-    ])
-    document["python"] = [{
-        "name": "owned-plugin", "version": "1.0", "metadata": {"root": "metadata", "path": "."},
-        "packages": [{"root": "package", "path": "."}], "dependencies": [],
-        "runtime": [{"root": "runtime", "path": "python"}],
-    }]
+    document = manifest(
+        [
+            {
+                "id": name,
+                "source": str(path),
+                "coverage": "tree",
+                "preserve_source": True,
+                "entries": entries(path),
+            }
+            for name, path in (("package", package), ("metadata", metadata), ("runtime", runtime))
+        ]
+    )
+    document["python"] = [
+        {
+            "name": "owned-plugin",
+            "version": "1.0",
+            "metadata": {"root": "metadata", "path": "."},
+            "packages": [{"root": "package", "path": "."}],
+            "dependencies": [],
+            "runtime": [{"root": "runtime", "path": "python"}],
+        }
+    ]
     project.documents["owned"] = document
     project.definitions["owned"] = {"format": "frozen-tool-v1", "manifest": "tool-locks/owned.json"}
     project.save("owned")
@@ -64,10 +78,21 @@ def installed_metadata(tmp_path, monkeypatch, mutation):
     return tool_capture.Capture(SimpleNamespace(root=project.root, tools=tools), stage, 20, None)
 
 
-@pytest.mark.parametrize("mutation", [
-    "valid", "hash", "size", "missing-self", "duplicate", "unrecorded-source", "hashless-source",
-])
-def test_installed_record_admits_only_complete_matching_owned_members(tmp_path, monkeypatch, mutation):
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "valid",
+        "hash",
+        "size",
+        "missing-self",
+        "duplicate",
+        "unrecorded-source",
+        "hashless-source",
+    ],
+)
+def test_installed_record_admits_only_complete_matching_owned_members(
+    tmp_path, monkeypatch, mutation
+):
     capture = installed_metadata(tmp_path, monkeypatch, mutation)
     if mutation == "valid":
         with capture:

@@ -37,8 +37,13 @@ def invocation(name, runner):
                             raise AssertionError("unsupported workflow expression in gate input")
                         return value
 
-                    found.append((tokens[0], [expand(token) for token in tokens[1:]],
-                                  {key: expand(value) for key, value in environment.items()}))
+                    found.append(
+                        (
+                            tokens[0],
+                            [expand(token) for token in tokens[1:]],
+                            {key: expand(value) for key, value in environment.items()},
+                        )
+                    )
     assert len(found) == 1, "one gate entry is required per workflow"
     return found[0]
 
@@ -94,7 +99,7 @@ def entry(tmp_path, monkeypatch, gates):
             environment.pop("TELESCOPE_FIXTURE_NODE", None)
             if "--node" in arguments:
                 index = arguments.index("--node")
-                del arguments[index:index + 2]
+                del arguments[index : index + 2]
             if selection == "argv":
                 arguments += ["--node", str(node)]
             else:
@@ -102,7 +107,7 @@ def entry(tmp_path, monkeypatch, gates):
         if missing == "node":
             if "--node" in arguments:
                 index = arguments.index("--node")
-                del arguments[index:index + 2]
+                del arguments[index : index + 2]
             environment.pop("TELESCOPE_FIXTURE_NODE", None)
         elif missing == "scratch":
             environment.pop("TMPDIR", None)

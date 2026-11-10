@@ -24,12 +24,21 @@ def test_empty_mode_zero_files_root_capture_verify_and_cleanup(tmp_path):
     entered = False
     locked = False
     try:
-        project.documents["owned"] = manifest([{
-            "id": "install", "source": str(source), "coverage": "files",
-            "preserve_source": False,
-            "entries": [{"path": ".", "kind": "directory", "mode": 0}],
-        }])
-        project.definitions["owned"] = {"format": "frozen-tool-v1", "manifest": "tool-locks/owned.json"}
+        project.documents["owned"] = manifest(
+            [
+                {
+                    "id": "install",
+                    "source": str(source),
+                    "coverage": "files",
+                    "preserve_source": False,
+                    "entries": [{"path": ".", "kind": "directory", "mode": 0}],
+                }
+            ]
+        )
+        project.definitions["owned"] = {
+            "format": "frozen-tool-v1",
+            "manifest": "tool-locks/owned.json",
+        }
         project.save("owned")
         project.configure()
         stage = tmp_path / "capture"
@@ -63,8 +72,12 @@ def test_empty_mode_zero_files_root_capture_verify_and_cleanup(tmp_path):
                         failures.append(errors(error))
         assert identity(source) == source_identity
         assert stat.S_IMODE(source.lstat().st_mode) == 0
-        diagnostic = {"mode": 0, "selected_entries": 1, "failures": failures,
-                      "copy_exists": os.path.lexists(capture.directory / "owned/install")}
+        diagnostic = {
+            "mode": 0,
+            "selected_entries": 1,
+            "failures": failures,
+            "copy_exists": os.path.lexists(capture.directory / "owned/install"),
+        }
         print(json.dumps(diagnostic))
         assert not failures, diagnostic
         assert not capture.directory.exists()

@@ -37,7 +37,11 @@ def test_static_elf_alone_selects_closed_configuration_and_real_program_reads_it
 def test_explicit_loader_without_elf_also_selects_native_view(configured):
     configured.executable.write_bytes(b"owned path-model executable, not launched\n")
     configured.document["executables"] = []
-    configured.document["loader"] = {"profile": "linux-x86_64-glibc-v1", "directories": [], "cache": None}
+    configured.document["loader"] = {
+        "profile": "linux-x86_64-glibc-v1",
+        "directories": [],
+        "cache": None,
+    }
     configured.save()
     with configured.capture() as capture:
         runtime = capture.runtimes["native"]
@@ -56,7 +60,9 @@ def test_data_only_selection_does_not_close_configuration(configured):
 
 
 @pytest.mark.parametrize("source_mode, expected", [(0o755, 0o555), (0o750, 0o550)])
-def test_config_projection_preserves_exact_read_modes_and_fixed_preload(configured, source_mode, expected):
+def test_config_projection_preserves_exact_read_modes_and_fixed_preload(
+    configured, source_mode, expected
+):
     put(configured.config, "nested/value", "nested\n", 0o640)
     (configured.config / "nested").chmod(source_mode)
     configured.selected.add("nested/value")
@@ -70,7 +76,11 @@ def test_config_projection_preserves_exact_read_modes_and_fixed_preload(configur
         preload = (etc / "ld.so.preload").lstat()
         assert stat.S_ISREG(preload.st_mode) and preload.st_size == 0
         assert stat.S_IMODE(preload.st_mode) == 0o444
-        assert set(path.name for path in etc.iterdir()) == {"selected.txt", "nested", "ld.so.preload"}
+        assert set(path.name for path in etc.iterdir()) == {
+            "selected.txt",
+            "nested",
+            "ld.so.preload",
+        }
         assert (configured.config / "nested").stat().st_mode & 0o777 == source_mode
 
 
@@ -82,8 +92,12 @@ def test_conflicting_preload_refuses_before_launch(configured, kind):
     elif kind == "directory":
         path.mkdir()
     else:
-        put(configured.config, path.name, "nonempty" if kind == "nonempty" else b"",
-            0o600 if kind == "wrong-mode" else 0o644)
+        put(
+            configured.config,
+            path.name,
+            "nonempty" if kind == "nonempty" else b"",
+            0o600 if kind == "wrong-mode" else 0o644,
+        )
     configured.selected.add(path.name)
     configured.save()
     with pytest.raises(UnsupportedCapability) as caught:
@@ -103,7 +117,10 @@ def test_declared_configuration_link_preserves_literal_text_and_target(configure
         mapped = {destination: source for source, destination in view.bindings}
         assert os.readlink(mapped["/etc"] / "alias") == target
         for path in ("/etc/alias", "/tools/native/config/alias"):
-            assert direct_static_read(configured.box, view, path) == (0, b"declared configuration\n")
+            assert direct_static_read(configured.box, view, path) == (
+                0,
+                b"declared configuration\n",
+            )
 
 
 @pytest.mark.parametrize("target", ["missing", "/unselected-outside-file", "alias"])
@@ -156,12 +173,21 @@ def test_owned_configuration_copy_corruption_is_refused(configured):
         assert view.native
 
 
-@pytest.mark.parametrize("hook", [
-    "lib/python3.12/site-packages/escape.pth", "lib/python3.12/site-packages/escape.egg-link",
-    "bin/python3.12._pth", "lib/python3.12/sitecustomize.py",
-    "lib/python3.12/usercustomize/__init__.py", "lib/python312.zip",
-    "bin/pyvenv.cfg", "pyvenv.cfg", "pybuilddir.txt", "Modules/Setup.local",
-])
+@pytest.mark.parametrize(
+    "hook",
+    [
+        "lib/python3.12/site-packages/escape.pth",
+        "lib/python3.12/site-packages/escape.egg-link",
+        "bin/python3.12._pth",
+        "lib/python3.12/sitecustomize.py",
+        "lib/python3.12/usercustomize/__init__.py",
+        "lib/python312.zip",
+        "bin/pyvenv.cfg",
+        "pyvenv.cfg",
+        "pybuilddir.txt",
+        "Modules/Setup.local",
+    ],
+)
 def test_selected_unsupported_startup_candidate_refuses(configured, hook):
     put(configured.prefix, hook, "owned unsupported candidate\n")
     configured.save()
@@ -176,6 +202,7 @@ def test_observed_startup_search_bound_is_enforced(configured, field):
     def change(description):
         target = description if field == "path" else description["startup"]
         target[field] = [str(configured.prefix / ("search-" + str(i))) for i in range(65)]
+
     configured.description(change)
     with pytest.raises(UnsupportedCapability) as caught:
         with configured.capture() as capture:
@@ -184,14 +211,18 @@ def test_observed_startup_search_bound_is_enforced(configured, field):
 
 
 def test_environment_overlay_outside_closed_prefix_refuses(configured):
-    configured.box = replace(configured.box, binds=(*configured.box.binds, ("/owned-uncovered", "/owned-uncovered")))
+    configured.box = replace(
+        configured.box, binds=(*configured.box.binds, ("/owned-uncovered", "/owned-uncovered"))
+    )
     with pytest.raises(UnsupportedCapability) as caught:
         with configured.capture() as capture:
             capture.view(["native"])
     assert caught.value.capability == "tool:layout"
 
 
-@pytest.mark.parametrize("case", ["valid", "missing", "oversize", "wrong-home", "duplicate", "unknown-key"])
+@pytest.mark.parametrize(
+    "case", ["valid", "missing", "oversize", "wrong-home", "duplicate", "unknown-key"]
+)
 def test_owned_venv_path_model_requires_exact_bounded_configuration(configured, case):
     # This is a Startup path-model fixture, not an executed virtual environment.
     venv = configured.prefix / "venv"
@@ -211,10 +242,14 @@ def test_owned_venv_path_model_requires_exact_bounded_configuration(configured, 
 
     def change(description):
         fields = description["startup"]
-        fields.update(prefix=str(venv), exec_prefix=str(venv),
-                      platstdlib=str(venv / "lib/python3.12"),
-                      purelib=str(venv / "lib/python3.12/site-packages"),
-                      platlib=str(venv / "lib/python3.12/site-packages"))
+        fields.update(
+            prefix=str(venv),
+            exec_prefix=str(venv),
+            platstdlib=str(venv / "lib/python3.12"),
+            purelib=str(venv / "lib/python3.12/site-packages"),
+            platlib=str(venv / "lib/python3.12/site-packages"),
+        )
+
     configured.description(change)
     configured.box = replace(configured.box, executable=str(venv / "bin/python"))
     configured.save()
@@ -238,7 +273,9 @@ def test_owned_projection_cleanup_finishes_and_never_changes_sources(configured)
 
 
 @pytest.mark.parametrize("persistent", [False, True])
-def test_native_configuration_copy_failure_has_two_bounded_attempts(configured, monkeypatch, persistent):
+def test_native_configuration_copy_failure_has_two_bounded_attempts(
+    configured, monkeypatch, persistent
+):
     original = tool_capture._measure
     attempts = []
 

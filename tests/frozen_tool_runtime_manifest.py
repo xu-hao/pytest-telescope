@@ -62,9 +62,7 @@ class RuntimeManifest:
         self._root(name, source, "tree", rows)
         for row in rows:
             path = source / row["path"]
-            if row["kind"] == "file" and (
-                path.suffix == ".so" or ".so." in path.name
-            ):
+            if row["kind"] == "file" and (path.suffix == ".so" or ".so." in path.name):
                 self.native_resources.add(path)
         return source
 
@@ -86,17 +84,18 @@ class RuntimeManifest:
         for row in entries(source):
             path = source / row["path"]
             self.pin(path)
-            if row["kind"] in {"file", "symlink"} and (
-                path.suffix == ".so" or ".so." in path.name
-            ):
+            if row["kind"] in {"file", "symlink"} and (path.suffix == ".so" or ".so." in path.name):
                 self.native_resources.add(path.resolve(strict=True))
 
     def _root(self, name, source, coverage, rows):
         if name in self.roots:
             raise ValueError("fixture root name is already used")
         self.roots[name] = {
-            "id": name, "source": str(source), "coverage": coverage,
-            "preserve_source": True, "entries": rows,
+            "id": name,
+            "source": str(source),
+            "coverage": coverage,
+            "preserve_source": True,
+            "entries": rows,
         }
 
     def _anchor(self, path):
@@ -180,12 +179,19 @@ class RuntimeManifest:
             if stat.S_ISLNK(info.st_mode):
                 rows.append({"path": relative, "kind": "symlink", "target": os.readlink(path)})
             elif stat.S_ISDIR(info.st_mode):
-                rows.append({"path": relative, "kind": "directory", "mode": stat.S_IMODE(info.st_mode)})
+                rows.append(
+                    {"path": relative, "kind": "directory", "mode": stat.S_IMODE(info.st_mode)}
+                )
             elif stat.S_ISREG(info.st_mode):
-                rows.append({
-                    "path": relative, "kind": "file", "mode": stat.S_IMODE(info.st_mode),
-                    "size": info.st_size, "sha256": file_digest(path),
-                })
+                rows.append(
+                    {
+                        "path": relative,
+                        "kind": "file",
+                        "mode": stat.S_IMODE(info.st_mode),
+                        "size": info.st_size,
+                        "sha256": file_digest(path),
+                    }
+                )
             else:
                 raise ValueError("fixture sparse runtime input is a special file")
         return sorted(rows, key=lambda row: row["path"])
@@ -194,7 +200,9 @@ class RuntimeManifest:
         commands = {} if commands is None else commands
         search = {path.parent for path in self.native_resources}
         information, dependencies, paths, runtime_search = native_relations(
-            [*self.entrypoints, *self.native_resources], sorted(search), library_pins,
+            [*self.entrypoints, *self.native_resources],
+            sorted(search),
+            library_pins,
         )
         for path in sorted(paths):
             self.pin(path)
@@ -240,25 +248,35 @@ class RuntimeManifest:
         for path, kind in sorted(self.entrypoints.items()):
             info = information[path]
             interpreter = info["interpreter"]
-            executables.append({
-                "file": self.reference(path), "format": kind,
-                "interpreter": None if interpreter is None else self.reference(interpreter),
-                "libraries": transitive(path), "resources": resources, "commands": [],
-            })
+            executables.append(
+                {
+                    "file": self.reference(path),
+                    "format": kind,
+                    "interpreter": None if interpreter is None else self.reference(interpreter),
+                    "libraries": transitive(path),
+                    "resources": resources,
+                    "commands": [],
+                }
+            )
         for path, interpreter, command in scripts:
-            executables.append({
-                "file": self.reference(path), "format": "script",
-                "interpreter": self.reference(interpreter), "libraries": [],
-                "resources": resources, "commands": [self.reference(commands[command])],
-            })
+            executables.append(
+                {
+                    "file": self.reference(path),
+                    "format": "script",
+                    "interpreter": self.reference(interpreter),
+                    "libraries": [],
+                    "resources": resources,
+                    "commands": [self.reference(commands[command])],
+                }
+            )
         self.document["executables"] = executables
         self.document["commands"] = [
-            {"name": name, "file": self.reference(path)}
-            for name, path in sorted(commands.items())
+            {"name": name, "file": self.reference(path)} for name, path in sorted(commands.items())
         ]
         directories = {path.resolve(strict=False) for path in SYSTEM_SEARCH} | runtime_search
         minimal = [
-            path for path in directories
+            path
+            for path in directories
             if not any(other != path and path.is_relative_to(other) for other in directories)
         ]
         self.document["loader"] = {
@@ -269,7 +287,8 @@ class RuntimeManifest:
         self.document["python"] = list(python)
         self.project.documents[self.name] = self.document
         self.project.definitions[self.name] = {
-            "format": "frozen-tool-v1", "manifest": f"tool-locks/{self.name}.json",
+            "format": "frozen-tool-v1",
+            "manifest": f"tool-locks/{self.name}.json",
         }
         self.project.save(self.name)
         self.project.configure()

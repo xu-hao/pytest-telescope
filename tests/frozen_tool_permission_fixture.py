@@ -90,14 +90,30 @@ class PermissionFixture:
         rows = [{"path": ".", "kind": "directory", "mode": 0o755 if interior else mode}]
         if interior:
             rows.append({"path": "inner", "kind": "directory", "mode": mode})
-        rows.append({"path": filename, "kind": "file", "mode": 0o644,
-                     "size": self.file.stat().st_size,
-                     "sha256": hashlib.sha256(self.file.read_bytes()).hexdigest()})
-        self.project.documents["owned"] = manifest([{
-            "id": "install", "source": str(self.source), "coverage": "files",
-            "preserve_source": False, "entries": rows,
-        }])
-        self.project.definitions["owned"] = {"format": "frozen-tool-v1", "manifest": "tool-locks/owned.json"}
+        rows.append(
+            {
+                "path": filename,
+                "kind": "file",
+                "mode": 0o644,
+                "size": self.file.stat().st_size,
+                "sha256": hashlib.sha256(self.file.read_bytes()).hexdigest(),
+            }
+        )
+        self.project.documents["owned"] = manifest(
+            [
+                {
+                    "id": "install",
+                    "source": str(self.source),
+                    "coverage": "files",
+                    "preserve_source": False,
+                    "entries": rows,
+                }
+            ]
+        )
+        self.project.definitions["owned"] = {
+            "format": "frozen-tool-v1",
+            "manifest": "tool-locks/owned.json",
+        }
         self.project.save("owned")
         self.project.configure()
         self.protected.chmod(mode)
@@ -105,8 +121,13 @@ class PermissionFixture:
         self.before = self.state()
 
     def state(self):
-        return (identity(self.protected), stat.S_IMODE(self.protected.lstat().st_mode),
-                identity(self.file), stat.S_IMODE(self.file.lstat().st_mode), self.file.read_bytes())
+        return (
+            identity(self.protected),
+            stat.S_IMODE(self.protected.lstat().st_mode),
+            identity(self.file),
+            stat.S_IMODE(self.file.lstat().st_mode),
+            self.file.read_bytes(),
+        )
 
     def finish(self):
         assert identity(self.protected) == self.before[0]
@@ -127,7 +148,10 @@ def abandon(project, ready):
     """Child exits naturally after a bounded receipt of actual capture/failure."""
     manager = sandbox.invocation(project)
     directory = manager.__enter__()
-    records = {str(directory): identity(directory), str(directory / "owner.lock"): identity(directory / "owner.lock")}
+    records = {
+        str(directory): identity(directory),
+        str(directory / "owner.lock"): identity(directory / "owner.lock"),
+    }
     with ready.with_suffix(".owner.json").open("x") as stream:
         json.dump({"directory": str(directory), "identity": identity(directory)}, stream)
         stream.flush()
@@ -139,8 +163,13 @@ def abandon(project, ready):
             capture.__enter__()
         except BaseException as error:
             failure = errors(error)
-        value = {"pid": os.getpid(), "directory": str(directory), "records": records,
-                 "failure": failure, "copy_exists": os.path.lexists(capture.directory / "owned/install/value")}
+        value = {
+            "pid": os.getpid(),
+            "directory": str(directory),
+            "records": records,
+            "failure": failure,
+            "copy_exists": os.path.lexists(capture.directory / "owned/install/value"),
+        }
         encoded = json.dumps(value).encode()
         assert len(encoded) <= 4096
         with ready.open("xb") as stream:

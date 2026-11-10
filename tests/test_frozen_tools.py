@@ -16,7 +16,8 @@ def project(tmp_path):
 
 def test_registered_and_default_tools_do_not_scope_an_ordinary_case(project):
     project.definitions["unused"] = {
-        "format": "frozen-tool-v1", "manifest": "tool-locks/not-present.json",
+        "format": "frozen-tool-v1",
+        "manifest": "tool-locks/not-present.json",
     }
     project.configure('[tool.pytest_telescope.defaults]\ntools = ["unused"]\n')
     project.module("test_plain.py", "def test_plain(): pass\n")
@@ -30,14 +31,20 @@ def test_empty_tools_and_inherited_selections_have_exact_static_routes(project):
     project.add_tree("first")
     project.add_tree("second")
     project.configure('[tool.pytest_telescope.bundles.shared]\ntools = ["second"]\n')
-    project.module("test_module.py", "import pytest\npytestmark = pytest.mark.telescope(tools=[])\ndef test_empty(): pass\n")
-    project.module("test_mixed.py", """import pytest
+    project.module(
+        "test_module.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=[])\ndef test_empty(): pass\n",
+    )
+    project.module(
+        "test_mixed.py",
+        """import pytest
 def test_plain(): pass
 @pytest.mark.telescope(tools=['first', 'first'], bundles=['shared'])
 class TestTools:
     @pytest.mark.telescope(tools=[])
     def test_inherits(self): pass
-""")
+""",
+    )
     preview = make_plan(project.root)
     assert preview["sandbox"]["required"] is True
     assert preview["tools"] == project.definitions
@@ -53,40 +60,60 @@ class TestTools:
 
 def test_structural_narrowing_does_not_prepare_an_excluded_tool(project):
     project.definitions["unused"] = {
-        "format": "frozen-tool-v1", "manifest": "tool-locks/not-present.json",
+        "format": "frozen-tool-v1",
+        "manifest": "tool-locks/not-present.json",
     }
     project.configure()
     project.module("test_plain.py", "def test_plain(): pass\n")
-    project.module("test_excluded.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['unused'])\ndef test_external(): pass\n")
+    project.module(
+        "test_excluded.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['unused'])\ndef test_external(): pass\n",
+    )
     preview = make_plan(project.root, structural_files={"default": ["tests/test_plain.py"]})
     assert preview["inventory"] == ["tests/test_plain.py"]
     assert preview["tools"] == {}
     assert preview["sandbox"]["required"] is False
 
 
-@pytest.mark.parametrize("declaration", [
-    "tools='first'", "tools=[1]", "tools=[True]", "tools=['unknown']",
-    "tool=['first']", "tools=['first'] + []",
-])
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "tools='first'",
+        "tools=[1]",
+        "tools=[True]",
+        "tools=['unknown']",
+        "tool=['first']",
+        "tools=['first'] + []",
+    ],
+)
 def test_invalid_tool_marker_values_refuse_statically(project, declaration):
     project.add_tree("first")
-    project.module("test_bad.py", f"import pytest\n@pytest.mark.telescope({declaration})\ndef test_bad(): pass\n")
+    project.module(
+        "test_bad.py",
+        f"import pytest\n@pytest.mark.telescope({declaration})\ndef test_bad(): pass\n",
+    )
     with pytest.raises(DeclarationError):
         make_plan(project.root)
 
 
-@pytest.mark.parametrize("definition", [
-    {"format": "frozen-tool-v1"},
-    {"format": "frozen-tool-v1", "manifest": "tool.json", "mount": "/opt"},
-    {"format": True, "manifest": "tool.json"},
-    {"format": "frozen-tool-v1", "manifest": "/outside/tool.json"},
-    {"format": "frozen-tool-v1", "manifest": "../tool.json"},
-    {"format": "frozen-tool-v1", "manifest": ".pytest-telescope/tool.json"},
-])
+@pytest.mark.parametrize(
+    "definition",
+    [
+        {"format": "frozen-tool-v1"},
+        {"format": "frozen-tool-v1", "manifest": "tool.json", "mount": "/opt"},
+        {"format": True, "manifest": "tool.json"},
+        {"format": "frozen-tool-v1", "manifest": "/outside/tool.json"},
+        {"format": "frozen-tool-v1", "manifest": "../tool.json"},
+        {"format": "frozen-tool-v1", "manifest": ".pytest-telescope/tool.json"},
+    ],
+)
 def test_registration_has_exact_safe_fields(project, definition):
     project.definitions["first"] = definition
     project.configure()
-    project.module("test_bad.py", "import pytest\n@pytest.mark.telescope(tools=['first'])\ndef test_bad(): pass\n")
+    project.module(
+        "test_bad.py",
+        "import pytest\n@pytest.mark.telescope(tools=['first'])\ndef test_bad(): pass\n",
+    )
     with pytest.raises(DeclarationError):
         make_plan(project.root)
 
@@ -95,7 +122,10 @@ def test_plan_never_executes_a_declared_script(project):
     source = project.add_tree("first", files={"run": "#!/bin/sh\nexit 93\n"})
     (source / "run").chmod(0o755)
     project.refresh("first")
-    project.module("test_static.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\nraise RuntimeError('must not import while planning')\n")
+    project.module(
+        "test_static.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\nraise RuntimeError('must not import while planning')\n",
+    )
     preview = make_plan(project.root)
     assert preview["case_inventory"] == "requires pytest collection"
     assert preview["tools"] == project.definitions
@@ -107,6 +137,9 @@ def test_manifest_path_symlink_refuses_without_reading_its_target(project):
     source = project.root / "tool-locks/first.json"
     source.unlink()
     source.symlink_to(put(project.external, "private-marker.json", "private-test-marker"))
-    project.module("test_bad.py", "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_bad(): pass\n")
+    project.module(
+        "test_bad.py",
+        "import pytest\npytestmark = pytest.mark.telescope(tools=['first'])\ndef test_bad(): pass\n",
+    )
     with pytest.raises(DeclarationError):
         make_plan(project.root)

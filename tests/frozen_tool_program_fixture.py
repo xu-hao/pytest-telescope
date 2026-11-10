@@ -33,7 +33,9 @@ def prerequisite_identity(documents):
         for root in document["roots"]:
             if root["id"] == "driver":
                 root["source"] = "<owned-driver>"
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def require_prerequisites(name, identity):
@@ -73,7 +75,11 @@ def capture_evidence(monkeypatch, directory):
             row["exception_type"] = type(error).__module__ + "." + type(error).__qualname__
         else:
             code, output = result
-            row.update(returncode=code, output_bytes=len(output), output_sha256=hashlib.sha256(output).hexdigest())
+            row.update(
+                returncode=code,
+                output_bytes=len(output),
+                output_sha256=hashlib.sha256(output).hexdigest(),
+            )
             if len(output) <= 1024 * 1024:
                 row["output_base64"] = base64.b64encode(output).decode("ascii")
             else:
@@ -177,8 +183,10 @@ class ProgramConfiguration:
         # Each dynamic tool is independently closed, even when its consumer also
         # selects another tool. Reuse the exact known worker inputs, not live binds.
         self.roots = {root["id"]: copy.deepcopy(root) for root in worker.document["roots"]}
-        self.selected = {name: {path for path in worker.paths if worker.anchor(path) == name}
-                         for name in worker.anchors}
+        self.selected = {
+            name: {path for path in worker.paths if worker.anchor(path) == name}
+            for name in worker.anchors
+        }
         self.native = set(worker.native)
         self.executables = {}
         self.document = manifest()
@@ -186,7 +194,9 @@ class ProgramConfiguration:
         self.node = self.required_program("TELESCOPE_FIXTURE_NODE")
         if not self.node.is_relative_to("/usr"):
             if self.node.parent.name != "bin":
-                raise ValueError("controlled Node fixture requires its explicit bin/lib prefix layout")
+                raise ValueError(
+                    "controlled Node fixture requires its explicit bin/lib prefix layout"
+                )
             self.files_root("node", self.node.parent.parent)
         self.executable(self.node)
         self.env = Path("/usr/bin/env").resolve(strict=True)
@@ -195,7 +205,12 @@ class ProgramConfiguration:
         scripts.mkdir(mode=0o755)
         scripts.chmod(0o755)
         for name in ("command.js", "browser.js", "build.js", "child.py"):
-            put(scripts, name, (PAYLOADS / name).read_bytes(), 0o755 if name.endswith(".js") else 0o644)
+            put(
+                scripts,
+                name,
+                (PAYLOADS / name).read_bytes(),
+                0o755 if name.endswith(".js") else 0o644,
+            )
         put(scripts, "input.txt", "frozen frontend input\n")
         self.scripts = scripts
         self.tree_root("driver", scripts)
@@ -219,7 +234,9 @@ class ProgramConfiguration:
             # It supplies no page resource: leave it unselected/absent in the
             # closed /usr view rather than changing or masking its source mode.
         self.finish()
-        self.identity = prerequisite_identity({"worker": worker.document, "frontend": self.document})
+        self.identity = prerequisite_identity(
+            {"worker": worker.document, "frontend": self.document}
+        )
         if require_receipt:
             require_prerequisites("browser" if browser else "node", self.identity)
 
@@ -237,14 +254,24 @@ class ProgramConfiguration:
         return actual
 
     def files_root(self, name, path):
-        self.roots[name] = {"id": name, "source": str(path), "coverage": "files",
-                            "preserve_source": True, "entries": []}
+        self.roots[name] = {
+            "id": name,
+            "source": str(path),
+            "coverage": "files",
+            "preserve_source": True,
+            "entries": [],
+        }
         self.selected[name] = {path}
 
     def tree_root(self, name, path, *, owned=None, maximum=PROGRAM_BYTES):
         rows = bounded_rows(path if owned is None else owned, maximum)
-        self.roots[name] = {"id": name, "source": str(path), "coverage": "tree",
-                            "preserve_source": True, "entries": rows}
+        self.roots[name] = {
+            "id": name,
+            "source": str(path),
+            "coverage": "tree",
+            "preserve_source": True,
+            "entries": rows,
+        }
         for row in rows:
             if row["kind"] == "file":
                 with ((path if owned is None else owned) / row["path"]).open("rb") as stream:
@@ -252,8 +279,11 @@ class ProgramConfiguration:
                         self.native.add((path / row["path"]).resolve(strict=True))
 
     def anchor(self, path):
-        candidates = [(len(Path(root["source"]).parts), name) for name, root in self.roots.items()
-                      if path.is_relative_to(root["source"])]
+        candidates = [
+            (len(Path(root["source"]).parts), name)
+            for name, root in self.roots.items()
+            if path.is_relative_to(root["source"])
+        ]
         if not candidates:
             raise ValueError("program dependency is outside explicitly declared anchors")
         return max(candidates)[1]
@@ -314,10 +344,15 @@ class ProgramConfiguration:
                         self.pin(Path(root["source"]) / row["path"])
         for name, selected in self.selected.items():
             root = Path(self.roots[name]["source"])
-            sizes = [path.lstat().st_size for path in selected if stat.S_ISREG(path.lstat().st_mode)]
+            sizes = [
+                path.lstat().st_size for path in selected if stat.S_ISREG(path.lstat().st_mode)
+            ]
             if any(size > PROGRAM_FILE_BYTES for size in sizes) or sum(sizes) > PROGRAM_BYTES:
                 raise ValueError("sparse program inputs exceed the reviewed byte bounds")
-            self.roots[name]["entries"] = [WorkerConfiguration.row(path, path.relative_to(root).as_posix()) for path in sorted(selected)]
+            self.roots[name]["entries"] = [
+                WorkerConfiguration.row(path, path.relative_to(root).as_posix())
+                for path in sorted(selected)
+            ]
         count = sum(len(root["entries"]) for root in self.roots.values())
         total = sum(row.get("size", 0) for root in self.roots.values() for row in root["entries"])
         if count > PROGRAM_ENTRIES or total > PROGRAM_BYTES:
@@ -332,35 +367,64 @@ class ProgramConfiguration:
                     seen.add(current)
                     pending.extend(dependencies[current])
             interpreter = information[path]["interpreter"]
-            records.append({"file": self.reference(path), "format": kind,
-                            "interpreter": None if interpreter is None else self.reference(interpreter),
-                            "libraries": [self.reference(value) for value in sorted(seen)],
-                            "resources": [self.reference(value) for value in sorted(self.worker.native)]
-                            if path == Path(sys.executable).resolve() else [], "commands": []})
+            records.append(
+                {
+                    "file": self.reference(path),
+                    "format": kind,
+                    "interpreter": None if interpreter is None else self.reference(interpreter),
+                    "libraries": [self.reference(value) for value in sorted(seen)],
+                    "resources": [self.reference(value) for value in sorted(self.worker.native)]
+                    if path == Path(sys.executable).resolve()
+                    else [],
+                    "commands": [],
+                }
+            )
         for name in ("command.js", "browser.js", "build.js"):
-            records.append({"file": self.reference(self.scripts / name), "format": "script",
-                            "interpreter": self.reference(self.env), "libraries": [],
-                            "resources": [{"root": "driver", "path": "."}],
-                            "commands": [self.reference(self.node)]})
+            records.append(
+                {
+                    "file": self.reference(self.scripts / name),
+                    "format": "script",
+                    "interpreter": self.reference(self.env),
+                    "libraries": [],
+                    "resources": [{"root": "driver", "path": "."}],
+                    "commands": [self.reference(self.node)],
+                }
+            )
         self.document["executables"] = records
         self.document["commands"] = [{"name": "node", "file": self.reference(self.node)}]
         directories = {path.resolve(strict=False) for path in SYSTEM_SEARCH} | search
         self.document["loader"] = {
             "profile": "linux-x86_64-glibc-v1",
-            "directories": sorted(str(path) for path in directories if not any(path != other and path.is_relative_to(other) for other in directories)),
+            "directories": sorted(
+                str(path)
+                for path in directories
+                if not any(path != other and path.is_relative_to(other) for other in directories)
+            ),
             "cache": {"root": "config", "path": "ld.so.cache"},
         }
         self.save()
-        put(self.project.external, "program-provenance.json", json.dumps({
-            "bytes": total, "entries": count, "node": str(self.node),
-            "node_sha256": file_digest(self.node),
-            "chrome": None if self.chrome is None else str(self.chrome),
-            "chrome_sha256": None if self.chrome is None else file_digest(self.chrome),
-            "manifest_sha256": file_digest(self.project.root / "tool-locks/frontend.json"),
-        }, sort_keys=True))
+        put(
+            self.project.external,
+            "program-provenance.json",
+            json.dumps(
+                {
+                    "bytes": total,
+                    "entries": count,
+                    "node": str(self.node),
+                    "node_sha256": file_digest(self.node),
+                    "chrome": None if self.chrome is None else str(self.chrome),
+                    "chrome_sha256": None if self.chrome is None else file_digest(self.chrome),
+                    "manifest_sha256": file_digest(self.project.root / "tool-locks/frontend.json"),
+                },
+                sort_keys=True,
+            ),
+        )
 
     def save(self):
         self.project.documents["frontend"] = self.document
-        self.project.definitions["frontend"] = {"format": "frozen-tool-v1", "manifest": "tool-locks/frontend.json"}
+        self.project.definitions["frontend"] = {
+            "format": "frozen-tool-v1",
+            "manifest": "tool-locks/frontend.json",
+        }
         self.project.save("frontend")
         self.project.configure()
