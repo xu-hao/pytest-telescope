@@ -75,8 +75,7 @@ without importing or evaluating project Python, within the
 [parsing limits below](#bounds-and-performance). Use `pytest.mark.telescope(...)`
 directly in function or class decorators, module or class `pytestmark`, or
 `pytest.param(..., marks=...)` inside literal parametrization declarations. Values must
-be literal string lists, booleans, or the supported literal Git version string. Use
-bundles to share declarations.
+be literal string lists or booleans. Use bundles to share declarations.
 
 Expressions, computed keyword arguments, marker factories, aliases and generated
 telescope markers are unsupported. Pytest collection still supplies ordinary parameter
@@ -188,6 +187,11 @@ The guard registry is bound to the same exact readable view. Changing a declared
 helper's bytes invalidates its consumers; a helper available only to another case does
 not join this case's registry or result identity. Stale or malformed registry evidence
 cannot make an inventory, case or batch record reusable.
+
+A selected frozen-tool project link is a verified data binding, including when its
+project name ends in `.py`. Its external target is not an authenticated project helper
+origin. Each readable view must select the exact binding and retain its captured link
+text; helper authentication does not follow that link into external source.
 
 Full current inventory is accounted for before selectors: selected cases are executed/reused/failed; other cases are explicitly unselected. `-k`, `-m` and node selectors use actual pytest semantics. Summaries report collection separately, actual case counts by route, fresh versus cached pass/skip outcomes, and no invented file-target granularity. Cache hit acceptance cannot hide new files/cases. Plan remains a nonexecuting static preview and explicitly does not claim real collected-case enumeration.
 

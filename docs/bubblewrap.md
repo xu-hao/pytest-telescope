@@ -352,7 +352,7 @@ interpreter identity (implementation, full version and build string, ABI and pla
 the sorted names and versions of every distribution visible to the isolated
 interpreter, and how the environment reaches into the project. Installing, upgrading or
 removing a package therefore invalidates scoped results. Only explicitly selected frozen
-Git/tool runtime files add host-tool byte identity; the remaining host system directories
+tool runtime files add host-tool byte identity; the remaining host system directories
 and the host network are not part of the key.
 
 How the environment reaches into the project is recorded relative to the project: the

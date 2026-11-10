@@ -566,6 +566,8 @@ requires `preserve_source=true`. Selecting the tool automatically includes this 
 project link at both project aliases. Inputs at or below it are allowed only with that
 selected binding. Relative text that resolves differently at `/project` and the mirrored
 project path refuses; a link is never changed into a directory to make it work.
+These links grant the selected frozen data view, including for a link named with a
+`.py` suffix. They do not authenticate external targets as project helper source.
 
 Each `locks` entry has exactly:
 

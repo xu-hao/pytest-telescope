@@ -305,10 +305,11 @@ infrastructure outcomes, and waits for cleanup before accepting results. Infrast
 remains at most two attempts per scoped case or batch; a retry occupies the same worker
 slot.
 
-The development frozen Git declaration supplies a supported committed tree and history
-only to its consumers. Collection may use a union of potential scopes, but does not
-grant that union to narrow execution or globally key unrelated case results. See the
-[Git view](bubblewrap.md#frozen-git-checkout-development-contract).
+Under the deferred frozen Git design, its declaration would supply a supported committed
+tree and history only to its consumers. That design is not implemented by this candidate.
+Its collection union would not grant that union to narrow execution or globally key
+unrelated case results. See the
+[deferred Git view](bubblewrap.md#frozen-git-checkout-development-contract).
 
 ## Explicit capability refusals
 
