@@ -310,7 +310,7 @@ known inventory facts. Available observations do not turn this into a successful
 
 Such a refusal adds `accounting` only when a session actually started and retention of
 its observations was attempted. Early preflight/declaration refusals omit this field.
-They do not fabricate a zero-run summary. Accounting has exactly one of these shapes:
+They do not fabricate a zero-run summary. Unguarded schema 4 accounting has exactly one of these shapes:
 
 ```json
 {"version": 1, "state": "unavailable", "reason": "bounds"}
@@ -361,6 +361,23 @@ The producer attaches only a validated `RefusalAccounting` value through its dec
 interface. Retained observations are deeply immutable between attachment and rendering;
 arbitrary mutable dictionaries, guessed attributes and fallback keys are not accepted.
 `error_result` reads this explicit property and serializes the same strict variant.
+
+For the unreleased guarded schema 5 profile, available accounting is exactly
+`{"version": 2, "state": "available", "observations": ...}`. Its observations have
+the same fields as version 1 plus exactly `fixture_guard`; execution mode is `batch` and
+profile is `batch-available-v1`. The outer refusal has the same `fixture_guard` object as
+the retained observations. Its profile is `available-v1`, its state is the actual
+producer-observed `admitted` or `unavailable` state, and its conditions are the actual
+privacy-safe case/group/matched rows. Each row refers to a selected case and its actual
+group; admitted rows have matched successfully. An unavailable guard has no condition
+rows. Outer inventory completeness and digest agree exactly with the observations.
+
+If bounded guard accounting cannot be represented, the accounting is exactly
+`{"version": 2, "state": "unavailable", "reason": "bounds"}` and the outer guard
+object has state `unavailable` and empty conditions. This is an evidence limitation,
+not a claim that admission or test bodies did not happen. Known outer inventory fields
+remain truthful. Invalid internal observations are rejected as an infrastructure
+failure, not coerced into the bounds case. No raw environment values are retained.
 
 For example, an ordinary body increments a counter once and a later scoped view raises
 `UnsupportedCapability("tool:layout", ...)`. Previously the bare refusal lost the

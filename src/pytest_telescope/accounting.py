@@ -86,14 +86,17 @@ def count_record(value, expected):
     require(all(integer(item) for item in value.values()) and value == expected)
 
 
-def validate_observations(value):
+def validate_observations(value, *, guarded=False):
     """Reject malformed producers; cardinality overflow has a distinct bounded end."""
-    record(value, FIELDS)
+    record(value, FIELDS | ({"fixture_guard"} if guarded else set()))
     suites = sequence(value["suites"], 64)
     require(all(_text(name) for name in suites) and len(set(suites)) == len(suites))
     execution = value["execution"]
     record(execution, {"mode", "profile", "workers"})
-    require(execution["mode"] in ("case", "batch") and execution["profile"] == execution["mode"] + "-v2")
+    require(execution["mode"] in ("case", "batch"))
+    require(execution["profile"] == ("batch-available-v1" if guarded else execution["mode"] + "-v2"))
+    if guarded:
+        require(execution["mode"] == "batch")
     require(integer(execution["workers"], 32) and execution["workers"] > 0)
     require(type(value["inventory_complete"]) is bool and type(value["grouping_complete"]) is bool)
     require(_digest(value["inventory_digest"]) if value["inventory_complete"] else value["inventory_digest"] is None)
@@ -173,6 +176,19 @@ def validate_observations(value):
         require((row["group_id"] is not None) == (row["case_id"] in grouped))
         if value["grouping_complete"] and row["selected"]:
             require(row["case_id"] in grouped)
+    if guarded:
+        guard = value["fixture_guard"]
+        record(guard, {"profile", "state", "conditions"})
+        require(guard["profile"] == "available-v1" and guard["state"] in ("admitted", "unavailable"))
+        conditions = sequence(guard["conditions"], 4096)
+        if guard["state"] == "unavailable":
+            require(not conditions)
+        for condition in conditions:
+            record(condition, {"case_id", "group_id", "matched"})
+            case = condition["case_id"]
+            require(_digest(case) and case in by_case and by_case[case]["selected"])
+            require(_digest(condition["group_id"]) and by_case[case]["group_id"] == condition["group_id"])
+            require(type(condition["matched"]) is bool and condition["matched"])
     collection = value["collection"]
     require(type(collection) is dict)
     record(collection, {"outcome", "collected", "worker_seconds", "failures", "suites", "skips"} | ({"reason"} if "reason" in collection else set()))
@@ -221,30 +237,47 @@ class RefusalAccounting:
     _encoded: bytes
     inventory_complete: bool
     inventory_digest: str | None
+    _guard_encoded: bytes | None
 
     def __init__(self, observations, *, metadata, maximum):
         require(type(maximum) is int and 0 < maximum <= 64 * 1024 * 1024)
-        record(observations, FIELDS)
+        guarded = type(metadata) is dict and metadata.get("schema") == 5
+        record(observations, FIELDS | ({"fixture_guard"} if guarded else set()))
         require(type(observations["inventory_complete"]) is bool)
         complete, identity = observations["inventory_complete"], observations["inventory_digest"]
         require(_digest(identity) if complete else identity is None)
         require(type(metadata) is dict and "status" in metadata)
-        record(metadata, {"schema", "kind", "inventory_complete", "inventory_digest", "status", "error"} | ({"capability"} if metadata["status"] == "unsupported" else set()))
-        require(type(metadata["schema"]) is int and metadata["schema"] == 4 and metadata["kind"] == "refusal")
+        record(metadata, {"schema", "kind", "inventory_complete", "inventory_digest", "status", "error"} | ({"capability"} if metadata["status"] == "unsupported" else set()) | ({"fixture_guard"} if guarded else set()))
+        require(type(metadata["schema"]) is int and metadata["schema"] == (5 if guarded else 4) and metadata["kind"] == "refusal")
         require(metadata["status"] in ("unsupported", "declaration_error") and _text(metadata["error"]))
+        require(type(metadata["inventory_complete"]) is bool)
+        if metadata["inventory_complete"]:
+            require(complete and metadata["inventory_digest"] == identity and _digest(metadata["inventory_digest"]))
+        else:
+            require(metadata["inventory_digest"] is None)
         if metadata["status"] == "unsupported":
             require(_text(metadata["capability"]))
+        if guarded:
+            require(metadata["fixture_guard"] == observations["fixture_guard"])
         envelope = {**metadata, "inventory_complete": complete, "inventory_digest": identity}
+        version = 2 if guarded else 1
         try:
-            validate_observations(observations)
-            payload = {"version": 1, "state": "available", "observations": observations}
+            validate_observations(observations, guarded=guarded)
+            payload = {"version": version, "state": "available", "observations": observations}
             encoded({**envelope, "accounting": payload}, maximum)
         except AccountingBounds:
-            payload = {"version": 1, "state": "unavailable", "reason": "bounds"}
+            payload = {"version": version, "state": "unavailable", "reason": "bounds"}
+            if guarded:
+                envelope["fixture_guard"] = {"profile": "available-v1", "state": "unavailable", "conditions": []}
             encoded({**envelope, "accounting": payload}, maximum)
         object.__setattr__(self, "_encoded", encoded(payload, maximum))
         object.__setattr__(self, "inventory_complete", complete)
         object.__setattr__(self, "inventory_digest", identity)
+        object.__setattr__(self, "_guard_encoded", encoded(envelope["fixture_guard"], maximum) if guarded else None)
 
     def render(self):
         return json.loads(self._encoded)
+
+    @property
+    def fixture_guard(self):
+        return json.loads(self._guard_encoded) if self._guard_encoded is not None else None
