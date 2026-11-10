@@ -42,7 +42,9 @@ def changing_project(root, *, extra=False):
 
 
 def metadata(observations):
-    result = controller.error_result(DeclarationError("synthetic declaration"), fixture_guard="available-v1")
+    result = controller.error_result(
+        DeclarationError("synthetic declaration"), fixture_guard="available-v1"
+    )
     result["inventory_complete"] = observations["inventory_complete"]
     result["inventory_digest"] = observations["inventory_digest"]
     result["fixture_guard"] = copy.deepcopy(observations["fixture_guard"])
@@ -70,10 +72,14 @@ def test_prior_guarded_cache_survives_real_late_refusal(tmp_path, monkeypatch):
     assert records[0][2]["declaration_error"] is True and records[0][2]["exit_code"] == 4
     retained = captured.value.accounting.render()["observations"]
     assert group(retained, "a")["outcome"] == "reused" and group(retained, "a")["attempts"] == 0
-    assert group(retained, "a")["cache_eligible"] and unit(retained, "a")["result_status"] == "passed"
+    assert (
+        group(retained, "a")["cache_eligible"] and unit(retained, "a")["result_status"] == "passed"
+    )
     assert group(retained, "b")["attempts"] == 1
     assert {p.relative_to(cache): p.read_bytes() for p in cache.rglob("*.json")} == prior
-    assert path_a.read_bytes() == prior[path_a.relative_to(cache)] and not list(cache.rglob("*.pending"))
+    assert path_a.read_bytes() == prior[path_a.relative_to(cache)] and not list(
+        cache.rglob("*.pending")
+    )
 
 
 def test_real_active_sibling_is_drained_before_typed_refusal(tmp_path, monkeypatch):
@@ -95,7 +101,13 @@ def test_real_active_sibling_is_drained_before_typed_refusal(tmp_path, monkeypat
             return result
         assert len(request["case_ids"]) == 1
         name = {case_id(n): n for n in ("a", "b", "c")}[request["case_ids"][0]]
-        assert validate_guarded_batch(result, group_id=request["group_id"], case_ids=request["case_ids"], registry_id=request["registry_id"], graph_id=request["graph_id"])
+        assert validate_guarded_batch(
+            result,
+            group_id=request["group_id"],
+            case_ids=request["case_ids"],
+            registry_id=request["registry_id"],
+            graph_id=request["graph_id"],
+        )
         observed.append((name, result["declaration_error"], result["exit_code"]))
         if name == "b":
             assert result["declaration_error"] is True and result["exit_code"] == 4
@@ -114,7 +126,12 @@ def test_real_active_sibling_is_drained_before_typed_refusal(tmp_path, monkeypat
     assert a_staged.is_set() and c_done.is_set() and c_drained.is_set()
     assert sorted(name for name, _, _ in observed) == ["a", "b", "c"]
     retained = captured.value.accounting.render()["observations"]
-    assert group(retained, "a")["attempts"] == group(retained, "b")["attempts"] == group(retained, "c")["attempts"] == 1
+    assert (
+        group(retained, "a")["attempts"]
+        == group(retained, "b")["attempts"]
+        == group(retained, "c")["attempts"]
+        == 1
+    )
     assert unit(retained, "a")["result_status"] == unit(retained, "c")["result_status"] == "passed"
     assert not any(g["cache_eligible"] for g in retained["groups"])
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
@@ -123,7 +140,9 @@ def test_real_active_sibling_is_drained_before_typed_refusal(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("started", [False, True])
-def test_simulated_typed_refusal_without_worker_result_keeps_start_truth(tmp_path, monkeypatch, started):
+def test_simulated_typed_refusal_without_worker_result_keeps_start_truth(
+    tmp_path, monkeypatch, started
+):
     project(tmp_path, 0)
     original = sandbox.execute
     events = []
@@ -140,7 +159,9 @@ def test_simulated_typed_refusal_without_worker_result_keeps_start_truth(tmp_pat
     monkeypatch.setattr(sandbox, "execute", execute)
     with pytest.raises(DeclarationError) as captured:
         controller.run(tmp_path, fixture_guard="available-v1", workers=1)
-    assert events == (["simulated-refusal", "simulated-start"] if started else ["simulated-refusal"])
+    assert events == (
+        ["simulated-refusal", "simulated-start"] if started else ["simulated-refusal"]
+    )
     observed = captured.value.accounting.render()["observations"]
     b, member = group(observed, "b"), unit(observed, "b")
     assert unit(observed, "a")["result_status"] == "passed"
@@ -179,7 +200,16 @@ def test_accounting_strict_guard_relations_and_immutable_copies(tmp_path, monkey
     assert value.fixture_guard == observations["fixture_guard"]
     with pytest.raises((FrozenInstanceError, AttributeError)):
         value.inventory_complete = False
-    for fault in ("extra", "profile", "state", "inventory", "member", "group", "condition", "matched"):
+    for fault in (
+        "extra",
+        "profile",
+        "state",
+        "inventory",
+        "member",
+        "group",
+        "condition",
+        "matched",
+    ):
         bad = copy.deepcopy(observations)
         badmeta = copy.deepcopy(meta)
         if fault == "extra":
@@ -196,7 +226,13 @@ def test_accounting_strict_guard_relations_and_immutable_copies(tmp_path, monkey
         elif fault == "group":
             bad["units"][0]["group_id"] = "f" * 64
         else:
-            bad["fixture_guard"]["conditions"] = [{"case_id": case_id("a"), "group_id": group(bad, "a")["group_id"], "matched": fault != "matched"}]
+            bad["fixture_guard"]["conditions"] = [
+                {
+                    "case_id": case_id("a"),
+                    "group_id": group(bad, "a")["group_id"],
+                    "matched": fault != "matched",
+                }
+            ]
             if fault == "condition":
                 bad["fixture_guard"]["conditions"][0]["case_id"] = "f" * 64
             badmeta["fixture_guard"] = bad["fixture_guard"]
@@ -210,13 +246,22 @@ def test_guard_bounds_unavailable_and_default_unavailable_refusal(tmp_path, monk
     maximum = len(json.dumps(meta, indent=2).encode()) + 1024
     bounded = RefusalAccounting(observations, metadata=meta, maximum=maximum)
     assert bounded.render() == {"version": 2, "state": "unavailable", "reason": "bounds"}
-    assert bounded.fixture_guard == {"profile": "available-v1", "state": "unavailable", "conditions": []}
+    assert bounded.fixture_guard == {
+        "profile": "available-v1",
+        "state": "unavailable",
+        "conditions": [],
+    }
     assert bounded.inventory_complete == observations["inventory_complete"]
     assert bounded.inventory_digest == observations["inventory_digest"]
     error = DeclarationError("synthetic declaration", accounting=bounded)
     envelope = controller.error_result(error, fixture_guard="available-v1")
-    assert envelope["accounting"] == bounded.render() and envelope["fixture_guard"] == bounded.fixture_guard
-    early = controller.error_result(DeclarationError("synthetic early"), fixture_guard="available-v1")
+    assert (
+        envelope["accounting"] == bounded.render()
+        and envelope["fixture_guard"] == bounded.fixture_guard
+    )
+    early = controller.error_result(
+        DeclarationError("synthetic early"), fixture_guard="available-v1"
+    )
     assert "accounting" not in early and early["fixture_guard"] == bounded.fixture_guard
     default = controller.error_result(DeclarationError("synthetic early"))
     assert default["schema"] == 4 and "fixture_guard" not in default and "accounting" not in default
@@ -269,15 +314,28 @@ def test_distinct_matching_conditions_can_have_identical_public_rows(tmp_path, m
     monkeypatch.setattr(sandbox, "execute", execute)
     conditions = [
         {"case_id": case_id("a"), "name": "GUARD_MULTI", "op": "present"},
-        {"case_id": case_id("a"), "name": "GUARD_MULTI", "op": "equals", "value": "synthetic-value"},
+        {
+            "case_id": case_id("a"),
+            "name": "GUARD_MULTI",
+            "op": "equals",
+            "value": "synthetic-value",
+        },
     ]
     with pytest.raises(DeclarationError) as captured:
-        controller.run(tmp_path, fixture_guard="available-v1", workers=1, condition_checks=conditions)
+        controller.run(
+            tmp_path, fixture_guard="available-v1", workers=1, condition_checks=conditions
+        )
     retained = captured.value.accounting.render()["observations"]
     rows = retained["fixture_guard"]["conditions"]
     assert len(rows) == 2 and rows[0] == rows[1]
-    assert rows[0] == {"case_id": case_id("a"), "group_id": group(retained, "a")["group_id"], "matched": True}
-    assert "synthetic-value" not in json.dumps(controller.error_result(captured.value, fixture_guard="available-v1"))
+    assert rows[0] == {
+        "case_id": case_id("a"),
+        "group_id": group(retained, "a")["group_id"],
+        "matched": True,
+    }
+    assert "synthetic-value" not in json.dumps(
+        controller.error_result(captured.value, fixture_guard="available-v1")
+    )
 
 
 def test_outer_inventory_metadata_types_are_not_silently_repaired(tmp_path, monkeypatch):
@@ -287,7 +345,12 @@ def test_outer_inventory_metadata_types_are_not_silently_repaired(tmp_path, monk
     reserved["inventory_digest"] = None
     valid = RefusalAccounting(observations, metadata=reserved, maximum=1024 * 1024)
     assert valid.render()["state"] == "available"
-    for field, invalid in (("inventory_complete", "false"), ("inventory_complete", 1), ("inventory_digest", 0), ("inventory_digest", "bad")):
+    for field, invalid in (
+        ("inventory_complete", "false"),
+        ("inventory_complete", 1),
+        ("inventory_digest", 0),
+        ("inventory_digest", "bad"),
+    ):
         malformed = copy.deepcopy(reserved)
         malformed[field] = invalid
         with pytest.raises(ValueError):

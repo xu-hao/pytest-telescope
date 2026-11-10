@@ -84,7 +84,13 @@ def observe(monkeypatch, *, synchronize=False, started=None):
                 graph_id=request["graph_id"],
             )
             records.append((name, copy.deepcopy(request), copy.deepcopy(value)))
-            print("GUARD_RECORD", name, request["group_id"], value["exit_code"], value["declaration_error"])
+            print(
+                "GUARD_RECORD",
+                name,
+                request["group_id"],
+                value["exit_code"],
+                value["declaration_error"],
+            )
             if name == "a":
                 done_a.set()
             elif synchronize:
@@ -106,8 +112,20 @@ def check_failed_session(root, monkeypatch, code, workers):
     assert a["declaration_error"] is False and a["exit_code"] == 0 and a["complete"]
     assert b["declaration_error"] is False and b["exit_code"] == code and b["complete"]
     assert b["passed"] == 1 and b["case_results"][0]["outcome"] == "passed"
-    assert [row["phase"] for row in b["case_results"][0]["reports"]] == ["setup", "call", "teardown"]
-    print("GUARD_FALSE_SESSION", code, workers, [(name, req["group_id"], value["exit_code"], value["declaration_error"]) for name, req, value in records])
+    assert [row["phase"] for row in b["case_results"][0]["reports"]] == [
+        "setup",
+        "call",
+        "teardown",
+    ]
+    print(
+        "GUARD_FALSE_SESSION",
+        code,
+        workers,
+        [
+            (name, req["group_id"], value["exit_code"], value["declaration_error"])
+            for name, req, value in records
+        ],
+    )
     assert report["schema"] == 5 and report["kind"] == "run" and report["status"] == "failed"
     assert report["fixture_guard"]["state"] == "admitted"
     assert group(report, "a")["attempts"] == group(report, "b")["attempts"] == 1
@@ -172,7 +190,9 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
             fixture_guard="available-v1",
             workers=1,
             arguments=["-s"],
-            condition_checks=[{"case_id": case_id("a"), "name": "GUARD_ACCOUNTING_PRESENT", "op": "present"}],
+            condition_checks=[
+                {"case_id": case_id("a"), "name": "GUARD_ACCOUNTING_PRESENT", "op": "present"}
+            ],
         )
     except DeclarationError as error:
         refusal = error
@@ -181,21 +201,44 @@ def test_actual_changed_guard_declaration_remains_typed_refusal(tmp_path, monkey
     b_request, b = records[1][1:]
     assert starts == [case_id("a"), case_id("b")]
     assert a["exit_code"] == 0 and a["case_results"][0]["outcome"] == "passed"
-    assert [row["phase"] for row in a["case_results"][0]["reports"]] == ["setup", "call", "teardown"]
+    assert [row["phase"] for row in a["case_results"][0]["reports"]] == [
+        "setup",
+        "call",
+        "teardown",
+    ]
     assert b["declaration_error"] is True and b["exit_code"] == 4 and not b["complete"]
     assert a_request["group_id"] != b_request["group_id"]
-    assert any(kind == "execution" and guarded and key == a_request["group_id"] for kind, guarded, key, _ in staged)
+    assert any(
+        kind == "execution" and guarded and key == a_request["group_id"]
+        for kind, guarded, key, _ in staged
+    )
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.pending"))
     assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
-    print("GUARD_TRUE_PRECONDITIONS", [(name, req["group_id"], value["declaration_error"]) for name, req, value in records], "starts", starts, "returned_status", returned["status"] if returned else None)
+    print(
+        "GUARD_TRUE_PRECONDITIONS",
+        [(name, req["group_id"], value["declaration_error"]) for name, req, value in records],
+        "starts",
+        starts,
+        "returned_status",
+        returned["status"] if returned else None,
+    )
     assert type(refusal) is DeclarationError, "known declaration refusal was not raised"
     retained = refusal.accounting.render()
     assert retained["version"] == 2 and retained["state"] == "available"
     observations = retained["observations"]
     assert observations["execution"]["profile"] == "batch-available-v1"
-    assert observations["fixture_guard"] == {"profile": "available-v1", "state": "admitted", "conditions": [{"case_id": case_id("a"), "group_id": a_request["group_id"], "matched": True}]}
-    assert group(observations, "a")["attempts"] == 1 and unit(observations, "a")["result_status"] == "passed"
+    assert observations["fixture_guard"] == {
+        "profile": "available-v1",
+        "state": "admitted",
+        "conditions": [
+            {"case_id": case_id("a"), "group_id": a_request["group_id"], "matched": True}
+        ],
+    }
+    assert (
+        group(observations, "a")["attempts"] == 1
+        and unit(observations, "a")["result_status"] == "passed"
+    )
     assert unit(observations, "a")["reports"] == a["case_results"][0]["reports"]
     assert group(observations, "b")["attempts"] == 1
     assert unit(observations, "b")["reports"] == b["case_results"][0]["reports"]
@@ -225,7 +268,15 @@ def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path,
         )
 
     assert value["declaration_error"] is False and value["protocol"] == 9 and valid(value)
-    for mutation in ("missing", "integer", "string", "true-zero", "true-three", "true-complete", "old-protocol"):
+    for mutation in (
+        "missing",
+        "integer",
+        "string",
+        "true-zero",
+        "true-three",
+        "true-complete",
+        "old-protocol",
+    ):
         altered = copy.deepcopy(value)
         if mutation == "missing":
             del altered["declaration_error"]
@@ -236,13 +287,26 @@ def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path,
         elif mutation == "old-protocol":
             altered["protocol"] = 6
         else:
-            altered.update(declaration_error=True, exit_code={"true-zero": 0, "true-three": 3, "true-complete": 4}[mutation])
+            altered.update(
+                declaration_error=True,
+                exit_code={"true-zero": 0, "true-three": 3, "true-complete": 4}[mutation],
+            )
             if mutation != "true-complete":
                 altered["complete"] = False
         assert not valid(altered)
     key = request["group_id"]
     path = tmp_path / ("protocol-control-" + key + ".json")
-    arguments = dict(kind="guarded-batch", group_id=key, case_ids=request["case_ids"], registry_id=request["registry_id"], graph_id=request["graph_id"])
+    arguments = dict(
+        kind="guarded-batch",
+        group_id=key,
+        case_ids=request["case_ids"],
+        registry_id=request["registry_id"],
+        graph_id=request["graph_id"],
+    )
     for schema, allowed in ((7, True), (6, False)):
-        path.write_text(json.dumps({"schema": schema, "key": key, "result": value, "checksum": fingerprint(value)}))
+        path.write_text(
+            json.dumps(
+                {"schema": schema, "key": key, "result": value, "checksum": fingerprint(value)}
+            )
+        )
         assert (controller.read_record(path, key, **arguments) is not None) is allowed

@@ -44,7 +44,7 @@ def test_simulated_prestart_worker_failure_reports_no_session(tmp_path, monkeypa
     )
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/test_owned.py").write_text(
-        'import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n',
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_item(): pass\n",
         encoding="utf-8",
     )
     original = sandbox.capture

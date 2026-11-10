@@ -25,8 +25,8 @@ def project(root, names):
     )
     for name in names:
         (root / "tests" / f"test_{name}.py").write_text(
-            'import os\nimport pytest\npytestmark = pytest.mark.telescope(inputs=[])\n'
-            '@pytest.fixture\ndef local():\n    yield object()\n'
+            "import os\nimport pytest\npytestmark = pytest.mark.telescope(inputs=[])\n"
+            "@pytest.fixture\ndef local():\n    yield object()\n"
             f'def test_item(local): os.write(1, b"H3_BODY_{name.upper()}\\n")\n',
             encoding="utf-8",
         )
@@ -150,8 +150,13 @@ def test_h3_positive_uncancelled_real_workers_and_reuse(tmp_path, monkeypatch):
     assert sorted(names(events, "execute")) == ["a", "b"]
     assert sorted(names(events, "response")) == ["a", "b"]
     assert cancellation and not cancellation[0].is_set()
-    assert all(group(report, n)["attempts"] == 1 and group(report, n)["cache_eligible"] for n in ("a", "b"))
-    assert all(unit(report, n)["result_status"] == "passed" and unit(report, n)["complete"] for n in ("a", "b"))
+    assert all(
+        group(report, n)["attempts"] == 1 and group(report, n)["cache_eligible"] for n in ("a", "b")
+    )
+    assert all(
+        unit(report, n)["result_status"] == "passed" and unit(report, n)["complete"]
+        for n in ("a", "b")
+    )
     before = list(events)
     warm = controller.run(tmp_path, fixture_guard="available-v1", workers=2, arguments=["-s"])
     assert warm["status"] == "passed" and warm["counts"]["reused"] == 2
@@ -181,7 +186,14 @@ def test_h3_submitted_b_cancelled_before_first_session_is_known_unrun(tmp_path, 
     assert_common(report, events, cancellation, tmp_path)
     assert "b" not in names(events, "execute") and "b" not in names(events, "response")
     b, member = group(report, "b"), unit(report, "b")
-    print("H3_PRE_FIRST_OBSERVED", events, b["attempts"], b["not_run"], b["unresolved"], member["result_status"])
+    print(
+        "H3_PRE_FIRST_OBSERVED",
+        events,
+        b["attempts"],
+        b["not_run"],
+        b["unresolved"],
+        member["result_status"],
+    )
     assert b["attempts"] == 0 and b["not_run"] == 1 and b["unresolved"] == 0
     assert b["stop_reason"] == "cancelled"
     assert member["attempts"] == 0 and member["result_status"] == "not-run"
@@ -196,7 +208,14 @@ def test_h3_cancelled_between_attempts_keeps_one_unresolved_session(tmp_path, mo
     assert names(events, "corrupted").count("b") == 1
     assert names(events, "b-first-failed").count("b") == 1
     b, member = group(report, "b"), unit(report, "b")
-    print("H3_BETWEEN_OBSERVED", events, b["attempts"], b["not_run"], b["unresolved"], member["result_status"])
+    print(
+        "H3_BETWEEN_OBSERVED",
+        events,
+        b["attempts"],
+        b["not_run"],
+        b["unresolved"],
+        member["result_status"],
+    )
     assert b["attempts"] == 1 and b["not_run"] == 0 and b["unresolved"] == 1
     assert b["stop_reason"] == "cancelled"
     assert member["attempts"] == 1 and member["result_status"] is None
