@@ -247,3 +247,48 @@ def test_unguarded_late_typed_refusal_retains_version_one(tmp_path, monkeypatch)
     envelope = controller.error_result(captured.value)
     assert envelope["schema"] == 4 and envelope["accounting"] == retained
     assert "fixture_guard" not in envelope
+
+
+def test_distinct_matching_conditions_can_have_identical_public_rows(tmp_path, monkeypatch):
+    project(tmp_path, 0)
+    put(
+        tmp_path,
+        "tests/test_a.py",
+        'import pytest\npytestmark = pytest.mark.telescope(inputs=["tests/conftest.py"], env=["GUARD_MULTI"])\n'
+        "def test_item(): pass\n",
+    )
+    monkeypatch.setenv("GUARD_MULTI", "synthetic-value")
+    original = sandbox.execute
+
+    def execute(*args, request, **kwargs):
+        if request["mode"] == "guard-batch" and request["case_ids"] == [case_id("b")]:
+            kwargs["on_session_start"]()
+            raise DeclarationError("synthetic typed refusal")
+        return original(*args, request=request, **kwargs)
+
+    monkeypatch.setattr(sandbox, "execute", execute)
+    conditions = [
+        {"case_id": case_id("a"), "name": "GUARD_MULTI", "op": "present"},
+        {"case_id": case_id("a"), "name": "GUARD_MULTI", "op": "equals", "value": "synthetic-value"},
+    ]
+    with pytest.raises(DeclarationError) as captured:
+        controller.run(tmp_path, fixture_guard="available-v1", workers=1, condition_checks=conditions)
+    retained = captured.value.accounting.render()["observations"]
+    rows = retained["fixture_guard"]["conditions"]
+    assert len(rows) == 2 and rows[0] == rows[1]
+    assert rows[0] == {"case_id": case_id("a"), "group_id": group(retained, "a")["group_id"], "matched": True}
+    assert "synthetic-value" not in json.dumps(controller.error_result(captured.value, fixture_guard="available-v1"))
+
+
+def test_outer_inventory_metadata_types_are_not_silently_repaired(tmp_path, monkeypatch):
+    observations = sample_accounting(tmp_path, monkeypatch)
+    reserved = metadata(observations)
+    reserved["inventory_complete"] = False
+    reserved["inventory_digest"] = None
+    valid = RefusalAccounting(observations, metadata=reserved, maximum=1024 * 1024)
+    assert valid.render()["state"] == "available"
+    for field, invalid in (("inventory_complete", "false"), ("inventory_complete", 1), ("inventory_digest", 0), ("inventory_digest", "bad")):
+        malformed = copy.deepcopy(reserved)
+        malformed[field] = invalid
+        with pytest.raises(ValueError):
+            RefusalAccounting(observations, metadata=malformed, maximum=1024 * 1024)
