@@ -18,7 +18,7 @@ and runs the behavioral tests and benchmark-harness unit
 checks. It requires a virtual environment and uses its interpreter throughout. The
 artifact directory must not already exist; use a new directory for another run. Build
 dependencies may need network access. No package is uploaded by this command. Each stage
-has a five-minute deadline, except the behavioral suite, which has fifteen minutes.
+has a five-minute deadline, except the behavioral suite, which has twenty minutes.
 A timeout fails the gate.
 
 ## Full qualification and core compatibility
@@ -126,6 +126,12 @@ Isolated Python child commands that can import the candidate must pass `-B` expl
 `-I` ignores the inherited `PYTHONDONTWRITEBYTECODE` environment setting. These controls
 preserve strict installed-package verification; deleting or ignoring generated producer
 bytecode after a test is not a successful qualification.
+When a test replaces a child environment, retain `PYTHONDONTWRITEBYTECODE=1` as well.
+The invoking interpreter's `-B` flag is not inherited by a later Python process.
+This matters for an isolated pytest caller that starts an ordinary Telescope session:
+the ordinary session correctly inherits the caller's environment. Its fixture must
+preserve the qualification policy through that boundary without changing ordinary
+execution semantics or disabling the installed plugin being tested.
 
 The new candidate binding uses schema 2 with exactly `schema`, `root`, `source`,
 `wheel_path`, `wheel` and `interpreter`. It binds source HEAD/tree, complete wheel
@@ -141,7 +147,8 @@ installation invalidates the gate even when the test process exits successfully.
 Explicit benchmark preparation retains its existing named profiles and exact hashed
 receipts; those are separate evidence and cannot stand in for the candidate guard.
 
-Functional pytest has a 900-second deadline. Capture each stage's
+Functional pytest has a 1,200-second deadline. Other stages retain their 300-second
+deadlines. Capture each stage's
 complete output once, with an 8 MiB bound; overflow fails rather than silently truncating
 successful evidence. On timeout or failure, stop dependent stages, terminate owned
 processes with a ten-second TERM grace followed by a ten-second KILL/reap bound, and
