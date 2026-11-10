@@ -21,9 +21,9 @@ def test_files_directory_permissions_survive_capture_view_verify_and_cleanup(tmp
     records, failures = {}, []
     stage = tmp_path / "capture"
     stage.mkdir()
-    capture = fixture.capture(stage)
     entered = False
     try:
+        capture = fixture.capture(stage)
         assert os.geteuid() != 0, "permission control requires an actual non-root owner"
         if mode == 0o111:
             with pytest.raises(PermissionError) as denied:
@@ -107,23 +107,28 @@ def test_abandoned_search_only_capture_recovers_without_source_permission_change
             assert fresh.exists()
         assert not fresh.exists()
     finally:
-        # Even an early child failure has a separate bounded ownership receipt.
-        # This fixed path list is not a scan and is not used to claim capture readiness.
-        owner = ready.with_suffix(".owner.json")
-        if not records and owner.exists():
-            assert owner.stat().st_size <= 4096
-            owned = json.loads(owner.read_bytes())
-            directory = Path(owned["directory"])
-            assert directory.parent == fixture.project.root / ".pytest-telescope/scratch"
-            assert identity(directory) == owned["identity"]
-            for suffix in ("", "owner.lock", "tools", "tools/.views", "tools/owned",
-                           "tools/owned/install", "tools/owned/install/value"):
-                path = directory / suffix
-                try:
-                    records[str(path)] = identity(path)
-                except FileNotFoundError:
-                    pass
         try:
+            # Even an early child failure has a separate bounded ownership receipt.
+            # This fixed list is not a scan and does not claim capture readiness.
+            owner = ready.with_suffix(".owner.json")
+            if not records and owner.exists():
+                assert owner.stat().st_size <= 4096
+                owned = json.loads(owner.read_bytes())
+                directory = Path(owned["directory"])
+                assert directory.parent == fixture.project.root / ".pytest-telescope/scratch"
+                try:
+                    current = identity(directory)
+                except FileNotFoundError:
+                    current = None
+                if current is not None:
+                    assert current == owned["identity"]
+                    for suffix in ("", "owner.lock", "tools", "tools/.views", "tools/owned",
+                                   "tools/owned/install", "tools/owned/install/value"):
+                        path = directory / suffix
+                        try:
+                            records[str(path)] = identity(path)
+                        except FileNotFoundError:
+                            pass
             assert fixture.state() == fixture.before
         finally:
             try:
