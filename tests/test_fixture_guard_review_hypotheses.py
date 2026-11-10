@@ -242,7 +242,7 @@ def test_review_h2_empty_condition_rejects_unselected_case(tmp_path, monkeypatch
     calls = []
     monkeypatch.setattr(sandbox, "execute", lambda *args, **kwargs: calls.append("sandbox"))
     monkeypatch.setattr(ordinary, "session", lambda *args, **kwargs: calls.append("ordinary"))
-    with pytest.raises(DeclarationError):
+    with pytest.raises(DeclarationError) as refused:
         controller.run(
             tmp_path,
             execution_mode="batch",
@@ -250,6 +250,7 @@ def test_review_h2_empty_condition_rejects_unselected_case(tmp_path, monkeypatch
             structural_files={"default": []},
             condition_checks=[condition()],
         )
+    assert type(refused.value) is DeclarationError
     assert not calls and not (tmp_path / ".pytest-telescope/cache").exists()
 
 

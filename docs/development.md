@@ -21,7 +21,7 @@ dependencies may need network access. No package is uploaded by this command. Ea
 has a five-minute deadline, except the behavioral suite, which has fifteen minutes.
 A timeout fails the gate.
 
-### Full qualification and core compatibility
+## Full qualification and core compatibility
 
 `check.py --functional-profile all` is the default and the only full qualification,
 release or guarded-landing verdict. It runs every functional test, including the real

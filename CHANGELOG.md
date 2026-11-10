@@ -17,6 +17,9 @@
   with schema 2. Default checks require no Node selection or program-profile preparation.
   Move five Node/program and nine installed-distribution qualification nodes intact to
   explicit compatibility benchmarks; their new compatibility execution remains unrun.
+- Keep `all` as the default and sole full/release qualification profile. Explicit `core`
+  compatibility checks retain ordinary behavior and unsupported-adapter refusals while
+  recording the exact real fixture-guard positives excluded from that profile.
 
 This candidate remains unreleased. New performance is unmeasured. Frozen-checkout/history
 capture and its proposed selector are deferred and are not implemented by this candidate.
