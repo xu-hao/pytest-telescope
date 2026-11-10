@@ -25,7 +25,8 @@ def workflow_roles(name, runner):
         rows = [dict(zip(axes, values)) for values in product(*axes.values())]
         for included in matrix.get("include", []):
             matched = [
-                row for row in rows
+                row
+                for row in rows
                 if all(row[key] == value for key, value in included.items() if key in axes)
             ]
             assert matched, "workflow fixture does not silently manufacture matrix jobs"
@@ -43,7 +44,8 @@ def workflow_roles(name, runner):
                     value = re.sub(r"\$\{\{\s*runner\.temp\s*\}\}", str(runner), value)
                     value = re.sub(
                         r"\$\{\{\s*matrix\.(\w+)\s*\}\}",
-                        lambda match: row[match[1]], value,
+                        lambda match: row[match[1]],
+                        value,
                     )
                     for key, content in environment.items():
                         value = value.replace("${" + key + "}", content)
@@ -62,7 +64,9 @@ def workflow_roles(name, runner):
                         continue
                     found.append(
                         dict(
-                            matrix=dict(row), python=python_version, installs=list(installs),
+                            matrix=dict(row),
+                            python=python_version,
+                            installs=list(installs),
                             executable=tokens[0],
                             arguments=[expand(token) for token in tokens[1:]],
                             environment={key: expand(value) for key, value in environment.items()},

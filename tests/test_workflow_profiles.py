@@ -27,7 +27,8 @@ def test_workflow_roles_use_explicit_profile_and_pinned_adapter(
     roles = workflow_roles(workflow, runner)
     assert len(roles) == (4 if workflow == "ci.yml" else 1)
     (role,) = [
-        role for role in roles
+        role
+        for role in roles
         if role["python"] == python_version
         and any(pytest_spec in command for command in role["installs"])
     ]
@@ -57,8 +58,11 @@ def test_workflow_roles_use_explicit_profile_and_pinned_adapter(
 
     def binding(root, wheel):
         return {
-            "schema": 2, "root": str(root), "source": dict(source),
-            "wheel_path": str(wheel), "wheel": {"sha256": "c" * 64},
+            "schema": 2,
+            "root": str(root),
+            "source": dict(source),
+            "wheel_path": str(wheel),
+            "wheel": {"sha256": "c" * 64},
             "interpreter": {"unit_double": "not executed"},
         }
 
