@@ -745,6 +745,27 @@ def run(
             }
         return report
 
+    def retain_refusal(error):
+        if progress["setup"] is not None:
+            from . import model
+            from .accounting import FIELDS, RefusalAccounting
+
+            observed = summary()
+            metadata = error_result(error, fixture_guard=fixture_guard)
+            fields = FIELDS
+            if fixture_guard:
+                metadata["fixture_guard"] = observed["fixture_guard"]
+                fields = fields | {"fixture_guard"}
+            try:
+                accounting = RefusalAccounting(
+                    {name: observed[name] for name in fields},
+                    metadata=metadata,
+                    maximum=model.MAX_OUTPUT_BYTES,
+                )
+                error.attach_accounting(accounting)
+            except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as exc:
+                raise InfrastructureError("cannot retain valid bounded refusal accounting") from exc
+
     def ordinary_sessions(scoped):
         """Run each suite's ordinary session once; False when its inventory failed."""
         for suite, _ in configured:
@@ -1248,6 +1269,7 @@ def run(
                             sessions_started += 1
 
                         for attempt in range(2):
+                            result = None
                             try:
                                 if cancellation.is_set():
                                     raise sandbox.InvocationInterrupted(
@@ -1302,10 +1324,6 @@ def run(
                                         on_session_start=session_started,
                                     )
                                 if result["declaration_error"]:
-                                    if fixture_guard:
-                                        raise _FixtureDrift(
-                                            "guarded execution or fixture validation failed"
-                                        )
                                     raise DeclarationError(
                                         "case collection or declarations differ from validated inventory"
                                     )
@@ -1317,21 +1335,20 @@ def run(
                                     reason=reason if explain else "",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
-                                return projected, group, result, False
-                            except UnsupportedCapability:
-                                if not fixture_guard:
-                                    raise
+                                return projected, group, result, False, None
+                            except DeclarationError as exc:
                                 cancellation.set()
                                 projected, group = project_result(
                                     job,
-                                    None,
+                                    result,
                                     mode,
                                     attempts=sessions_started,
-                                    reason="guarded execution capability became unavailable",
+                                    reason=str(exc),
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
-                                group["timing_complete"] = False
-                                return projected, group, None, True
+                                if result is None:
+                                    group["timing_complete"] = False
+                                return projected, group, None, False, exc
                             except (InfrastructureError, OSError) as exc:
                                 terminal = isinstance(
                                     exc, (sandbox.CleanupError, _FixtureDrift)
@@ -1352,12 +1369,18 @@ def run(
                                     group["timing_complete"] = False
                                     if isinstance(exc, sandbox.InvocationInterrupted):
                                         group["stop_reason"] = "cancelled"
-                                    return projected, group, None, terminal
+                                    return projected, group, None, terminal, None
 
-                    def accept(job, projected, group):
+                    refusal = None
+
+                    def accept(job, projected, group, error):
+                        nonlocal refusal
                         groups[job["group_index"]] = group
                         for index, row in projected:
                             results[index] = row
+                        if error is not None and refusal is None:
+                            refusal = error
+                            cancellation.set()
 
                     active, cursor = {}, 0
                     executor = ThreadPoolExecutor(max_workers=concurrency)
@@ -1376,8 +1399,8 @@ def run(
                             completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
                             for future in completed:
                                 job = active.pop(future)
-                                projected, group, result, terminal = future.result()
-                                accept(job, projected, group)
+                                projected, group, result, terminal, error = future.result()
+                                accept(job, projected, group, error)
                                 if terminal:
                                     blocked = (
                                         "run stopped after infrastructure failure or cancellation"
@@ -1406,8 +1429,8 @@ def run(
                         executor.shutdown(wait=True, cancel_futures=False)
                         for future, job in active.items():
                             if future.done() and not future.cancelled():
-                                projected, group, _, terminal = future.result()
-                                accept(job, projected, group)
+                                projected, group, _, terminal, error = future.result()
+                                accept(job, projected, group, error)
                                 if terminal:
                                     blocked = (
                                         "run stopped after infrastructure failure or cancellation"
@@ -1420,12 +1443,17 @@ def run(
                                 groups[job["group_index"]]["stop_reason"] = "cancelled"
                                 for index, _ in job["members"]:
                                     results[index]["reason"] = blocked
+                    if refusal is not None:
+                        raise refusal
                 if blocked is None:
                     pending.publish()
                     progress["published"] = True
                 else:
                     # A completed success is not reusable until every owned copy is removed.
                     stop("infrastructure_error", blocked)
+    except DeclarationError as error:
+        retain_refusal(error)
+        raise
     except (InfrastructureError, OSError) as exc:
         stop(
             "infrastructure_error",
@@ -1483,6 +1511,16 @@ def error_result(error, *, fixture_guard=None):
             "state": "unavailable",
             "conditions": [],
         }
+    if isinstance(error, DeclarationError) and error.accounting is not None:
+        result["inventory_complete"] = error.accounting.inventory_complete
+        result["inventory_digest"] = error.accounting.inventory_digest
+        result["accounting"] = error.accounting.render()
+        if fixture_guard is not None:
+            if error.accounting.fixture_guard is None:
+                raise InfrastructureError("guarded refusal accounting profile mismatch")
+            result["fixture_guard"] = error.accounting.fixture_guard
+        elif error.accounting.fixture_guard is not None:
+            raise InfrastructureError("unguarded refusal accounting profile mismatch")
     return result
 
 
