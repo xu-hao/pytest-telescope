@@ -24,7 +24,7 @@ class Project:
 
     def cli(self, command, *arguments, expected=0):
         completed = subprocess.run(
-            [sys.executable, "-I", "-m", "pytest_telescope", command, *arguments],
+            [sys.executable, "-I", "-B", "-m", "pytest_telescope", command, *arguments],
             cwd=self.root,
             env={**os.environ, "PYTEST_ADDOPTS": ""},
             text=True,

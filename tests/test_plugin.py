@@ -18,7 +18,7 @@ def invoke(project, *args, extra_env=None):
     env = {"PATH": os.defpath, "HOME": str(project), "TMPDIR": str(project)}
     env.update(extra_env or {})
     return subprocess.run(
-        [sys.executable, "-I", "-m", "pytest", "-q", *args],
+        [sys.executable, "-I", "-B", "-m", "pytest", "-q", *args],
         cwd=project,
         env=env,
         text=True,
@@ -142,6 +142,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
         "case_inventory": "requires pytest collection",
         "inventory": ["test_another.py", "test_subject.py"],
         "distributions": [],
+        "tools": {},
         "suites": [
             {
                 "name": "default",
@@ -176,6 +177,7 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
                 "inputs": ["conftest.py", "data.json", "helper.py"],
                 "absent": [],
                 "env": [],
+                "tools": [],
                 "cache": True,
             }
             for name in ["test_another.py", "test_subject.py"]

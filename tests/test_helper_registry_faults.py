@@ -375,6 +375,10 @@ def test_helper_infrastructure_retry_is_bounded_with_fresh_scratch(
         if request["mode"] == phase:
             attempts.append(invocation_directory)
             if exhaust or len(attempts) == 1:
+                if phase != "collection":
+                    # Explicit launched-worker fault double: failed sessions count
+                    # only after the production start callback has been signalled.
+                    options["on_session_start"]()
                 raise InfrastructureError("owned deterministic unavailable worker")
         return execute(*args, request=request, invocation_directory=invocation_directory, **options)
 

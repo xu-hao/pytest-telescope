@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
 
 from pytest_telescope import controller, sandbox, tool_capture
-from pytest_telescope.model import DeclarationError, fingerprint
+from pytest_telescope.model import DeclarationError
 
 
 def scoped(project, name, inputs=()):
@@ -26,18 +26,10 @@ def test_body():
 
 def test_outer_cleanup_failure_supersedes_typed_refusal_after_staged_success(tmp_path, monkeypatch):
     project = ToolProject(tmp_path / "project", tmp_path / "external")
-    # Preparation is an explicit default-view fixture boundary. The real worker,
-    # result protocol, invocation ownership and cleanup remain production paths.
-    # This does not qualify runtime discovery, preflight or the native tool profile.
-    prefix = Path(sys.prefix)
-    box = sandbox.Sandbox(
-        bwrap="/usr/bin/bwrap",
-        executable=sys.executable,
-        binds=((str(prefix), str(prefix)),),
-        path=str(prefix / "bin") + ":/usr/bin:/bin",
-        identity=fingerprint(["owned-default-worker", sys.executable, str(prefix)]),
-        description={},
-    )
+    # Use the actual interpreter closure, including a hosted venv's base runtime.
+    # Prepare before launch observation so the five recorded processes remain
+    # collection, ordinary dispatch and the three scoped workers under test.
+    box = sandbox.prepare(project.root)
 
     def prepare(root):
         assert Path(root) == project.root
@@ -117,8 +109,8 @@ def test_ordinary():
             raise refusal
         return result
 
-    def stage(self, final, key, result, *, kind="execution"):
-        original_stage(self, final, key, result, kind=kind)
+    def stage(self, final, key, result, *, kind="execution", guarded=False):
+        original_stage(self, final, key, result, kind=kind, guarded=guarded)
         if kind == "execution" and result is returned.get("tests/test_10_success.py"):
             paths = [path for path, (target, _, _) in self.paths.items() if target == final]
             assert len(paths) == 1 and paths[0].is_file()
