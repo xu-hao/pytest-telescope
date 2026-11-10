@@ -275,6 +275,40 @@ worker response to its invocation.
 
 ## Refusal envelope
 
+### Retained observations after a late refusal
+
+After an established invocation has started a session, a typed `DeclarationError` or
+`UnsupportedCapability` retains the observations the controller has actually received.
+The exception's `accounting` property is an immutable, bounded producer-owned value;
+`render()` returns a fresh JSON value. Early exceptions can have `accounting: None`.
+The CLI and `error_result` retain that same evidence in the refusal envelope. They do
+not turn a refusal into a successful run. Before exposing the exception the controller
+drains started work and discards newly staged successes; pre-existing cache records remain.
+
+For the existing unguarded schema 4 profiles, available accounting is exactly
+`{"version": 1, "state": "available", "observations": ...}`. The observations contain
+the established run's execution, suites, inventory and grouping completeness, counts,
+case and collection evidence, units, groups, and timing. The execution profile remains
+`case-v2` or `batch-v2`. If the evidence exceeds its output or cardinality bound, the
+accounting is exactly `{"version": 1, "state": "unavailable", "reason": "bounds"}`.
+
+For the unreleased guarded schema 5 profile, available accounting is exactly
+`{"version": 2, "state": "available", "observations": ...}`. Its observations have
+the same fields as version 1 plus exactly `fixture_guard`; execution mode is `batch` and
+profile is `batch-available-v1`. The outer refusal has the same `fixture_guard` object as
+the retained observations. Its profile is `available-v1`, its state is the actual
+producer-observed `admitted` or `unavailable` state, and its conditions are the actual
+privacy-safe case/group/matched rows. Each row refers to a selected case and its actual
+group; admitted rows have matched successfully. An unavailable guard has no condition
+rows. Outer inventory completeness and digest agree exactly with the observations.
+
+If bounded guard accounting cannot be represented, the accounting is exactly
+`{"version": 2, "state": "unavailable", "reason": "bounds"}` and the outer guard
+object has state `unavailable` and empty conditions. This is an evidence limitation,
+not a claim that admission or test bodies did not happen. Known outer inventory fields
+remain truthful. Invalid internal observations are rejected as an infrastructure
+failure, not coerced into the bounds case. No raw environment values are retained.
+
 If no complete inventory can be established for a typed refusal, the CLI emits:
 
 ```json

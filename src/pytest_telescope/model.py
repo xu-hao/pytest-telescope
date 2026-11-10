@@ -15,7 +15,22 @@ from pathlib import Path
 
 
 class DeclarationError(ValueError):
-    pass
+    def __init__(self, *args, accounting=None):
+        super().__init__(*args)
+        self._accounting = None
+        if accounting is not None:
+            self.attach_accounting(accounting)
+
+    @property
+    def accounting(self):
+        return self._accounting
+
+    def attach_accounting(self, value):
+        from .accounting import RefusalAccounting
+
+        if type(value) is not RefusalAccounting or self._accounting is not None:
+            raise TypeError("refusal accounting requires one validated immutable value")
+        self._accounting = value
 
 
 class UnsupportedCapability(DeclarationError):
