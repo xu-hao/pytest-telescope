@@ -1,7 +1,8 @@
 # Run results and explicit refusals
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
+> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
+> not provide them.
 
 This reference describes result schema 4. Start with the practical
 [quickstart](index.md). The [API and configuration reference](bubblewrap-api.md) lists the
@@ -206,6 +207,7 @@ report actually gives `Skipped: optional feature disabled`, a consumer computes:
 
 ```python
 import hashlib
+
 expected = hashlib.sha256(b"Skipped: optional feature disabled").hexdigest()
 ```
 
@@ -232,9 +234,25 @@ partial evidence or a failed lifecycle cannot establish a skip or authorize a re
 
 ## Internal protocol and cache versions
 
-Persistent cache envelopes use schema 7. Collection, singleton execution, batch execution
-and ordinary-session worker protocols use versions 8, 5, 6 and 3 respectively. Old cache
+Persistent cache envelopes use schema 8. Collection, singleton execution, batch execution
+and ordinary-session worker protocols use versions 11, 9, 10 and 4 respectively. Old cache
 records and protocols are ineligible; strict producers and validators advance together.
+
+| Boundary | Version/profile |
+| --- | --- |
+| Unguarded public run/refusal | schema 4; retained accounting version 1 |
+| Guarded public run/refusal | schema 5; retained accounting version 2 |
+| Collection worker | 11 |
+| Singleton worker | 9 |
+| Batch worker | 10, with required guarded bindings when selected |
+| Ordinary-session worker | 4 |
+| Persistent inventory/case/group cache envelope | 8 |
+
+Both cache profiles use envelope 8, but their exact contexts, profiles and result
+validators remain distinct. They cannot reuse one another's records. Unguarded worker
+nonces are 32 lowercase hexadecimal characters; guarded capture, inspection and batch
+nonces are 64. Neither accepts the other's nonce shape.
+
 Every request and worker common result carries an exact lowercase 64-hex `context_id`.
 For a batch it equals `group_id`; for a singleton or collection it equals the candidate
 or inventory cache key; an ordinary invocation uses a fresh nonce-bound digest as its
@@ -242,13 +260,36 @@ public group ID. The controller validates the requested context before projectio
 requires a persisted result's context to equal its cache key. Requests contain no raw
 environment map.
 
+Every worker result has an exact boolean `declaration_error`. It is true only when the
+worker's declaration validation failed, and requires `exit_code: 4` and `complete: false`.
+For ordinary protocol 4 it also requires `inventory_complete: false`.
+Missing, nonboolean, unknown or inconsistent fields
+are invalid. Unguarded public result schema 4 and the `case-v2`, `batch-v2` and
+`ordinary-v2` profiles remain distinct from guarded schema 5 and `batch-available-v1`.
+
+When `declaration_error` is false, valid pytest exit codes 0 through 5 retain their
+existing per-kind completion and count rules. The flag does not imply success. In
+particular, a scoped session hook can set exit 4 after a passing body: its validated
+phase reports remain observations, while the group and run fail and that group cannot
+be reused. The ordinary session retains its final-status precedence: final exit 3 or 4
+is an infrastructure outcome even when earlier member reports passed. Those reports
+remain observed, the ordinary session is not replayed, and no such result is reusable.
+Collection with false/exit 4 is failed collection, not a declaration refusal.
+Exit code alone never supplies the declaration flag.
+
+The sandbox validates and returns explicit declaration-error evidence so the controller
+can retain known observations before a typed refusal. A typed boundary exception with no
+returned worker result instead retains actual started-attempt counts and unresolved
+members. Neither path permits ordinary replay or publication of pending successes after
+a refusal. The separate unsupported-capability marker keeps its existing meaning.
+
 Worker results also contain `collection_skips`, each exactly `file` and `reason`.
 Execution member rows contain exactly `case_id`, `outcome`, `complete`, and `reports`;
-singleton protocol 5 includes `case_results` just as batch and ordinary sessions do.
+singleton protocol 9 includes `case_results` just as batch and ordinary sessions do.
 Counts and member order reconcile with these rows and the request. A singleton collection
 failure can have zero collected cases and empty `case_ids` and `case_results`; its known
 requested public member remains not-run, incomplete and failed under the case-profile
-collection verdict. Collection protocol 8 carries inventory items and collection skips,
+collection verdict. Collection protocol 11 carries inventory items and collection skips,
 never executed reports or passes. The existing nonce and exact request identity bind the
 worker response to its invocation.
 
@@ -274,6 +315,17 @@ collected indices, node labels or equal parameter values.
 
 ## Refusal envelope
 
+Frozen-tool context binds the existing opaque case/group and inventory identities; it
+does not add raw source-path, runtime-file or environment-value maps to this schema.
+Tool names and project-relative manifest paths may appear in the static plan. Tool
+refusals use `tool:frozen-v1`, `tool:layout`, `tool:bounds` or `tool:identity` as listed in
+the [capability reference](bubblewrap-api.md#capability-codes). Missing/invalid inputs
+remain declaration errors; observed mutation or failed owned capture is infrastructure
+failure. A late failure retains available accounting and cannot make an incomplete
+group reusable. Cleanup uncertainty prevents all new pending publication and preserves
+previously valid records. Diagnostics never include external source paths, file contents
+or raw tool output.
+
 If no complete inventory can be established for a typed refusal, the CLI emits:
 
 ```json
@@ -286,6 +338,99 @@ Refusal status is `unsupported`, `declaration_error`, or `infrastructure_error`.
 `sandbox:bubblewrap`, `sandbox:namespaces` and `sandbox:environment`. A refusal creates no
 reusable result. The runner does not widen the view or fall back to ordinary execution.
 
+### Retained observations after a late refusal
+
+The development contract preserves the typed refusal when a declaration or capability
+error occurs after a collection or execution session has started. The Python API still
+raises `DeclarationError` or its `UnsupportedCapability` subclass; the latter retains
+its capability. CLI conversion still produces `kind: "refusal"`, the existing refusal
+status and exit code. Inventory fields keep their existing meaning: complete validated
+membership for every selected suite, independently of success. Early refusals have
+`inventory_complete: false` and `inventory_digest: null`; late refusals retain the actual
+known inventory facts. Available observations do not turn this into a successful run.
+
+Such a refusal adds `accounting` only when a session actually started and retention of
+its observations was attempted. Early preflight/declaration refusals omit this field.
+They do not fabricate a zero-run summary. Unguarded schema 4 accounting has exactly one of these shapes:
+
+```json
+{"version": 1, "state": "unavailable", "reason": "bounds"}
+```
+
+The available variant has exactly `version: 1`, `state: "available"` and
+`observations`. `observations` has exactly these existing run-accounting fields:
+
+| Fields | Retained meaning |
+| --- | --- |
+| `execution`, `suites` | Existing mode/profile/workers and selected suite names. |
+| `inventory_complete`, `inventory_digest`, `grouping_complete` | Actual known membership and planning state; inventory fields agree with the outer refusal. |
+| `counts`, `route_counts`, `cases`, `case_outcomes` | Existing counts of known, selected, attempted, fresh and reused cases. |
+| `collection`, `units`, `groups` | Existing collection observations and actual case/group phase, outcome and lifecycle evidence. |
+| `elapsed_seconds`, `setup_seconds` | Existing controller timing measurements. |
+
+It has no `schema`, `kind`, overall `status`, `error`, `capability` or `sandbox` field.
+It adds no raw source paths, environment values, output or cache/context maps. Actual
+member `result_status: "passed"` and group outcomes remain meaningful observations;
+there is no second overall success verdict. Known unrun cases, unresolved attempts,
+null measurements and actual attempt counts retain their existing distinctions.
+All known collected cases remain represented even if group planning stopped partway;
+an attempted session with unavailable observations is not an unattempted session.
+Pending groups do not become cache eligible, and the refusal publishes no new pending
+successes. Previously valid records and previously accepted reuse evidence survive.
+
+The variant and every nested record are strict: unknown versions, states, reasons,
+fields or profiles, booleans in integer fields, malformed paths/digests, nonfinite or
+negative timing, and inconsistent counts or references are invalid. Existing schema 4
+cardinality, path, digest and phase rules apply. Route counts sum to total counts;
+case/phase/outcome totals reconcile with observed units; group members and suite
+references identify known rows. Incomplete planning cannot invent a group or a pass.
+
+The complete refusal, including its diagnostic metadata and accounting wrapper, must
+fit the existing 64 MiB output budget. Encoding is bounded incrementally. If complete
+observations exceed an encoding or cardinality bound, emit the exact `unavailable`
+variant above, without truncated observations, fabricated zero counts or silent omission
+of the known late session. Reserve the actual refusal metadata before accepting an
+available payload. Invalid producer types or inconsistent observations are terminal
+internal failures, not a reason to coerce data into `state: "unavailable"`.
+The unavailable variant does not erase independently established inventory facts:
+retain a proved complete inventory and its digest, or false/null when completeness
+was not established. It supplies no invented case, group or attempt counts.
+
+`DeclarationError` explicitly owns `accounting: RefusalAccounting | None`, initialized
+when the exception is constructed; `UnsupportedCapability` preserves that property.
+The producer attaches only a validated `RefusalAccounting` value through its declared
+interface. Retained observations are deeply immutable between attachment and rendering;
+arbitrary mutable dictionaries, guessed attributes and fallback keys are not accepted.
+`error_result` reads this explicit property and serializes the same strict variant.
+
+For the unreleased guarded schema 5 profile, available accounting is exactly
+`{"version": 2, "state": "available", "observations": ...}`. Its observations have
+the same fields as version 1 plus exactly `fixture_guard`; execution mode is `batch` and
+profile is `batch-available-v1`. The outer refusal has the same `fixture_guard` object as
+the retained observations. Its profile is `available-v1`, its state is the actual
+producer-observed `admitted` or `unavailable` state, and its conditions are the actual
+privacy-safe case/group/matched rows. Each row refers to a selected case and its actual
+group; admitted rows have matched successfully. An unavailable guard has no condition
+rows. Outer inventory completeness and digest agree exactly with the observations.
+
+If bounded guard accounting cannot be represented, the accounting is exactly
+`{"version": 2, "state": "unavailable", "reason": "bounds"}` and the outer guard
+object has state `unavailable` and empty conditions. This is an evidence limitation,
+not a claim that admission or test bodies did not happen. Known outer inventory fields
+remain truthful. Invalid internal observations are rejected as an infrastructure
+failure, not coerced into the bounds case. No raw environment values are retained.
+
+For example, an ordinary body increments a counter once and a later scoped view raises
+`UnsupportedCapability("tool:layout", ...)`. Previously the bare refusal lost the
+available case accounting. The development result keeps that exception class, capability
+and CLI exit 4, and adds `accounting.version: 1`, `state: "available"` with
+`observations.route_counts.ordinary.executed: 1` and the actual ordinary unit/group
+evidence. These named values are an excerpt, not a complete sample payload. The counter
+is not incremented again, known scoped work stays unrun, and no pending record is
+published. Structurally knowable environment/tool conflicts are checked before ordinary
+bodies; genuinely deferred errors retain observations rather than promise universal
+preflight discovery.
+
 A refusal or `inventory_complete: false` alone does not prove that no earlier case
 executed: ordinary sessions may already have run. Sandbox prerequisites are checked
 before any session starts, so a `sandbox:*` refusal happens before test code runs. Do not
@@ -297,3 +442,49 @@ CLI exit statuses are 0 for success, 1 for test failure, 3 for infrastructure fa
 Cancellation and bounded storage/parsing failures use the infrastructure refusal shape
 when a complete run result cannot be returned. Exception text is diagnostic, not a stable
 machine interface.
+
+## Required guard result schema 5 (unreleased)
+
+Schema 5 is the required opt-in development contract, not a shipped or qualified
+feature. Unguarded runs and refusals continue to use schema 4. A guarded run preserves
+schema 4 fields and adds exactly:
+
+```json
+{"profile": "available-v1", "state": "admitted", "conditions": []}
+```
+
+This object is the `fixture_guard` field. A guarded run may instead have state
+`unavailable` and empty `conditions` when the producer returns real partial collection or
+infrastructure observations before admission. That state makes no inference that bodies
+were unrun; the run retains its actual available inventory and observations. `admitted`
+records admission of the original complete pre-dispatch plan, not eventual completion. Condition rows, in caller order,
+contain exactly `case_id`, `group_id` and `matched`; they bind an actually selected case
+to its actual group and never disclose environment names, operations, values or hashes.
+All checks must match before dispatch or reuse. A cache hit evaluates conditions again
+from the current invocation's capture, before accepting the hit. Match evidence alone
+is not a pass, skip, teardown or final-session verdict.
+
+`error_result(error, fixture_guard="available-v1")` produces a schema 5 refusal with
+the `fixture_guard` field. Without retained accounting, that field is:
+
+```json
+{"profile": "available-v1", "state": "unavailable", "conditions": []}
+```
+
+Without accounting, `unavailable` means the converter has no validated phase, admission
+or attempt evidence. It does not establish that admission failed, no collection occurred,
+no body ran, or that replay is safe. It adds no fabricated units, groups or zero-attempt
+assertion. `inventory_complete: false` likewise means inventory is unknown. There is no
+`not-admitted` state inferred from an exception. A typed late refusal with available
+version 2 accounting instead preserves its actual guard state and observations as described
+above. If accounting exceeds its bounds, the guard state is `unavailable` with no
+conditions, while known outer inventory remains. Guarded accounting requires explicit
+guard context; a mismatch raises `InfrastructureError`. `error_result(error)` is the
+unguarded schema 4 converter; a parser failure before a valid guarded CLI invocation also
+retains schema 4.
+
+Expected execution-side drift or another controlled late infrastructure failure is
+reported as a schema 5 run with `admitted` for the original plan and the actual prior
+attempts, group outcomes and infrastructure status retained. No new staged successes
+are published. A late typed refusal instead carries its available retained observations;
+an exception without accounting makes no claim about phase or bodies.

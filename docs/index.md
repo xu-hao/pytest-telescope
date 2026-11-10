@@ -1,7 +1,13 @@
 # pytest-telescope
 
-> The schema 4 and per-scope environment interfaces described here are an unreleased
-> development contract. Published version 0.1.0a6 does not provide them.
+> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
+> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
+> not provide them.
+
+Contributors qualify host-specific tool installations with the separately invoked
+[installed-runtime benchmarks](benchmark.md#installed-runtime-compatibility-benchmarks).
+All [actual browser execution](benchmark.md#browser-execution-benchmarks) is benchmark
+work, outside functional readiness; controlled Node and plugin checks remain functional.
 
 pytest-telescope caches pytest results so repeated checks spend less time running tests
 whose inputs haven't changed. If coding agents are adding changes to a merge queue,
@@ -103,7 +109,7 @@ conftest files, helpers and data need declarations.
 This makes the test *scoped*: it sees the declared project files read-only, plus the
 installed environment and system directories. Undeclared project files are absent.
 Writes belong in private scratch, for example through pytest's `tmp_path` fixture.
-Tests without an `inputs`, `bundles`, `distributions` or `env` declaration remain ordinary,
+Tests without an `inputs`, `bundles`, `distributions`, `env`, `tools` or `git` declaration remain ordinary,
 including other tests in the same file.
 
 ### 4. Run the test twice
@@ -140,6 +146,11 @@ files listed by `plan` and add the missing dependency. Pytest fixtures still run
 but their files must be declared. If Bubblewrap is missing or namespaces are unavailable, the
 run refuses; use a host that meets the [requirements](bubblewrap-api.md#host-requirements).
 A refusal can occur after earlier tests have run, so inspect the result before retrying.
+The development [late-refusal accounting contract](result-schema.md#retained-observations-after-a-late-refusal)
+retains available observations without changing the typed refusal into a successful run.
+A plugin's nonzero session verdict can fail a run even when its case bodies passed.
+Those observed passes remain visible; a declaration refusal is identified separately
+by the [strict worker protocol](result-schema.md#internal-protocol-and-cache-versions).
 
 ### 5. Change an input and run again
 
@@ -161,8 +172,9 @@ Declarations at module, class, function and parameter levels add together for ea
 case's actual ancestors and selected parameter alternatives. Copying a sibling's Mark
 does not make its declaration inherited; see
 [additive inheritance](specification.md#additive-inheritance). A literal
-`env=["OPTIONAL_FEATURE"]` marker scopes and forwards that name only to its consumers;
-`env=[]` also scopes a case. Top-level `env` still applies to every scoped case. The
+`env=["OPTIONAL_FEATURE"]` marker in the development candidate scopes and forwards that
+name only to its consumers; `env=[]` also scopes a case. Published 0.1.0a6 supports the
+top-level `env` setting, which applies to every scoped case. The
 [marker reference](specification.md) shows the supported forms, defaults and bundles.
 
 Run the whole suite with your usual pytest arguments after `--`:
@@ -175,6 +187,61 @@ python -m pytest_telescope run --explain -- -q
 Every run executes the selected ordinary cases in one fresh pytest session per suite.
 Scoped cases use a cached result when they can and run in a sandbox when they cannot.
 `route_counts` breaks down the executed and reused counts for each route.
+
+A development-only `git="frozen-checkout-v1"` declaration is being added for cases
+that require a frozen checkout and history. It is not part of the published 0.1.0a6
+package. See the [Git view contract](bubblewrap.md#frozen-git-checkout-development-contract)
+for its precise supported states and limits.
+
+## Opt into frozen external tools (development contract)
+
+Contributor [program qualification](development.md#controlled-program-qualification)
+uses explicit runtime prerequisites for Node and installed-plugin functional controls.
+The [installed gate](development.md#installed-candidate-and-functional-prerequisites)
+verifies the exact candidate wheel before preparing those inputs with its interpreter.
+Full-browser execution is a separately invoked benchmark. These development interfaces
+are not part of the published release.
+
+For a candidate implementing frozen tools, register an existing installation manifest
+and add the selection to its consuming test:
+
+```toml
+[tool.pytest_telescope.tools.frontend]
+format = "frozen-tool-v1"
+manifest = "tool-locks/frontend.json"
+```
+
+```python
+@pytest.mark.telescope(tools=["frontend"])
+```
+
+The manifest pins the actual installation bytes and required runtime, command, link and
+lock relations. The test keeps its existing body and subprocess calls. Selecting it
+exposes only the frozen closure and binds its identity to those consumers. An unchanged
+package version or a read-only live mount is insufficient. Start with the
+[complete data-only example](bubblewrap-api.md#a-complete-data-only-example), then use
+the [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+for native, browser or installed Python closures. Unsupported layouts refuse; this
+feature does not install tools. Published 0.1.0a6 does not implement this opt-in.
+The [capture and reuse contract](execution-contract.md#frozen-tool-capture-and-reuse)
+distinguishes an independently reusable case record from admission of the structurally
+required collection union, including when pytest selectors choose only one consumer.
+
+Selecting a native closure also closes system configuration: `/etc/resolv.conf` is
+absent unless the selected manifest pins it and preserves its path. Required certificate
+or fixture configuration likewise appears only as declared frozen bytes, alongside the
+required loader controls. A data-only tool without ELF files or a loader profile keeps
+the existing system view, as do nonconsumers. See
+[declared native configuration](bubblewrap-api.md#declared-native-system-configuration)
+for the exact trigger and examples; dependencies remain the caller's responsibility.
+Native worker startup also requires the
+[supported CPython prefix closure](bubblewrap-api.md#invoking-python-startup-closure).
+When `/usr` is its base prefix, unselected files throughout `/usr` are absent; pin the
+actual worker, stdlib, pytest dependencies and any commands the test needs.
+For native libraries, the [verified ordering subset](bubblewrap-api.md#verified-native-library-ordering)
+keeps executable process contexts and their declared native resources explicit. It
+supports proven search ordering and refuses ambiguous ancestry or loaded-name conflicts;
+it does not discover arbitrary program dependencies or promise ABI compatibility.
 
 ## Use it in CI
 
@@ -200,6 +267,10 @@ Session, module and class fixtures are recreated for each scoped case. Ordinary 
 share normal pytest fixture lifetimes within their suite's ordinary session. A module
 containing both routes is imported during ordinary collection; use a module-level scope
 when the whole module, including its import, should be collected only in a sandbox.
+
+The required but unreleased [fixture guard](batching.md#required-fixture-guard-unreleased)
+will conservatively refuse possible shared user fixture lifetimes split across exact-scope
+groups. Its adapter and real Bubblewrap behavior still require qualification.
 
 Optional [batch mode](batching.md) shares fixture lifetimes among selected scoped cases
 in the same module and suite with exactly the same readable files, declared absence,

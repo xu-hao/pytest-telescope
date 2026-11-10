@@ -85,3 +85,89 @@ For your own suite, record executed and reused case counts alongside cold and wa
 timings. A warm run can finish sooner because it reuses results; those cases have not
 run again. The balance between execution overhead and reuse depends on your tests and
 how often their inputs change.
+
+## Installed-runtime compatibility benchmarks
+
+The unreleased frozen-tool profile also has explicit host-compatibility controls in
+`benchmarks/frozen_runtime`. They exercise a real native library, unchanged env/Node
+commands, full Chromium navigation and clicking through an isolated CLI child, and a
+normally installed Python distribution in an isolated child. The small C sources, wheel
+and browser page are owned fixtures. Their compiler, installed Node/browser, glibc loader
+cache, stdlib and native-library layout still depend on the selected host, so these
+controls are invoked separately from the default functional suite.
+
+Supply actual installed executable paths; the harness neither downloads a browser nor
+substitutes a headless-shell binary for full Chromium:
+
+```sh
+TELESCOPE_TEST_NODE=/absolute/path/to/node \
+TELESCOPE_TEST_CHROMIUM=/absolute/path/to/chrome \
+python -m pytest -q benchmarks/frozen_runtime --basetemp /tmp/telescope-runtime-benchmark
+```
+
+Use a new owned temporary directory and explicit caller resource limits for each run.
+The fixture names every source root and byte pin, retains actual link and command
+semantics, closes native library search directories, and refuses unsupported layouts.
+The native configuration contract also requires explicit frozen configuration inputs;
+host DNS, certificate and font settings are not implicitly available through `/etc`.
+The authored compatibility controls require qualification against that contract before
+any successful-runtime claim; earlier ambient-preservation evidence does not qualify it.
+Missing prerequisites and failed required controls are failures, never skips or evidence
+that the runtime is supported. Record the selected source revision, executable and
+closure digests, complete output, resource receipt and observed outcomes with each
+benchmark. Report compatibility only for the actual closure exercised; these checks do
+not establish arbitrary installed-runtime support or a portable performance result.
+
+## Browser execution benchmarks
+
+Actual browser execution belongs to separately invoked benchmarks, even when the page,
+driver and runtime closure are explicit owned inputs. The default functional suite and
+its prerequisite preparation must not launch or require a browser. Node and installed
+Python plugin controls remain functional, as do deterministic frozen-input, transport,
+lifecycle, error and cleanup controls. Such controls do not claim browser UI coverage.
+
+The controlled Chromium case retains the real env/Node driver, isolated Python CLI child
+and CDP pipe. Its oracle requires navigation, a real mouse click that updates the DOM,
+argument preservation, unchanged driver bytes and warm result reuse. It uses full
+Chromium; a different headless-shell executable does not qualify that case. Keep all
+existing executable selections, flags, assertions, output bounds and cleanup when
+invoking it separately. Missing prerequisites or a failed browser startup fail that
+benchmark; they do not become skips, functional failures or permission to widen the
+sandbox. Preserve previous failures separately from new benchmark results.
+
+Prepare a browser-only receipt with the exact interpreter and checkout that will run
+the benchmark. Supply `TELESCOPE_FIXTURE_NODE` and `TELESCOPE_FIXTURE_CHROMIUM` as explicit
+installed executable paths. Use a new owned preparation directory and receipt path
+inside caller-provided scratch; preparation inventories files but launches no browser.
+Review the complete receipt and bind its SHA-256 through `TELESCOPE_FIXTURE_ADMISSION`
+and `TELESCOPE_FIXTURE_ADMISSION_SHA256` before invoking the case:
+
+```sh
+python tests/frozen_tool_prepare_programs.py --profile browser \
+  --directory "$TMPDIR/browser-preparation" --output "$TMPDIR/browser-prerequisites.json"
+# Review the complete receipt; set its exact path and SHA-256 admission variables.
+python -m pytest -q \
+  benchmarks/frozen_runtime/test_browser.py::test_full_chromium_real_navigation_click_through_isolated_cli \
+  --basetemp "$TMPDIR/browser-benchmark"
+```
+
+Each invocation needs explicit caller resource limits, a finite deadline, complete
+bounded private output and cleanup of only its owned resources. Do not reuse an old
+receipt after the interpreter, selected program bytes or fixture changes. This is a
+compatibility benchmark; no timing comparison or broad runtime-support claim follows
+from a successful case. It is not included by `scripts/check.py` or default pytest
+collection. The benchmark harness's separate unit checks remain part of the gate.
+
+### Browser case migration ledger
+
+| Case | Previous path | Current path | Classification and reason |
+| --- | --- | --- | --- |
+| Controlled full Chromium navigation/click through an isolated CLI | `tests/test_frozen_tool_programs.py::test_full_chromium_real_navigation_click_through_isolated_cli` | `benchmarks/frozen_runtime/test_browser.py::test_full_chromium_real_navigation_click_through_isolated_cli` | Moved out of functional discovery because it executes a real browser. Preserve the entire oracle and bounded failure observations. Its prior sandbox-startup failure remains a failure; no successful browser result is implied. |
+| Earlier installed-runtime Chromium navigation/click | `benchmarks/frozen_runtime/test_native.py::test_full_chromium_navigation_and_click_through_isolated_cli_child` | Same path | Already a separately invoked host-compatibility benchmark. No test movement or new qualification is claimed. Its previously unexecuted status is unchanged. |
+
+Shared driver and runtime-declaration helpers remain in `tests/` because functional
+Node controls use them too. Storing or pinning browser-driver bytes does not execute a
+browser. Browser-specific runtime preparation is opt-in; ordinary functional preparation
+selects only the Node and installed-plugin profiles. Private historical check wrappers
+and receipts retain their original paths and verdicts; they are not current functional
+readiness requirements or executable migration instructions.
