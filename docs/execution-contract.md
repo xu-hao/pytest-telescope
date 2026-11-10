@@ -252,6 +252,14 @@ restore directory traversal/write permissions only on verified owned material af
 views finish, never on source paths or symlink targets. A refusal does not authorize an
 ordinary replay or prove earlier ordinary cases never ran.
 
+Verification of restrictive owned directories uses read handles acquired before their
+final frozen modes are applied; verification does not widen a live view's permissions.
+These controller-only handles refer to owned copies and projections, never source
+directories, and are not transported to children. Verification checks that each held
+inode still corresponds to its declared owned path. Cleanup restores only the verified
+owned inode and closes retained handles on every exit and before retry. Descriptor
+exhaustion follows the bounded infrastructure-failure path, without changing caller limits.
+
 Materialization reserves a complete bounded set of new owned paths before creating it.
 The aggregate includes capture copies, tool and projection roots, empty ancestors,
 closed-view members, command directories/symlinks and fixed loader controls. Count each
