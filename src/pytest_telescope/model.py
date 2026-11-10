@@ -44,6 +44,7 @@ class InfrastructureError(RuntimeError):
 
 
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+MAX_INPUT_PATHS = 100_000
 SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
 
 
@@ -347,7 +348,7 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None, tool_
                         "inputs must be regular files, directories, or leaf symlinks"
                     )
                 found.add(rel)
-                if len(found) > 100_000:
+                if len(found) > MAX_INPUT_PATHS:
                     raise DeclarationError("expanded declarations exceed 100000 paths")
     return sorted(found)
 
@@ -480,7 +481,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             env.update(child.env)
         if type(item.get("cache", True)) is not bool:
             raise DeclarationError("cache must be a boolean")
-        if len(inputs) + len(absent) > 100_000:
+        if len(inputs) + len(absent) > MAX_INPUT_PATHS:
             raise DeclarationError("effective declaration exceeds 100000 paths")
         unit = Unit(
             label, [], [], sorted(absent), item.get("cache", True), sorted(metadata),
@@ -594,7 +595,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             effective.update(dependency.inputs)
         for name in unit.distributions:
             effective.update(distributions[name].inputs)
-        if len(effective) + len(unit.absent) > 100_000:
+        if len(effective) + len(unit.absent) > MAX_INPUT_PATHS:
             raise DeclarationError("effective declaration exceeds 100000 paths")
         unit.inputs = sorted(effective)
     for tool in tools.values():
