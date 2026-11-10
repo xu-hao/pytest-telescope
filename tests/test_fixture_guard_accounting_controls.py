@@ -6,12 +6,12 @@ from dataclasses import FrozenInstanceError
 from threading import Event
 
 import pytest
+from test_fixture_guard_declaration_protocol import case_id, group, observe, project, put, unit
 
 from pytest_telescope import controller, sandbox
 from pytest_telescope.accounting import RefusalAccounting
 from pytest_telescope.model import DeclarationError, InfrastructureError
 from pytest_telescope.result import validate_guarded_batch
-from test_fixture_guard_declaration_protocol import case_id, group, observe, project, put, unit
 
 
 def changing_project(root, *, extra=False):

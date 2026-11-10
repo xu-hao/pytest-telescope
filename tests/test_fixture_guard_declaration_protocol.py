@@ -5,8 +5,6 @@ import hashlib
 import json
 from threading import Event
 
-import pytest
-
 from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError, fingerprint
 from pytest_telescope.result import validate_guarded_batch
