@@ -6,7 +6,7 @@ import json
 import pytest
 from frozen_tool_fixtures import ToolProject, put
 
-from pytest_telescope import controller, sandbox
+from pytest_telescope import batching, controller, sandbox
 from pytest_telescope.model import DeclarationError
 
 
@@ -124,3 +124,68 @@ def test_authenticated_helper_marker_cannot_be_borrowed_by_a_guarded_case(
         controller.run(joint_project.root, fixture_guard="available-v1", timeout=20)
     assert modes and "collection" in modes
     assert all(mode not in modes for mode in ("batch", "guard-batch", "execution"))
+
+
+def test_guard_reverifies_frozen_helper_before_inspection_or_cache_reuse(
+    joint_project, monkeypatch
+):
+    cold = guarded_run(joint_project)
+    assert {row["outcome"] for row in cold.values()} == {"executed"}
+    cache = joint_project.root / ".pytest-telescope/cache"
+    prior = {path.relative_to(cache): path.read_bytes() for path in cache.rglob("*.json")}
+    assert prior
+    group_jobs = batching.group_jobs
+    materialize = controller.materialize
+    execute = sandbox.execute
+    built = False
+    mutations, modes = [], []
+
+    def grouped(*args, **kwargs):
+        nonlocal built
+        candidates = group_jobs(*args, **kwargs)
+        built = True
+        return candidates
+
+    def changed_materialize(pool, unit, destination, records):
+        materialize(pool, unit, destination, records)
+        if built and not mutations:
+            helper = pool / "helper.py"
+            assert helper.stat().st_mode & 0o777 == 0o444
+            # Change only the owned frozen mode after candidate construction and
+            # materialization, before the fresh worker's registry checkpoint.
+            helper.chmod(0o400)
+            mutations.append({"phase": "before-inspection", "mode": 0o400})
+
+    def observed(*args, request, **kwargs):
+        modes.append(request["mode"])
+        return execute(*args, request=request, **kwargs)
+
+    monkeypatch.setattr(batching, "group_jobs", grouped)
+    monkeypatch.setattr(controller, "materialize", changed_materialize)
+    monkeypatch.setattr(sandbox, "execute", observed)
+    report = controller.run(joint_project.root, fixture_guard="available-v1", timeout=20)
+    after = {path.relative_to(cache): path.read_bytes() for path in cache.rglob("*.json")}
+    print(
+        json.dumps(
+            {
+                "registry_observation": {
+                    "mutations": mutations,
+                    "modes": modes,
+                    "report": report,
+                    "old_cache_preserved": after == prior,
+                }
+            },
+            sort_keys=True,
+        )
+    )
+    assert mutations == [{"phase": "before-inspection", "mode": 0o400}]
+    assert all(
+        mode not in modes
+        for mode in ("guard-capture", "guard-inspection", "guard-batch", "batch", "execution")
+    ), modes
+    assert report["status"] == "infrastructure_error", report
+    assert report["counts"]["executed"] == report["counts"]["reused"] == 0
+    assert not report["grouping_complete"]
+    assert not any(group["cache_eligible"] for group in report["groups"])
+    assert after == prior
+    assert not list(cache.rglob("*.pending"))

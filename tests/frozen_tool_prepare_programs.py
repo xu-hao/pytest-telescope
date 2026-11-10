@@ -3,8 +3,8 @@
 This inventories declared prerequisites and copies tiny owned configuration/package
 trees. It never launches a tool, imports the owned plugin copy, installs, compiles,
 constructs a Capture, or starts a controller. Its caller supplies claimed scratch.
-Functional preparation excludes browsers; browser benchmarks select that profile
-explicitly.
+This is explicit compatibility-benchmark preparation; each invocation selects its
+named profiles. The default functional gate does not invoke this helper.
 """
 
 import argparse
