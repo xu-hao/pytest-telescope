@@ -871,11 +871,15 @@ def run(
 
             evaluate_conditions(condition_checks, [])
         # All-ordinary: no sandbox, frozen copy, cache directory or lock.
-        if ordinary_sessions(scoped):
-            if requested_selectors - seen_aliases - seen_files:
-                raise DeclarationError("selector does not identify a collected case")
-            progress["grouping_complete"] = True
-        return summary()
+        try:
+            if ordinary_sessions(scoped):
+                if requested_selectors - seen_aliases - seen_files:
+                    raise DeclarationError("selector does not identify a collected case")
+                progress["grouping_complete"] = True
+            return summary()
+        except DeclarationError as error:
+            retain_refusal(error)
+            raise
 
     try:
         box = sandbox.prepare(manifest.root)
@@ -1007,7 +1011,7 @@ def run(
                         row["skips"] = [
                             {**skip, "phase": "collect"} for skip in collected["collection_skips"]
                         ]
-                        if collected["exit_code"] == 4:
+                        if collected["declaration_error"]:
                             raise DeclarationError(
                                 "unsupported or changed declarations during sandboxed collection"
                             )
