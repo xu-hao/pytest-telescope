@@ -90,7 +90,7 @@ def member(frame):
     return row
 
 
-def retained(report, frame, *, ordinary_route):
+def retained(report, frame, *, ordinary_route, empty_ordinary=None):
     assert report["kind"] == "refusal" and report["status"] == "declaration_error"
     accounting = report["accounting"]
     assert accounting["version"] == 1 and accounting["state"] == "available"
@@ -98,7 +98,36 @@ def retained(report, frame, *, ordinary_route):
     assert "status" not in observed and "kind" not in observed
     expected_member = member(frame)
     (unit,) = observed["units"]
-    (group,) = observed["groups"]
+    if ordinary_route:
+        assert empty_ordinary is None
+        (group,) = observed["groups"]
+        assert group["route"] == "ordinary" and group["profile"] == "ordinary-v2"
+    else:
+        assert empty_ordinary is not None
+        assert len(observed["groups"]) == 2
+        by_context = {row["group_id"]: row for row in observed["groups"]}
+        assert len(by_context) == 2
+        assert frame["context_id"] != empty_ordinary["context_id"]
+        assert set(by_context) == {frame["context_id"], empty_ordinary["context_id"]}
+        group = by_context[frame["context_id"]]
+        empty = by_context[empty_ordinary["context_id"]]
+        assert group["route"] == "scoped"
+        assert frame["protocol"] in (8, 9)
+        assert group["profile"] == ("case-v2" if frame["protocol"] == 8 else "batch-v2")
+        assert empty["route"] == "ordinary" and empty["profile"] == "ordinary-v2"
+        assert empty["case_ids"] == empty_ordinary["case_ids"] == []
+        assert empty["suite"] == group["suite"] == unit["suite"]
+        assert empty["attempts"] == 1 and empty["outcome"] == "executed"
+        assert empty["complete"] is True and empty["cache_eligible"] is False
+        assert empty["stop_reason"] is None
+        assert empty["worker_seconds"] == empty_ordinary["worker_seconds"]
+        assert empty["passed"] == empty["failed"] == empty["skipped"] == 0
+        assert empty["not_run"] == empty["unresolved"] == 0
+        assert empty["failures"] == empty_ordinary["failures"] == []
+        assert empty["collection_skips"] == empty_ordinary["collection_skips"] == []
+    assert unit["group_id"] == group["group_id"] == frame["context_id"]
+    assert group["case_ids"] == [unit["case_id"]]
+    assert unit["route"] == group["route"]
     assert unit["case_id"] == expected_member["case_id"]
     assert unit["attempts"] == group["attempts"] == 1
     assert unit["complete"] and unit["result_status"] == "passed" and unit["passed"] == 1
@@ -195,6 +224,20 @@ def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkey
     monkeypatch.setattr(sandbox, "prepare", lambda root: box)
     original = sandbox.execute
     returned, started = [], []
+    original_session, original_popen = ordinary.session, sandbox.subprocess.Popen
+    empty_sessions, ordinary_processes = [], []
+
+    def popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        ordinary_processes.append(process)
+        return process
+
+    def ordinary_session(*args, **kwargs):
+        with patch.object(sandbox.subprocess, "Popen", popen):
+            value = original_session(*args, **kwargs)
+        assert validate_ordinary(value)
+        empty_sessions.append(value)
+        return value
 
     def execute(*args, **kwargs):
         request = kwargs["request"]
@@ -215,6 +258,7 @@ def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkey
         return value
 
     monkeypatch.setattr(sandbox, "execute", execute)
+    monkeypatch.setattr(ordinary, "session", ordinary_session)
     with pytest.raises(DeclarationError) as caught:
         controller.run(project.root, timeout=10, execution_mode=mode)
     assert len(returned) == len(started) == 1 and not counter.exists()
@@ -222,6 +266,16 @@ def test_scoped_late_policy_refusal_retains_real_member_reports(tmp_path, monkey
     assert frame["declaration_error"] is True and frame["exit_code"] == 4 and not frame["complete"]
     assert frame["protocol"] == (8 if mode == "case" else 9)
     member(frame)
-    retained(controller.error_result(caught.value), frame, ordinary_route=False)
+    (empty_ordinary,) = empty_sessions
+    assert len(ordinary_processes) == 1 and ordinary_processes[0].poll() is not None
+    assert empty_ordinary["protocol"] == 2 and empty_ordinary["exit_code"] == 5
+    assert empty_ordinary["declaration_error"] is False
+    assert empty_ordinary["complete"] is True and empty_ordinary["inventory_complete"] is True
+    assert empty_ordinary["dispatch_started"] is True
+    assert empty_ordinary["case_ids"] == empty_ordinary["case_results"] == []
+    assert empty_ordinary["collected"] == empty_ordinary["passed"] == empty_ordinary["failed"] == empty_ordinary["skipped"] == 0
+    (observed_item,) = empty_ordinary["items"]
+    assert observed_item["selected"] is True and observed_item["case_id"] == frame["case_ids"][0]
+    retained(controller.error_result(caught.value), frame, ordinary_route=False, empty_ordinary=empty_ordinary)
     assert not cache_bytes(project.root)
     assert not list((project.root / ".pytest-telescope/scratch").iterdir())
