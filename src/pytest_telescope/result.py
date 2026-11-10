@@ -14,8 +14,10 @@ COMMON = {
     "leaked_descendants",
     "worker_seconds",
     "failures",
+    "context_id",
+    "collection_skips",
 }
-FIELDS = COMMON | {"collected", "passed", "failed", "skipped", "case_ids"}
+FIELDS = COMMON | {"collected", "passed", "failed", "skipped", "case_ids", "case_results"}
 COLLECTION_FIELDS = COMMON | {"kind", "items"}
 MAX_INVENTORY_BYTES = 67_108_864
 
@@ -35,11 +37,101 @@ def _path(value):
         and not PurePosixPath(value).is_absolute()
         and ".." not in PurePosixPath(value).parts
         and "\\" not in value
+        and PurePosixPath(value).as_posix() == value
         and len(PurePosixPath(value).parts) <= 64
     )
 
 
-def _common(result, nonce, codes):
+def _digest(value):
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _reason(value, *, collection=False):
+    return (
+        type(value) is dict
+        and set(value) == {"profile", "kind", "sha256"}
+        and value["profile"] == "pytest-reason-sha256-v1"
+        and value["kind"] in (("skip",) if collection else ("skip", "xfail"))
+        and _digest(value["sha256"])
+    )
+
+
+def _member(row, case):
+    if type(row) is not dict or set(row) != {"case_id", "outcome", "complete", "reports"}:
+        return False
+    if row["case_id"] != case or type(row["complete"]) is not bool:
+        return False
+    reports = row["reports"]
+    if type(reports) is not list or len(reports) > 3:
+        return False
+    phases = []
+    for report in reports:
+        if type(report) is not dict or set(report) != {"phase", "outcome", "skip_reason"}:
+            return False
+        phase, outcome, reason = report["phase"], report["outcome"], report["skip_reason"]
+        if phase not in ("setup", "call", "teardown") or outcome not in (
+            "passed",
+            "failed",
+            "skipped",
+        ):
+            return False
+        if (outcome == "skipped" and not _reason(reason)) or (
+            outcome != "skipped" and reason is not None
+        ):
+            return False
+        phases.append(phase)
+    if reports:
+        if phases[0] != "setup" or phases not in (
+            ["setup"],
+            ["setup", "call"],
+            ["setup", "teardown"],
+            ["setup", "call", "teardown"],
+        ):
+            return False
+        if ("call" in phases) != (len(phases) > 1 and reports[0]["outcome"] == "passed"):
+            return False
+    complete = bool(reports) and phases[-1] == "teardown"
+    status = (
+        "failed"
+        if any(report["outcome"] == "failed" for report in reports)
+        else "skipped"
+        if any(report["outcome"] == "skipped" for report in reports)
+        else "passed"
+        if any(report["phase"] == "call" and report["outcome"] == "passed" for report in reports)
+        else "not-run"
+    )
+    return row["complete"] == complete and row["outcome"] == status
+
+
+def _failure_phases(result, rows):
+    failed = {
+        (row["case_id"], report["phase"])
+        for row in rows
+        for report in row["reports"]
+        if report["outcome"] == "failed"
+    }
+    return all(
+        failure["phase"] == "collect" or (failure["case_id"], failure["phase"]) in failed
+        for failure in result["failures"]
+    )
+
+
+def _common(result, nonce, codes, context_id=None):
+    if not _digest(result["context_id"]) or (
+        context_id is not None and result["context_id"] != context_id
+    ):
+        return False
+    skips = result["collection_skips"]
+    if type(skips) is not list or len(skips) > 100_000:
+        return False
+    for skip in skips:
+        if (
+            type(skip) is not dict
+            or set(skip) != {"file", "reason"}
+            or not _path(skip["file"])
+            or not _reason(skip["reason"], collection=True)
+        ):
+            return False
     if type(result["nonce"]) is not str or not re.fullmatch(r"[0-9a-f]{32}", result["nonce"]):
         return False
     if nonce is not None and result["nonce"] != nonce:
@@ -85,13 +177,13 @@ def _common(result, nonce, codes):
     return True
 
 
-def validate_result(result, nonce=None, successful_only=False, case_id=None):
+def validate_result(result, nonce=None, successful_only=False, case_id=None, context_id=None):
     """Return False for an incompatible or malformed execution record."""
     if type(result) is not dict or set(result) != FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 1:
+    if type(result["protocol"]) is not int or result["protocol"] != 5:
         return False
-    if not _common(result, nonce, (0, 1, 2, 4, 5)):
+    if not _common(result, nonce, (0, 1, 2, 4, 5), context_id):
         return False
     for field in ("collected", "passed", "failed", "skipped"):
         if type(result[field]) is not int or not 0 <= result[field] <= 1:
@@ -108,6 +200,25 @@ def validate_result(result, nonce=None, successful_only=False, case_id=None):
             return False
         if ids and ids != [case_id]:
             return False
+    rows = result["case_results"]
+    if type(rows) is not list or len(rows) != len(ids):
+        return False
+    if any(not _member(row, case) for case, row in zip(ids, rows)):
+        return False
+    if any(
+        result[status] != sum(row["outcome"] == status for row in rows)
+        for status in ("passed", "failed", "skipped")
+    ):
+        return False
+    if result["complete"] and not all(row["complete"] for row in rows):
+        return False
+    if any(
+        failure["phase"] != "collect" and failure["case_id"] not in ids
+        for failure in result["failures"]
+    ):
+        return False
+    if not _failure_phases(result, rows):
+        return False
     total = result["passed"] + result["failed"] + result["skipped"]
     if total > result["collected"] or (result["complete"] and total != result["collected"]):
         return False
@@ -125,13 +236,13 @@ def validate_result(result, nonce=None, successful_only=False, case_id=None):
     return not successful_only or code == 0
 
 
-def validate_collection(result, nonce=None, successful_only=False):
+def validate_collection(result, nonce=None, successful_only=False, context_id=None):
     """Validate real item inventory without interpreting it as executed test success."""
     if type(result) is not dict or set(result) != COLLECTION_FIELDS:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 4:
+    if type(result["protocol"]) is not int or result["protocol"] != 7:
         return False
-    if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5)):
+    if result["kind"] != "collection" or not _common(result, nonce, (0, 2, 4, 5), context_id):
         return False
     items = result["items"]
     if not _inventory(items):
@@ -206,7 +317,7 @@ def _inventory(items):
     return sorted(orders) == list(range(len(orders)))
 
 
-def validate_ordinary(result, nonce=None):
+def validate_ordinary(result, nonce=None, context_id=None):
     """One ordinary session: its full collected inventory and its own ordinary outcomes."""
     fields = FIELDS | {
         "kind",
@@ -220,11 +331,11 @@ def validate_ordinary(result, nonce=None):
         return False
     if (
         type(result["protocol"]) is not int
-        or result["protocol"] != 1
+        or result["protocol"] != 2
         or result["kind"] != "ordinary"
     ):
         return False
-    if not _common(result, nonce, (0, 1, 2, 3, 4, 5)):
+    if not _common(result, nonce, (0, 1, 2, 3, 4, 5), context_id):
         return False
     if (
         type(result["inventory_complete"]) is not bool
@@ -245,13 +356,7 @@ def validate_ordinary(result, nonce=None):
         return False
     counts = dict(passed=0, failed=0, skipped=0, **{"not-run": 0})
     for case, row in zip(ids, rows):
-        if type(row) is not dict or set(row) != {"case_id", "outcome", "complete"}:
-            return False
-        if row["case_id"] != case or type(row["complete"]) is not bool:
-            return False
-        if type(row["outcome"]) is not str or row["outcome"] not in counts:
-            return False
-        if row["outcome"] == "not-run" and row["complete"]:
+        if not _member(row, case):
             return False
         if not result["dispatch_started"] and row["outcome"] != "not-run":
             return False
@@ -261,6 +366,8 @@ def validate_ordinary(result, nonce=None):
             len(ids) if key == "collected" else counts[key]
         ):
             return False
+    if not _failure_phases(result, rows):
+        return False
     if result["complete"] and (
         not result["inventory_complete"] or not all(row["complete"] for row in rows)
     ):
@@ -272,18 +379,22 @@ def validate_ordinary(result, nonce=None):
     return True
 
 
-def validate_batch(result, nonce=None, successful_only=False, group_id=None, case_ids=None):
+def validate_batch(
+    result, nonce=None, successful_only=False, group_id=None, case_ids=None, context_id=None
+):
     """Validate one atomic ordered session, including honest partial pytest stops."""
-    if type(result) is not dict or set(result) != FIELDS | {"group_id", "case_results"}:
+    if type(result) is not dict or set(result) != FIELDS | {"group_id"}:
         return False
-    if type(result["protocol"]) is not int or result["protocol"] != 2:
+    if type(result["protocol"]) is not int or result["protocol"] != 6:
         return False
-    if not _common(result, nonce, (0, 1, 2, 4, 5)):
+    if not _common(result, nonce, (0, 1, 2, 4, 5), context_id):
         return False
     identity = result["group_id"]
     if type(identity) is not str or not re.fullmatch(r"[0-9a-f]{64}", identity):
         return False
     if group_id is not None and identity != group_id:
+        return False
+    if result["context_id"] != identity:
         return False
     ids = result["case_ids"]
     if type(ids) is not list or not 1 <= len(ids) <= 4096:
@@ -302,9 +413,7 @@ def validate_batch(result, nonce=None, successful_only=False, group_id=None, cas
         return False
     counts = dict(passed=0, failed=0, skipped=0, **{"not-run": 0})
     for case, row in zip(ids, rows):
-        if type(row) is not dict or set(row) != {"case_id", "outcome", "complete"}:
-            return False
-        if row["case_id"] != case or type(row["complete"]) is not bool:
+        if not _member(row, case):
             return False
         outcome = row["outcome"]
         if type(outcome) is not str or outcome not in counts:
@@ -313,6 +422,8 @@ def validate_batch(result, nonce=None, successful_only=False, group_id=None, cas
             return False
         counts[outcome] += 1
     if any(result[name] != counts[name] for name in ("passed", "failed", "skipped")):
+        return False
+    if not _failure_phases(result, rows):
         return False
     if result["complete"] and not all(row["complete"] for row in rows):
         return False

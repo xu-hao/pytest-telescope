@@ -1,6 +1,9 @@
 # Run results and explicit refusals
 
-This reference describes result schema 3. Start with the practical
+> The schema 4 and per-scope environment interfaces described here are an unreleased
+> development contract. Published version 0.1.0a6 does not provide them.
+
+This reference describes result schema 4. Start with the practical
 [quickstart](index.md). The [API and configuration reference](bubblewrap-api.md) lists the
 interfaces that produce these results, and
 [complete examples](bubblewrap-schema-examples.json) show whole reports.
@@ -14,7 +17,7 @@ Use the status and capability fields to handle these errors; message text can ch
 
 ## Complete and incomplete run inventories
 
-A run result has `schema: 3` and `kind: "run"`. These fields distinguish it from a refusal.
+A run result has `schema: 4` and `kind: "run"`. These fields distinguish it from a refusal.
 
 | Field | Meaning |
 | --- | --- |
@@ -22,7 +25,7 @@ A run result has `schema: 3` and `kind: "run"`. These fields distinguish it from
 | `inventory_complete` | Whether a complete, validated case inventory is available for each selected suite's effective file list. |
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
-| `execution` | Effective `mode` (`case` or `batch`), versioned scoped `profile` (`case-v1` or `batch-v1`), and `workers`. |
+| `execution` | Effective `mode` (`case` or `batch`), versioned scoped `profile` (`case-v2` or `batch-v2`), and `workers`. |
 | `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v2`), `required`, and `identity`. |
 | `grouping_complete` | All suite inventories and group-size preflight are validated; selected cases then belong to exactly one planned group. |
 | `groups` | Ordered ordinary sessions and scoped execution/cache groups with atomic member outcomes and wall-clock timing. |
@@ -43,13 +46,18 @@ the project. A matching sandbox identity alone is not enough to reuse a result.
 `collection.suites` has one row per suite and route that has files. The `ordinary` row
 covers the files of the suite's ordinary session; the `scoped` row covers files whose
 module-level declaration scopes every case. Each row contains `name`, `route`, structural
-`files`, collection `outcome`, `collected` count, `inventory_digest` and `worker_seconds`.
+`files`, collection `outcome`, `collected` count, `inventory_digest`, `worker_seconds`
+and `skips`.
 An ordinary row's `worker_seconds` is null because its session time belongs to its
 ordinary group. Structural file membership is available even before real collection
 succeeds. A row not collected has `outcome: "not-started"`, `collected: null`, and a null
 inventory digest. `collection.collected` counts unique cases, and `collection.worker_seconds`
 sums scoped collection time only. Known files do
 not establish a complete case inventory: dynamic and parametrized items require pytest.
+A validated structural file can collect no cases, including after a collection skip;
+implicit files and explicit file targets do not invent selected cases. An explicit node
+selector still requires a genuinely collected alias, even when its file is covered. File
+coverage and collection skip evidence remain separate from case inventory and selection.
 With `structural_files`, these are the effective exact file lists. Files outside them
 produce neither case rows nor `not-selected` counts; a complete inventory does not claim
 coverage of those files. Adding a new file outside an explicit list does not add it to
@@ -88,7 +96,7 @@ under the current identity, not a newly executed case.
 
 ## Atomic groups and member outcomes
 
-Schema 3 applies to both modes and both routes. When `grouping_complete` is true, every selected known case belongs to exactly one group.
+Schema 4 applies to both modes and both routes. When `grouping_complete` is true, every selected known case belongs to exactly one group.
 Unselected cases have `group_id: null`; selected known cases can also have null group IDs
 when an earlier inventory or group-size refusal prevents completed planning. Groups appear in deterministic suite/module/
 first-selected-member order. `case_ids` retains actual selected pytest order after
@@ -98,7 +106,7 @@ collection hooks. Hash sorting does not define execution order.
 | --- | --- |
 | `group_id` | Opaque lowercase SHA-256 identity binding profile, ordered members and complete execution context. |
 | `suite`, `files`, `case_ids` | Public suite, sorted structural files and ordered selected opaque member identities. A scoped group has one file. |
-| `route`, `profile` | `ordinary` with `ordinary-v1` for an ordinary suite session; `scoped` with `case-v1` or `batch-v1`. |
+| `route`, `profile` | `ordinary` with `ordinary-v2` for an ordinary suite session; `scoped` with `case-v2` or `batch-v2`. |
 | `outcome` | `executed`, `reused`, `failed`, `incomplete`, or `infrastructure_error`. |
 | `complete` | Every requested member has a validated final teardown outcome. |
 | `cache_eligible` | Complete successful evidence accepted after lifecycle cleanup with reuse enabled. Always false for ordinary groups, `--no-cache` and `cache=False`. |
@@ -109,8 +117,9 @@ collection hooks. Hash sorting does not define execution order.
 | `passed`, `failed`, `skipped`, `not_run`, `unresolved` | Member totals: known unrun members are distinct from attempted members with no valid result. |
 | `stop_reason` | `null` for complete groups; otherwise `pytest-stop`, `collection`, `infrastructure`, or `cancelled`. |
 | `failures` | Bounded phase/location/type/opaque-ID evidence, including execution-side collection failures that do not belong to a requested member. |
+| `collection_skips` | Execution-side collection skip evidence, each with `file`, `phase`, and `reason`. |
 
-Each case row adds `group_id`, `result_status`, and `complete`. Result status is `passed`,
+Each case row adds `group_id`, `result_status`, `complete`, and `reports`. Result status is `passed`,
 `failed`, `skipped`, `not-run`, or `null` for unselected/unresolved infrastructure cases.
 Case `attempts` repeats its group count: summing case attempts does not count workers.
 Every batch-mode case row, including unselected and unresolved members, has
@@ -134,7 +143,8 @@ observed failures are `failed`; unrun requested members are `infrastructure_erro
 and the run status is `failed`, not an infrastructure outage. Shared setup failures
 belong to each attempted affected member; shared teardown failure belongs to the member
 whose teardown pytest reports. No member of a failed/incomplete group becomes reusable.
-Skips are counted without retaining reason text or arbitrary captured output.
+Skips retain the observed phase and bounded digest evidence described below, without
+retaining reason text or arbitrary captured output.
 
 In the default case profile, a valid nonzero pytest result retains case `outcome:
 "failed"`, including an execution-side collection failure before the test body starts.
@@ -164,12 +174,90 @@ there is no separate smaller arbitrary-output channel. The 100,000-case invocati
 cache/output bounds continue to apply. See the [batching contract](batching.md) for exact
 fixture, scope, lifecycle and identity rules.
 
+## Observed phase and collection evidence
+
+Every `units` row has `reports`, an ordered list of zero to three actual final pytest
+log reports for `setup`, `call`, and `teardown`. Each object has exactly `phase`, `outcome`
+(`passed`, `failed`, or `skipped`) and `skip_reason`. A skipped report requires a
+non-null reason; passed and failed reports require null. The reason has exactly
+`profile: "pytest-reason-sha256-v1"`, `kind: "skip"` or `"xfail"`, and `sha256`, a
+lowercase 64-hex digest. Duplicate, reordered or unknown phases and inconsistent reason
+presence are invalid. Empty reports mean no valid observed phase evidence; they never
+prove success. Unselected and unavailable members have empty lists; an interrupted member
+with a valid result can retain an observed prefix. Fresh and reused reports are identical.
+
+Setup precedes call or teardown; call exists only after passed setup. Teardown may follow
+skipped or failed setup without a call. A complete attempted case has actual setup and
+teardown, plus call if setup passed. Any failed phase makes its member failed; otherwise
+any skipped phase makes it skipped; otherwise a passed call makes it passed, with other
+prefixes not-run. Count members, not phase reports. A teardown failure after a skip leaves
+the skip visible but makes the member failed. A nonzero session verdict, missing teardown,
+failed or incomplete member, descendant leak, or outer cleanup failure prevents reuse
+regardless of observed passes or skips. Ordinary members have the same reports but never
+reuse them.
+
+For a final skipped pytest report, an actual string `wasxfail` supplies the exact reason
+and kind `xfail`. A passed XPASS is not a skip. Otherwise kind is `skip`, and the reason
+is exactly the third field of an actual `(path: str, line: int, reason: str)` longrepr
+tuple, or the exact string longrepr. No arbitrary object representation is evaluated.
+The exact string must encode as strict UTF-8 in 0 to 4,096 bytes. Hash those bytes without
+stripping prefixes, changing whitespace or truncating. For example, if pytest's final
+report actually gives `Skipped: optional feature disabled`, a consumer computes:
+
+```python
+import hashlib
+expected = hashlib.sha256(b"Skipped: optional feature disabled").hexdigest()
+```
+
+Unsupported, missing, unencodable or oversized reason evidence yields a bounded generic
+infrastructure result, without emitting the raw reason, longrepr or traceback in protocol
+or normal diagnostics; exhausted recovery refuses rather
+than fabricating evidence or falling back to ordinary execution. A digest is comparable
+to a known expected reason, but is not proof of a skip, current context or final teardown.
+Avoid sensitive reasons: a predictable reason can be guessed from its digest.
+
+`collection.skips` contains objects with exactly `suite`, `route` (`ordinary` or
+`scoped`), `file` (canonical project-relative path), `phase: "collect"`, and `reason`. Each `collection.suites` row has `skips` with `file`, `phase`
+and `reason`; groups have `collection_skips` in that same shape for execution-side
+collection. Reasons use the same profile with kind `skip`. Collection skips come from actual final pytest collection reports and do not
+invent cases or member successes. The worker allows at most 100,000 entries subject to the
+existing aggregate response limit. Collection evidence can be reused only with a valid
+current inventory; missing, malformed or stale evidence invalidates the inventory record.
+
+To accept evidence, a consumer checks complete current inventory and its requested
+structural/suite/case coverage and selection, opaque case identity, ordered group
+membership and context, unit outcome/status and actual phase/reason, unit and group
+completeness, final group/run verdict and fresh or reused status. Unknown profiles,
+partial evidence or a failed lifecycle cannot establish a skip or authorize a replay.
+
+## Internal protocol and cache versions
+
+Persistent cache envelopes use schema 6. Collection, singleton execution, batch execution
+and ordinary-session worker protocols use versions 7, 5, 6 and 2 respectively. Old cache
+records and protocols are ineligible; strict producers and validators advance together.
+Every request and worker common result carries an exact lowercase 64-hex `context_id`.
+For a batch it equals `group_id`; for a singleton or collection it equals the candidate
+or inventory cache key; an ordinary invocation uses a fresh nonce-bound digest as its
+public group ID. The controller validates the requested context before projection and
+requires a persisted result's context to equal its cache key. Requests contain no raw
+environment map.
+
+Worker results also contain `collection_skips`, each exactly `file` and `reason`.
+Execution member rows contain exactly `case_id`, `outcome`, `complete`, and `reports`;
+singleton protocol 5 includes `case_results` just as batch and ordinary sessions do.
+Counts and member order reconcile with these rows and the request. A singleton collection
+failure can have zero collected cases and empty `case_ids` and `case_results`; its known
+requested public member remains not-run, incomplete and failed under the case-profile
+collection verdict. Collection protocol 7 carries inventory items and collection skips,
+never executed reports or passes. The existing nonce and exact request identity bind the
+worker response to its invocation.
+
 ## Refusal envelope
 
 If no complete inventory can be established for a typed refusal, the CLI emits:
 
 ```json
-{"schema": 3, "kind": "refusal", "status": "unsupported", "capability": "sandbox:namespaces", "inventory_complete": false, "inventory_digest": null, "error": "Bubblewrap could not create the user, mount and PID namespaces that scoped tests need: bwrap: setting up uid map: Permission denied"}
+{"schema": 4, "kind": "refusal", "status": "unsupported", "capability": "sandbox:namespaces", "inventory_complete": false, "inventory_digest": null, "error": "Bubblewrap could not create the user, mount and PID namespaces that scoped tests need: bwrap: setting up uid map: Permission denied"}
 ```
 
 Refusal status is `unsupported`, `declaration_error`, or `infrastructure_error`.
