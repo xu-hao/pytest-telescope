@@ -103,7 +103,8 @@ def retained(report, frame, *, ordinary_route):
     assert unit["attempts"] == group["attempts"] == 1
     assert unit["complete"] and unit["result_status"] == "passed" and unit["passed"] == 1
     assert unit["reports"] == expected_member["reports"]
-    assert group["outcome"] == "failed" and not group["cache_eligible"]
+    assert group["outcome"] == ("infrastructure_error" if ordinary_route else "incomplete")
+    assert group["complete"] is False and not group["cache_eligible"]
     assert group["worker_seconds"] == frame["worker_seconds"]
     assert report["inventory_complete"] is (not ordinary_route)
     assert observed["inventory_complete"] is report["inventory_complete"]
