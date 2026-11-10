@@ -15,12 +15,15 @@ from pytest_telescope.sandbox import CleanupError
 def fixture(tmp_path):
     project = ToolProject(tmp_path / "project", tmp_path / "installed")
     source = project.add_tree("first", files={"value.txt": "first"})
-    project.module("test_value.py", """from pathlib import Path
+    project.module(
+        "test_value.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 def test_value():
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
-""")
+""",
+    )
     return project, source / "value.txt"
 
 
@@ -39,7 +42,9 @@ def capture_attempts(monkeypatch):
 
 
 @pytest.mark.parametrize("persistent", [False, True])
-def test_capture_io_outage_retries_at_most_twice_from_fresh_owned_staging(fixture, monkeypatch, persistent):
+def test_capture_io_outage_retries_at_most_twice_from_fresh_owned_staging(
+    fixture, monkeypatch, persistent
+):
     project, source = fixture
     assert_counts(project.run(), executed=1)
     previous = cache_bytes(project.root)
@@ -68,7 +73,9 @@ def test_capture_io_outage_retries_at_most_twice_from_fresh_owned_staging(fixtur
     assert all(not directory.exists() for directory in attempts)
 
 
-def test_source_replaced_after_copy_is_detected_and_recaptured_before_cache_hit(fixture, monkeypatch):
+def test_source_replaced_after_copy_is_detected_and_recaptured_before_cache_hit(
+    fixture, monkeypatch
+):
     project, source = fixture
     assert_counts(project.run(), executed=1)
     original = tool_capture._measure
@@ -103,7 +110,11 @@ def test_corrupt_owned_copy_is_never_used_or_published(fixture, monkeypatch, per
     def measure(filename, expected, budget, destination=None, *, frozen=False):
         nonlocal corruptions
         result = original(filename, expected, budget, destination, frozen=frozen)
-        if Path(filename) == source and destination is not None and (persistent or corruptions == 0):
+        if (
+            Path(filename) == source
+            and destination is not None
+            and (persistent or corruptions == 0)
+        ):
             corruptions += 1
             destination.chmod(0o644)
             destination.write_text("corrupt owned staging")
@@ -145,10 +156,13 @@ def test_cleanup_uncertainty_is_terminal_and_preserves_previous_records(fixture,
     project, source = fixture
     assert_counts(project.run(), executed=1)
     previous = cache_bytes(project.root)
-    project.module("test_new.py", """import pytest
+    project.module(
+        "test_new.py",
+        """import pytest
 pytestmark = pytest.mark.telescope(tools=['first'])
 def test_new(): pass
-""")
+""",
+    )
     original = tool_capture._remove
     attempted = []
 
@@ -175,12 +189,15 @@ def test_new(): pass
 def test_unselected_source_outage_does_not_touch_an_unrelated_tool_scope(fixture, monkeypatch):
     project, source = fixture
     second = project.add_tree("second")
-    project.module("test_second.py", """from pathlib import Path
+    project.module(
+        "test_second.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['second'])
 def test_second():
     assert Path('/tools/second/install/value.txt').read_text() == 'second'
-""")
+""",
+    )
     original = tool_capture._parent
     forbidden = []
 

@@ -18,7 +18,9 @@ def frontend(tmp_path, monkeypatch):
 
 
 def command_case(frontend):
-    frontend.project.module("test_frontend.py", f"""import base64
+    frontend.project.module(
+        "test_frontend.py",
+        f"""import base64
 import hashlib
 import json
 import os
@@ -28,8 +30,8 @@ import sys
 import pytest
 pytestmark = pytest.mark.telescope(tools=['worker', 'frontend'])
 def test_frontend(tmp_path, capfd):
-    for script in ({str(frontend.scripts / 'command.js')!r}, {frontend.logical(frontend.scripts / 'command.js')!r}):
-        command = [sys.executable, '-I', {frontend.logical(frontend.scripts / 'child.py')!r}, script]
+    for script in ({str(frontend.scripts / "command.js")!r}, {frontend.logical(frontend.scripts / "command.js")!r}):
+        command = [sys.executable, '-I', {frontend.logical(frontend.scripts / "child.py")!r}, script]
         result = subprocess.run(command + ['space value', '', '--literal'], capture_output=True, text=True, timeout=75)
         if result.returncode != 0:
             observation = {{'existing_child_returncode': result.returncode}}
@@ -49,10 +51,11 @@ def test_frontend(tmp_path, capfd):
         assert subprocess.run(command + ['exit'], capture_output=True, timeout=75).returncode == 23
         assert subprocess.run(command + ['signal'], capture_output=True, timeout=75).returncode == -signal.SIGTERM
     output = tmp_path / 'frontend-output.txt'
-    built = subprocess.run([sys.executable, '-I', {frontend.logical(frontend.scripts / 'child.py')!r}, {frontend.logical(frontend.scripts / 'build.js')!r}, str(output)], capture_output=True, timeout=75)
+    built = subprocess.run([sys.executable, '-I', {frontend.logical(frontend.scripts / "child.py")!r}, {frontend.logical(frontend.scripts / "build.js")!r}, str(output)], capture_output=True, timeout=75)
     assert (built.returncode, built.stdout, built.stderr) == (0, b'built\\n', b'')
     assert output.read_bytes() == b'FROZEN FRONTEND INPUT\\n'
-""")
+""",
+    )
 
 
 def test_env_node_unchanged_script_arguments_exit_signal_and_warm_reuse(frontend):
@@ -67,17 +70,22 @@ def test_env_node_unchanged_script_arguments_exit_signal_and_warm_reuse(frontend
 
 def test_command_selection_change_invalidates_only_consumer(frontend):
     command_case(frontend)
-    frontend.project.module("test_unrelated.py", """from pathlib import Path
+    frontend.project.module(
+        "test_unrelated.py",
+        """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['worker'])
 def test_unrelated():
     assert not Path('/tools/frontend').exists()
-""")
+""",
+    )
     assert_counts(frontend.project.run(timeout=180), executed=2)
     assert_counts(frontend.project.run(timeout=180), reused=2)
     # An additional explicitly selected name changes command context, while the
     # unchanged env shebang still resolves node to exactly the same executable.
-    frontend.document["commands"].append({"name": "owned-node-alias", "file": frontend.reference(frontend.node)})
+    frontend.document["commands"].append(
+        {"name": "owned-node-alias", "file": frontend.reference(frontend.node)}
+    )
     frontend.save()
     assert_counts(frontend.project.run(timeout=180), executed=1, reused=1)
 
@@ -90,7 +98,12 @@ def test_env_node_conflict_refuses_before_project_import(frontend, fault):
         marker = "pytestmark = pytest.mark.telescope(tools=['worker', 'frontend'])"
     else:
         marker = "pytestmark = pytest.mark.telescope(tools=['worker', 'frontend'], env=['PATH'])"
-    frontend.project.module("test_refused.py", "import pytest\n" + marker + "\nraise RuntimeError('invalid command context reached import')\ndef test_refused(): pass\n")
+    frontend.project.module(
+        "test_refused.py",
+        "import pytest\n"
+        + marker
+        + "\nraise RuntimeError('invalid command context reached import')\ndef test_refused(): pass\n",
+    )
     report = frontend.project.run(timeout=180)
     assert report["status"] in {"unsupported", "declaration_error"}, report
     assert not cache_bytes(frontend.project.root)

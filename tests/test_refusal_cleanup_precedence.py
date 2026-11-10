@@ -14,11 +14,14 @@ from pytest_telescope.model import DeclarationError, fingerprint
 
 
 def scoped(project, name, inputs=()):
-    project.module(name, f'''import pytest
+    project.module(
+        name,
+        f"""import pytest
 pytestmark = pytest.mark.telescope(inputs={list(inputs)!r})
 def test_body():
     assert 1 + 1 == 2
-''')
+""",
+    )
 
 
 def test_outer_cleanup_failure_supersedes_typed_refusal_after_staged_success(tmp_path, monkeypatch):
@@ -28,9 +31,12 @@ def test_outer_cleanup_failure_supersedes_typed_refusal_after_staged_success(tmp
     # This does not qualify runtime discovery, preflight or the native tool profile.
     prefix = Path(sys.prefix)
     box = sandbox.Sandbox(
-        bwrap="/usr/bin/bwrap", executable=sys.executable,
-        binds=((str(prefix), str(prefix)),), path=str(prefix / "bin") + ":/usr/bin:/bin",
-        identity=fingerprint(["owned-default-worker", sys.executable, str(prefix)]), description={},
+        bwrap="/usr/bin/bwrap",
+        executable=sys.executable,
+        binds=((str(prefix), str(prefix)),),
+        path=str(prefix / "bin") + ":/usr/bin:/bin",
+        identity=fingerprint(["owned-default-worker", sys.executable, str(prefix)]),
+        description={},
     )
 
     def prepare(root):
@@ -47,16 +53,22 @@ def test_outer_cleanup_failure_supersedes_typed_refusal_after_staged_success(tmp
     for name in ("test_10_success.py", "test_20_refusal.py", "test_30_never.py"):
         scoped(project, name)
     ordinary_count = tmp_path / "ordinary-once"
-    project.module("test_ordinary.py", f'''from pathlib import Path
+    project.module(
+        "test_ordinary.py",
+        f"""from pathlib import Path
 def test_ordinary():
     p = Path({str(ordinary_count)!r})
     p.write_text(p.read_text() + 'x' if p.exists() else 'x')
-''')
+""",
+    )
 
     original_execute = sandbox.execute
     original_enter = tool_capture.Capture.__enter__
     original_remove = sandbox._remove
-    original_stage, original_publish = controller.PendingRecords.stage, controller.PendingRecords.publish
+    original_stage, original_publish = (
+        controller.PendingRecords.stage,
+        controller.PendingRecords.publish,
+    )
     original_popen = sandbox.subprocess.Popen
     staged = threading.Event()
     guard = threading.Lock()
@@ -158,7 +170,11 @@ def test_ordinary():
         assert len(cleanup_failures) == 1 and isinstance(cleanup_failures[0].__cause__, OSError)
         assert report["kind"] == "run" and report["status"] == "infrastructure_error", report
         assert report["inventory_complete"] and report["inventory_digest"] is not None
-        expected = {"tests/test_00_prior.py", "tests/test_10_success.py", "tests/test_20_refusal.py"}
+        expected = {
+            "tests/test_00_prior.py",
+            "tests/test_10_success.py",
+            "tests/test_20_refusal.py",
+        }
         assert set(calls) == set(started) == set(returned) == expected
         assert len(calls) == len(started) == 3
         assert ordinary_count.read_text() == "x"

@@ -20,9 +20,14 @@ import pytest_telescope
 from pytest_telescope import controller, sandbox
 
 
-@pytest.mark.parametrize("interior,mode", [(False, 0o111), (True, 0o111), (False, 0o555), (True, 0o755)],
-                         ids=["root-search-only", "interior-search-only", "root-readable", "interior-readable"])
-def test_files_directory_permissions_survive_capture_view_verify_and_cleanup(tmp_path, interior, mode):
+@pytest.mark.parametrize(
+    "interior,mode",
+    [(False, 0o111), (True, 0o111), (False, 0o555), (True, 0o755)],
+    ids=["root-search-only", "interior-search-only", "root-readable", "interior-readable"],
+)
+def test_files_directory_permissions_survive_capture_view_verify_and_cleanup(
+    tmp_path, interior, mode
+):
     fixture = PermissionFixture(tmp_path, interior, mode)
     records, failures = {}, []
     stage = tmp_path / "capture"
@@ -54,8 +59,12 @@ def test_files_directory_permissions_survive_capture_view_verify_and_cleanup(tmp
                     except BaseException as error:
                         failures.append(errors(error))
         assert fixture.state() == fixture.before
-        diagnostic = {"mode": mode, "interior": interior, "failures": failures,
-                      "copy_exists": os.path.lexists(capture.directory / "owned/install")}
+        diagnostic = {
+            "mode": mode,
+            "interior": interior,
+            "failures": failures,
+            "copy_exists": os.path.lexists(capture.directory / "owned/install"),
+        }
         print(json.dumps(diagnostic))
         assert not failures, diagnostic
         assert not capture.directory.exists()
@@ -77,8 +86,10 @@ def test_abandoned_search_only_capture_recovers_without_source_permission_change
                 list(listing)
         source = str(Path(pytest_telescope.__file__).parent.parent)
         helpers = str(Path(__file__).parent)
-        code = ("import sys; from pathlib import Path; sys.path[:0]=" + repr([source, helpers]) + "; "
-                "from frozen_tool_permission_fixture import abandon; abandon(Path(sys.argv[1]),Path(sys.argv[2]))")
+        code = (
+            "import sys; from pathlib import Path; sys.path[:0]=" + repr([source, helpers]) + "; "
+            "from frozen_tool_permission_fixture import abandon; abandon(Path(sys.argv[1]),Path(sys.argv[2]))"
+        )
         processes = []
         original = sandbox.subprocess.Popen
 
@@ -88,9 +99,12 @@ def test_abandoned_search_only_capture_recovers_without_source_permission_change
             return process
 
         with patch.object(sandbox.subprocess, "Popen", popen):
-            code_status, output = sandbox.capture([sys.executable, "-I", "-B", "-c", code,
-                                                  str(fixture.project.root), str(ready)], 10,
-                                                 env=dict(os.environ), limit=4096)
+            code_status, output = sandbox.capture(
+                [sys.executable, "-I", "-B", "-c", code, str(fixture.project.root), str(ready)],
+                10,
+                env=dict(os.environ),
+                limit=4096,
+            )
         assert code_status == 0, output
         assert ready.stat().st_size <= 4096
         received = json.loads(ready.read_bytes())
@@ -102,7 +116,9 @@ def test_abandoned_search_only_capture_recovers_without_source_permission_change
         records = received["records"]
         assert len(records) <= 32 and all(Path(name).is_relative_to(directory) for name in records)
         assert received["copy_exists"], received
-        print(json.dumps({"capture_failure": received["failure"], "recorded_members": len(records)}))
+        print(
+            json.dumps({"capture_failure": received["failure"], "recorded_members": len(records)})
+        )
         cache = fixture.project.root / ".pytest-telescope/cache"
         cache.mkdir()
         with controller.lock(cache / ".lock", 10):
@@ -128,8 +144,15 @@ def test_abandoned_search_only_capture_recovers_without_source_permission_change
                     current = None
                 if current is not None:
                     assert current == owned["identity"]
-                    for suffix in ("", "owner.lock", "tools", "tools/.views", "tools/owned",
-                                   "tools/owned/install", "tools/owned/install/value"):
+                    for suffix in (
+                        "",
+                        "owner.lock",
+                        "tools",
+                        "tools/.views",
+                        "tools/owned",
+                        "tools/owned/install",
+                        "tools/owned/install/value",
+                    ):
                         path = directory / suffix
                         try:
                             records[str(path)] = identity(path)

@@ -20,7 +20,9 @@ def test_native_worker_request_keeps_isolation_flags_and_exact_projected_context
     tmp_path, monkeypatch, changed
 ):
     fixture = StaticConfiguration(tmp_path, monkeypatch)
-    tools = tool_context.load_selected(fixture.project.root, fixture.project.definitions, ["native"])
+    tools = tool_context.load_selected(
+        fixture.project.root, fixture.project.definitions, ["native"]
+    )
     calls, started = [], []
 
     def observe(argv, timeout, **kwargs):
@@ -31,8 +33,13 @@ def test_native_worker_request_keeps_isolation_flags_and_exact_projected_context
     with sandbox.invocation(fixture.project.root) as directory:
         project_view = directory / "project"
         project_view.mkdir()
-        with tool_capture.Capture(SimpleNamespace(root=fixture.project.root, tools=tools),
-                                  directory, 10, None, sandbox=fixture.box) as capture:
+        with tool_capture.Capture(
+            SimpleNamespace(root=fixture.project.root, tools=tools),
+            directory,
+            10,
+            None,
+            sandbox=fixture.box,
+        ) as capture:
             view = capture.view(["native"])
             assert view.native and capture.runtimes["native"].elfs
             box = fixture.box
@@ -46,17 +53,32 @@ def test_native_worker_request_keeps_isolation_flags_and_exact_projected_context
                 box = replace(box, description=description)
             expected = RequestObserved if changed == "unchanged" else InfrastructureError
             with pytest.raises(expected):
-                sandbox.execute(box, project_view, [], {}, 10, root=fixture.project.root,
-                                invocation_directory=directory, tool_view=view,
-                                request={"mode": "collection", "registry": [], "selectors": [],
-                                         "context_id": "0" * 64},
-                                on_session_start=lambda: started.append(True))
+                sandbox.execute(
+                    box,
+                    project_view,
+                    [],
+                    {},
+                    10,
+                    root=fixture.project.root,
+                    invocation_directory=directory,
+                    tool_view=view,
+                    request={
+                        "mode": "collection",
+                        "registry": [],
+                        "selectors": [],
+                        "context_id": "0" * 64,
+                    },
+                    on_session_start=lambda: started.append(True),
+                )
             if changed == "unchanged":
                 assert len(calls) == 1
                 argv, kwargs = calls[0]
                 assert argv[-4:] == [box.executable, "-I", "-B", sandbox.WORKER_PATH]
-                mounts = [(argv[index + 1], argv[index + 2]) for index, word in enumerate(argv)
-                          if word == "--ro-bind"]
+                mounts = [
+                    (argv[index + 1], argv[index + 2])
+                    for index, word in enumerate(argv)
+                    if word == "--ro-bind"
+                ]
                 for destination in view.closed:
                     owned = dict((target, source) for source, target in view.bindings)[destination]
                     assert (str(owned), destination) in mounts
