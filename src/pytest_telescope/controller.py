@@ -784,12 +784,8 @@ def run(
                 row["outcome"] = "infrastructure_error"
                 stop("infrastructure_error", str(exc))
                 return False
-            if result["declaration_error"]:
-                raise DeclarationError(
-                    "unsupported or changed declarations during ordinary collection"
-                )
             row["skips"] = [{**skip, "phase": "collect"} for skip in result["collection_skips"]]
-            if not result["inventory_complete"]:
+            if not result["inventory_complete"] and not result["declaration_error"]:
                 # Includes pytest's own startup errors, such as a failing conftest import.
                 row["outcome"] = "failed"
                 stop(
@@ -830,6 +826,13 @@ def run(
                         )
                     )
                     continue
+                if item["case_id"] not in outcomes:
+                    if result["declaration_error"] and not result["dispatch_started"]:
+                        # Collection observed this selection, but no execution
+                        # membership was established before its typed refusal.
+                        results.append(_row(item, suite, "ordinary", "infrastructure_error"))
+                        continue
+                    raise InfrastructureError("ordinary result omitted an execution member")
                 status = outcomes[item["case_id"]]["outcome"]
                 unit = _row(
                     item,
@@ -857,12 +860,18 @@ def run(
                 results.append(unit)
             groups.append(group)
             row.update(
-                outcome="executed",
+                outcome="failed" if result["declaration_error"] else "executed",
                 collected=len(result["items"]),
-                inventory_digest=fingerprint(
+                inventory_digest=None if result["declaration_error"] else fingerprint(
                     sorted([suite.name, item["case_id"], item["file"]] for item in result["items"])
                 ),
             )
+            if result["declaration_error"]:
+                # A strict incomplete inventory can still carry genuine member
+                # reports. Retain them before raising; never plan or replay it.
+                raise DeclarationError(
+                    "unsupported or changed declarations during ordinary collection"
+                )
         return True
 
     if not manifest.scope_possible:
