@@ -75,6 +75,7 @@ def test_default_gate_needs_no_program_selection_or_profile_preparation(
     assert len(bindings) == 1
     for name, arguments, options in stages:
         assert Path(options["env"]["TMPDIR"]).is_relative_to(scratch)
+        assert options.get("timeout", 300) == (1200 if name == "functional" else 300)
         if name in {"functional", "harness"}:
             assert ("tests" if name == "functional" else "harness") in arguments
             assert "--binding" in arguments and "--binding-sha256" in arguments

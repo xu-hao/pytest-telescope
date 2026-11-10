@@ -49,8 +49,8 @@ def test_workflow_roles_use_explicit_profile_and_pinned_adapter(
         def __init__(self, output, root):
             self.output = output
 
-        def run(self, label, *arguments, **kwargs):
-            stages.append((label, arguments))
+        def run(self, label, *arguments, timeout=300, **kwargs):
+            stages.append((label, arguments, timeout))
             if label == "build":
                 directory = Path(arguments[arguments.index("--outdir") + 1])
                 directory.mkdir()
@@ -74,7 +74,8 @@ def test_workflow_roles_use_explicit_profile_and_pinned_adapter(
     monkeypatch.setattr(gates.gate.subprocess, "run", forbidden)
     monkeypatch.setattr(gates.gate.subprocess, "Popen", forbidden)
     gates.check.main()
-    for label, arguments in stages:
+    for label, arguments, timeout in stages:
+        assert timeout == (1200 if label == "functional" else 300)
         if label in {"functional", "harness"}:
             assert arguments[arguments.index("--functional-profile") + 1] == profile
-    assert [name for name, _ in stages][-2:] == ["functional", "harness"]
+    assert [name for name, _, _ in stages][-2:] == ["functional", "harness"]

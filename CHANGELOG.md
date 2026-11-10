@@ -24,6 +24,10 @@
   before test bodies or a success receipt.
   Preserve the complete core partition across exclusion callbacks and reject additional
   callback deselections before bodies.
+- Preserve qualification bytecode suppression through isolated pytest fixtures and
+  their ordinary-session children; keep installed-package verification strict.
+  Allow twenty minutes for the functional stage while retaining five-minute limits
+  for other stages and the existing bounded process cleanup.
 
 This candidate remains unreleased. New performance is unmeasured. Frozen-checkout/history
 capture and its proposed selector are deferred and are not implemented by this candidate.
