@@ -1,8 +1,8 @@
 # Marker and project reference
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 Declare inputs beside tests, then use defaults and bundles in `pyproject.toml` to share
 declarations. If you're setting up pytest-telescope for the first time, start with the
@@ -24,14 +24,13 @@ def test_red(): ...
 | --- | --- |
 | `inputs=["path", "data/*.json"]` | Explicit project paths, directories, and globs. Makes the case scoped, including when empty. |
 | `bundles=["pricing"]` | Reusable project declarations. Also makes the case scoped, including when empty. |
-| `git="frozen-checkout-v1"` | Request a frozen read-only Git checkout and history. Makes the case scoped. |
 | `distributions=["core"]` | Selected local distribution metadata. Also makes the case scoped, including when empty. |
 | `env=["OPTIONAL_FEATURE"]` | Forward and key named environment variables for this scope. Also makes the case scoped, including when empty. |
 | `tools=["frontend"]` | Select registered frozen tool/runtime closures. Also makes the case scoped, including when empty. |
 | `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not make a case scoped. |
 | `cache=False` | Never reuse or record success for this case; does not make a case scoped. |
 
-Without an `inputs`, `bundles`, `distributions`, `env`, `tools` or `git` field on or above it, a case is
+Without an `inputs`, `bundles`, `distributions`, `env` or `tools` field on or above it, a case is
 ordinary: it runs in an ordinary pytest session every time, with no sandbox and no cache.
 Project defaults alone do not make it scoped. A scoped case sees exactly the union of its
 inherited declarations, defaults, containing test source and configuration, read-only, in
@@ -196,8 +195,8 @@ env = ["PARSER_FEATURE"]
 | --- | --- |
 | `test_roots` | Static test-source discovery roots; default `["."]`. Real pytest inventory includes new files and cases before accepting hits. |
 | `env` | Explicit host environment names to forward into scoped sandboxes and key, including presence/absence. Reserved runtime/protocol names are rejected. Ordinary sessions inherit the whole environment. |
-| `defaults` | Shared `inputs`, `bundles`, `distributions`, `env`, `tools`, `absent`, `git`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
-| `bundles.NAME` | Reusable `inputs`, nested `bundles`, `distributions`, `env`, `tools`, `absent` lists and the Git declaration. Cycles and unknown names are errors. |
+| `defaults` | Shared `inputs`, `bundles`, `distributions`, `env`, `tools`, `absent`, and `cache` policy. Adds support to scoped cases without making unmarked cases scoped. |
+| `bundles.NAME` | Reusable `inputs`, nested `bundles`, `distributions`, `env`, `tools`, and `absent` lists. Cycles and unknown names are errors. |
 | `tools.NAME` | Exactly `format="frozen-tool-v1"` and a project-relative `manifest` JSON path. Registration alone does not scope a case. |
 
 Containing test source and configuration are automatic inputs. Scoped cases explicitly
@@ -217,8 +216,8 @@ Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), teles
 state (`.pytest-telescope` and an explicit in-project cache directory), pytest/bytecode
 caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, or
 a directory with validated `pyvenv.cfg`). Hidden and Git-ignored files can be declared.
-Without a Git declaration, pytest-telescope never walks or hashes undeclared project files.
-The explicit Git declaration grants the supported committed tree as described below.
+pytest-telescope never walks or hashes undeclared project files for the current input
+contract. The separate deferred Git design below is not an implemented grant.
 
 The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
 [Independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
@@ -292,15 +291,16 @@ import paths, including in isolated children; see the
 
 ## Frozen Git checkout (development contract)
 
-The following interface is under development and is not a claim about the published
-0.1.0a6 package. Request it explicitly on a case:
+The following is a deferred design contract. Neither the current four-component
+candidate nor published 0.1.0a6 implements the selector or frozen-checkout/history
+capture. This records the future declaration form, not a runnable current example:
 
-```python
+```text
 @pytest.mark.telescope(git="frozen-checkout-v1")
 def test_revision(): ...
 ```
 
-The same literal string may appear in project defaults or bundles. Module, class,
+Under that future contract, the same literal string may appear in defaults or bundles. Module, class,
 function and parameter declarations add together; inherited Git cannot be removed.
 Defaults alone do not scope an ordinary case. Omission leaves Git disabled; unknown
 versions and non-string or dynamic marker values are rejected. `plan` is static and
@@ -403,7 +403,7 @@ Scoped tests run the host's own tools from the read-only system directories, for
 `git` from `/usr/bin`, with `HOME` and `TMPDIR` set to private `/tmp`. Create
 repositories and other writable state in `/tmp` or `tmp_path`, copying declared inputs
 there when needed; project source stays read-only. Except for explicitly requested
-frozen Git or tool/runtime files described above, host tools and system libraries are not part of the
+frozen tool/runtime files described above, host tools and system libraries are not part of the
 cache key, so mark a scoped test `cache=False` when its result depends on
 their version.
 

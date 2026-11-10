@@ -1,8 +1,8 @@
 # API, CLI and configuration
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 This reference lists the interfaces of the [ordinary and Bubblewrap execution
 contract](bubblewrap.md). The [result reference](result-schema.md) defines every schema 4
@@ -76,9 +76,10 @@ The [marker and project reference](specification.md#project-configuration) defin
 A suite's `capabilities` list accepts `python` and `project:readonly`;
 `network:none` and `scratch:noexec` refuse with that capability code.
 
-The development marker `git="frozen-checkout-v1"` requests the
-[frozen Git view](bubblewrap.md#frozen-git-checkout-development-contract); this is not a
-claim of support in the published 0.1.0a6 package. `plan` remains a static preview.
+The separate [frozen Git design](bubblewrap.md#frozen-git-checkout-development-contract)
+is deferred. The current candidate has no `git=` selector or frozen-checkout/history
+capture. It is distinct from selecting a Git executable as a frozen tool for an owned
+scratch repository. `plan` remains a static preview of implemented declarations.
 
 ## Frozen tool manifest (development contract)
 
@@ -671,9 +672,6 @@ The project may be `/project` itself.
 | `tool:layout` | Unsupported or unverifiable source, executable, loader or installed-package layout. |
 | `tool:bounds` | A bounded manifest, capture, entry, byte, path or relation limit was exceeded. |
 | `tool:identity` | A declared lock, runtime or content pin does not match. |
-| `git:frozen-checkout-v1` | Requested repository state, layout, ref, link or object format is unsupported or absent. |
-| `git:executable` | System Git or its supported runtime closure is unavailable or unsupported. |
-| `git:limits` | A bounded Git capture, path, ref, object or runtime limit was exceeded. |
 | `sandbox:bubblewrap` | No `bwrap` executable on `PATH`. |
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
 | `sandbox:environment` | The interpreter could not start in the view, the environment layout overlaps the project or the sandbox's own mount points, or the project directory cannot also be shown at its host path. |
@@ -685,10 +683,9 @@ The project may be `/project` itself.
 | `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
 | `project:links` | A project input contains an unsupported directory symlink. |
 
-Malformed Git declarations or conflicting forwarded Git, SSH, loader or locale controls raise `DeclarationError`.
-Changed previously observed bytes, corrupt or incomplete objects, command, deadline,
-read and materialization failures yield bounded `InfrastructureError` evidence after
-at most two fresh capture attempts; cleanup failure is terminal.
+The deferred Git design separately specifies `git:frozen-checkout-v1`, `git:executable`
+and `git:limits`, plus controlled Git/SSH/loader/locale declarations and bounded capture
+recovery. These are not capabilities or declaration fields implemented by this candidate.
 
 For frozen tools, missing declared inputs and malformed declarations raise
 `DeclarationError`; observed source mutation, I/O outage or corrupt owned capture is

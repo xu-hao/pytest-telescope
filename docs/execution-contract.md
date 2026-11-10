@@ -1,8 +1,8 @@
 # Declarations, inventory and reuse
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 This page explains how pytest-telescope reads declarations, discovers cases and decides
 whether to reuse their results. The [execution contract](bubblewrap.md) describes which
@@ -39,8 +39,7 @@ def test_variant(value): ...
 
 Module/class/function/parameter declarations are additive. A literal `inputs`,
 `bundles`, `distributions`, `env` or `tools` field makes a case scoped, including an empty list.
-The development declaration `git="frozen-checkout-v1"` also scopes its case. Its
-effective scope is the union of those inherited declarations, project defaults,
+Its effective scope is the union of those inherited declarations, project defaults,
 containing test source and configuration source. A policy-only `cache=False` marker or
 absence assertion does not make a case scoped. Any inherited `cache=False` disables
 successful-result reuse for that item.
@@ -202,7 +201,8 @@ scoped inventory.
 
 ### Frozen Git identity (development contract)
 
-The explicit `git="frozen-checkout-v1"` declaration adds the verified frozen Git
+This is a deferred design, not an implemented property of the current candidate.
+Under that future contract, `git="frozen-checkout-v1"` would add the verified frozen Git
 context and its executable/runtime identity to only consuming case and group keys.
 It adds the supported tracked tree to that scope; other cases retain their existing
 inputs. Collection uses the union needed by its potential consumers, but execution

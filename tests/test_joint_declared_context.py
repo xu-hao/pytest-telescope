@@ -31,6 +31,8 @@ def joint_project(tmp_path, monkeypatch):
         """from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(env=["HELPER_ONLY"])
+AVAILABLE_TOOLS = {name for name in ("left", "right") if Path("/tools", name).is_dir()}
+assert AVAILABLE_TOOLS, "collection lost its declared tool view"
 def read_tool(name):
     return Path("/tools", name, "install", "value.txt").read_text()
 """,
@@ -49,6 +51,7 @@ def per_case():
     assert len(values) == 1
 @pytest.mark.telescope(tools=["left"], env=["LEFT_FEATURE"])
 def test_left(per_case):
+    assert helper.AVAILABLE_TOOLS == {"left"}
     assert per_case == []
     per_case.append(helper.read_tool("left"))
     assert per_case == ["left-value"]
@@ -58,6 +61,7 @@ def test_left(per_case):
     assert not Path("/tools/right").exists()
 @pytest.mark.telescope(tools=["right"], env=["RIGHT_FEATURE"])
 def test_right(per_case):
+    assert helper.AVAILABLE_TOOLS == {"right"}
     assert per_case == []
     per_case.append(helper.read_tool("right"))
     assert per_case == ["right-value"]
@@ -119,4 +123,4 @@ def test_authenticated_helper_marker_cannot_be_borrowed_by_a_guarded_case(
     with pytest.raises(DeclarationError):
         controller.run(joint_project.root, fixture_guard="available-v1", timeout=20)
     assert modes and "collection" in modes
-    assert "batch" not in modes and "execution" not in modes
+    assert all(mode not in modes for mode in ("batch", "guard-batch", "execution"))

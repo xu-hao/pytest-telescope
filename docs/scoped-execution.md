@@ -1,8 +1,8 @@
 # Metadata, independent suites, and parallel workers
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 Use these settings when tests need local package metadata, when parts of your project
 have separate pytest configurations, or when you want to run scoped tests in parallel.

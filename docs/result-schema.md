@@ -1,8 +1,8 @@
 # Run results and explicit refusals
 
-> Per-scope environment inputs, frozen Git and tools, helper ownership and the opt-in
-> fixture guard are unreleased development interfaces. Published version 0.1.0a6 does
-> not provide them.
+> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
+> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
+> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
 
 This reference describes result schema 4. Start with the practical
 [quickstart](index.md). The [API and configuration reference](bubblewrap-api.md) lists the

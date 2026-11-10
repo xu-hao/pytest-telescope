@@ -24,6 +24,11 @@ PROGRAM_BYTES = 768 * 1024 * 1024
 PROGRAM_FILE_BYTES = 512 * 1024 * 1024
 PROGRAM_ENTRIES = 10000
 FONT_BYTES = 64 * 1024 * 1024
+PROFILE_DOCUMENTS = {
+    "node": {"worker", "frontend"},
+    "installed": {"worker", "unselected-baseline"},
+    "browser": {"worker", "frontend"},
+}
 
 
 def prerequisite_identity(documents):
@@ -38,17 +43,56 @@ def prerequisite_identity(documents):
     ).hexdigest()
 
 
+def read_prerequisite_receipt(filename, expected):
+    """Read the bounded explicit benchmark receipt without tolerating ambiguous JSON."""
+    with Path(filename).open("rb") as stream:
+        content = stream.read(4 * 1024 * 1024 + 1)
+    if len(content) > 4 * 1024 * 1024 or hashlib.sha256(content).hexdigest() != expected:
+        raise ValueError("prerequisite receipt changed or exceeded its bound")
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate prerequisite receipt field")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("nonfinite prerequisite receipt value")
+
+    receipt = json.loads(content, object_pairs_hook=unique, parse_constant=invalid_constant)
+    if (
+        type(receipt) is not dict
+        or set(receipt) != {"schema", "profiles"}
+        or type(receipt["schema"]) is not int
+        or receipt["schema"] != 1
+        or type(receipt["profiles"]) is not dict
+        or not receipt["profiles"]
+        or not set(receipt["profiles"]) <= set(PROFILE_DOCUMENTS)
+    ):
+        raise ValueError("invalid explicit prerequisite receipt")
+    for name, profile in receipt["profiles"].items():
+        if (
+            type(profile) is not dict
+            or set(profile) != {"identity", "documents"}
+            or type(profile["identity"]) is not str
+            or len(profile["identity"]) != 64
+            or any(character not in "0123456789abcdef" for character in profile["identity"])
+            or type(profile["documents"]) is not dict
+            or set(profile["documents"]) != PROFILE_DOCUMENTS[name]
+        ):
+            raise ValueError("invalid explicit prerequisite profile")
+    return receipt
+
+
 def require_prerequisites(name, identity):
     filename = os.environ.get("TELESCOPE_FIXTURE_ADMISSION")
     expected = os.environ.get("TELESCOPE_FIXTURE_ADMISSION_SHA256")
     if not filename or not expected:
         raise ValueError("an exact reviewed prerequisite receipt is required")
-    with Path(filename).open("rb") as stream:
-        content = stream.read(4 * 1024 * 1024 + 1)
-    if len(content) > 4 * 1024 * 1024 or hashlib.sha256(content).hexdigest() != expected:
-        raise ValueError("prerequisite receipt changed or exceeded its bound")
-    receipt = json.loads(content)
-    if receipt["schema"] != 1 or receipt["profiles"][name]["identity"] != identity:
+    receipt = read_prerequisite_receipt(filename, expected)
+    if name not in receipt["profiles"] or receipt["profiles"][name]["identity"] != identity:
         raise ValueError("selected runtime bytes differ from the reviewed preparation")
 
 
