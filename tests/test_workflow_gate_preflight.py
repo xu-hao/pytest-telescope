@@ -1,5 +1,6 @@
 """Actual workflow commands meet real preflight; all execution stages are doubles."""
 
+import hashlib
 import os
 import re
 import shlex
@@ -149,6 +150,14 @@ def test_explicit_owned_prerequisites_reach_only_stage_double(entry, workflow, s
     with pytest.raises(StageReached):
         run(workflow, repair=True, selection=selection)
     assert [call[0] for call in calls] == ["construct", "lint"]
-    assert identities[0][1]["file"]["size"] == len(b"owned selected Node stand-in\n")
+    assert len(identities) == 1
+    selected, identity = identities[0]
+    content = b"owned selected Node stand-in\n"
+    assert identity == {
+        "path": selected,
+        "actual": str(Path(selected).resolve()),
+        "mode": 0o755,
+        "file": {"bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()},
+    }
     scratch = Path(calls[-1][2]["env"]["TMPDIR"])
     assert scratch.is_relative_to(runner) and not scratch.exists()
