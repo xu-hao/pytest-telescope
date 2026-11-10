@@ -1,6 +1,7 @@
 """Literal-call authentication from verified frozen inputs, never scope grants."""
 
 import hashlib
+import os
 import posixpath
 import re
 from pathlib import PurePosixPath
@@ -63,7 +64,7 @@ class FrozenRegistry:
 
     def verify_link(self, name):
         try:
-            actual = (self.root / name).readlink().as_posix()
+            actual = os.readlink(self.root / name)
         except OSError as exc:
             raise InfrastructureError("cannot verify frozen declaration source link") from exc
         if actual != self.records[name]["target"]:
