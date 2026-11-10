@@ -54,6 +54,13 @@ The `all` profile admits no deselections. The `core` profile admits exactly its 
 positive cases as deselected; an ambient selector or other unexplained deselection
 refuses before execution rather than being credited to the profile.
 
+This boundary includes late collection callbacks and collection-hook wrapper teardown.
+All collection callbacks must return before final membership is verified and its receipt
+is written. Removing, adding or deselecting cases after the earlier selection check
+refuses before any test body, even when the earlier snapshot still matches the requested
+profile. A post-run mismatch cannot repair a body that already executed under false
+membership evidence.
+
 The final gate result records `functional_profile` and `verdict_kind`: `full` for
 `all`, `compatibility` for `core`. A successful `core` result remains compatibility
 evidence. The candidate binding remains schema 2 with its existing exact fields;

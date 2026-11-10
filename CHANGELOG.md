@@ -20,6 +20,8 @@
 - Keep `all` as the default and sole full/release qualification profile. Explicit `core`
   compatibility checks retain ordinary behavior and unsupported-adapter refusals while
   recording the exact real fixture-guard positives excluded from that profile.
+  Verify final membership after collection callbacks finish and refuse late changes
+  before test bodies or a success receipt.
 
 This candidate remains unreleased. New performance is unmeasured. Frozen-checkout/history
 capture and its proposed selector are deferred and are not implemented by this candidate.
