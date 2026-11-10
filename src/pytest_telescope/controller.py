@@ -1175,6 +1175,10 @@ def run(
                                         materialize_metadata(
                                             manifest.distributions, unit.distributions, metadata
                                         )
+                                        if frozen_registry.for_view(unit) != candidate["registry"]:
+                                            raise InfrastructureError(
+                                                "frozen fixture inspection registry changed"
+                                            )
                                         request = {
                                             "mode": inspection_mode,
                                             "registry": candidate["registry"],
