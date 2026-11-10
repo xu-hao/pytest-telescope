@@ -1,8 +1,8 @@
 # API, CLI and configuration
 
 > Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
-> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
+> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
+> and is not implemented by this version.
 
 This reference lists the interfaces of the [ordinary and Bubblewrap execution
 contract](bubblewrap.md). The [result reference](result-schema.md) defines every schema 4

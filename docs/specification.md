@@ -1,8 +1,8 @@
 # Marker and project reference
 
 > Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
-> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
+> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
+> and is not implemented by this version.
 
 Declare inputs beside tests, then use defaults and bundles in `pyproject.toml` to share
 declarations. If you're setting up pytest-telescope for the first time, start with the

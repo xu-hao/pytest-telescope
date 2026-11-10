@@ -1,8 +1,8 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
 > Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
-> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
+> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
+> and is not implemented by this version.
 
 Tests without a scope declaration run as ordinary pytest every time. Tests with a
 declaration run in a Bubblewrap sandbox and can reuse a previous successful result.

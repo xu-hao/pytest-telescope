@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0a7 (unreleased)
+## 0.1.0 (2026-11-10)
 
 - Add per-scope environment declarations that distinguish absent, empty and valued
   inputs and affect only their consumers.
@@ -29,9 +29,9 @@
   Allow twenty minutes for the functional stage while retaining five-minute limits
   for other stages and the existing bounded process cleanup.
 
-This candidate remains unreleased. New performance is unmeasured. Frozen-checkout/history
-capture and its proposed selector are deferred and are not implemented by this candidate.
-Published 0.1.0a6 guarantees and historical qualification remain unchanged.
+New performance is unmeasured. Frozen-checkout/history capture and its proposed
+selector are deferred and are not implemented by this release.
+Prior 0.1.0a6 guarantees and historical qualification remain unchanged.
 
 ## 0.1.0a6
 

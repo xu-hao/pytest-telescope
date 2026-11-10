@@ -1,8 +1,8 @@
 # Declarations, inventory and reuse
 
 > Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are unreleased 0.1.0a7 interfaces. Published version 0.1.0a6 does not provide
-> them. Frozen-checkout/history support is deferred and is not implemented by this candidate.
+> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
+> and is not implemented by this version.
 
 This page explains how pytest-telescope reads declarations, discovers cases and decides
 whether to reuse their results. The [execution contract](bubblewrap.md) describes which
