@@ -405,9 +405,10 @@ repositories and other writable state in `/tmp` or `tmp_path`, copying declared 
 there when needed; project source stays read-only. Except for explicitly requested
 frozen tool/runtime files described above, host tools and system libraries are not part of the
 cache key, so mark a scoped test `cache=False` when its result depends on
-their version. The same applies to a test that reads the source directories in the mount
-table (field 4 of `/proc/*/mountinfo`), where a scoped test can observe its checkout's
-location; see
+their version. The same applies to a test that reads either of the two things that
+still name its checkout's location: the source directories in the mount table (field 4
+of `/proc/*/mountinfo`), or the raw bytes of cached bytecode files (`__pycache__/*.pyc`)
+of an environment inside the project. See
 [what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
 `subprocess.run([sys.executable, ...])` starts the same host interpreter with the same

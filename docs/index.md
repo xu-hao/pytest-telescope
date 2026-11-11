@@ -290,9 +290,14 @@ or `run --no-cache` to bypass result reading and recording.
 
 **Not location-blind:** identical checkouts at different paths share scoped results, and
 a scoped test sees its project at `/project` wherever the checkout lives.
-A test that reads the source directories in the mount table (field 4 of
-`/proc/*/mountinfo`) can observe its checkout's location, which its cache key does not
-contain. Leave such a test ordinary, or add `cache=False` to its scope.
+Two things a scoped test can read still name its checkout's location, which its cache
+key does not contain:
+
+- the source directories in the mount table (field 4 of `/proc/*/mountinfo`);
+- the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an environment inside
+  the project.
+
+Leave a test that reads either one ordinary, or add `cache=False` to its scope.
 See [what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
 The sandbox controls which files tests can see. Limit CPU, memory, processes and scratch

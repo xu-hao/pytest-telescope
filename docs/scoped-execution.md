@@ -321,12 +321,16 @@ interpreter, environment and system directories, private writable scratch, and t
 network. It does not install tools, build runtimes, limit resources or isolate the
 network.
 
-**Not location-blind: the mount table's source directories.** A scoped declaration lets
-identical checkouts at different paths share a result, so the view shows the project at
-`/project`, wherever the checkout lives.
-A test that reads the source directories in the mount table (field 4 of
-`/proc/*/mountinfo`) can observe its checkout's location, which its cache key does not
-contain. Leave such a test ordinary, or add `cache=False` to its scope.
+**Not location-blind.** A scoped declaration lets identical checkouts at different paths
+share a result, so the view shows the project at `/project`, wherever the checkout lives.
+Two things a scoped test can read still name its checkout's location, which its cache
+key does not contain:
+
+- the source directories in the mount table (field 4 of `/proc/*/mountinfo`);
+- the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an environment inside
+  the project.
+
+Leave a test that reads either one ordinary, or add `cache=False` to its scope.
 See [what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
 Explicit [frozen tools](bubblewrap.md#frozen-tools-and-runtime-files-development-contract)

@@ -540,12 +540,17 @@ randomness, native global state, network services or host tools. Make those depe
 reproducible, set `cache=False`, or leave the test ordinary. Scoped tests share the host
 network, and the cache cannot detect changes to external state.
 
-**Exception to cache reuse — not location-blind.** Identical checkouts at different paths
-share scoped results, so a scoped test sees its project at `/project`, wherever the
+**Exceptions to cache reuse — not location-blind.** Identical checkouts at different
+paths share scoped results, so a scoped test sees its project at `/project`, wherever the
 checkout lives.
-A test that reads the source directories in the mount table (field 4 of
-`/proc/*/mountinfo`) can observe its checkout's location, which its cache key does not
-contain. Leave such a test ordinary, or add `cache=False` to its scope.
+Two things a scoped test can read still name its checkout's location, which its cache
+key does not contain:
+
+- the source directories in the mount table (field 4 of `/proc/*/mountinfo`);
+- the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an environment inside
+  the project.
+
+Leave a test that reads either one ordinary, or add `cache=False` to its scope.
 See [what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
 ## Failures and troubleshooting
