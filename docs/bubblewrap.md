@@ -111,7 +111,7 @@ This is a design rule of the sandbox. Every change to the sandbox must keep it.
   `/project`, such as `.venv -> ../shared-venv`, shows its target's path instead.
 - The project, and everything inside the project directory, appears only below
   `/project`. Nothing is mounted at the project's host path.
-- No file is reachable at two paths.
+- No file has two real paths: every name of a file resolves to the same path.
 - A layout that would need a second path is refused with a named cause; it is not given
   another mount. For example, an
   [environment inside the project](#an-environment-inside-the-project) that depends on
@@ -301,13 +301,14 @@ file that its location was written into. When the interpreter's environment, or 
 environment it was created from, lies inside the project and has a `conda-meta`
 directory, pytest-telescope reads those records once, while it identifies the
 environment. Any listed file, binary or text, that the sandbox does not show rewritten
-causes the refusal. Every conda environment that contains Python has one: Python's
-build configuration module. At most 4096 records, 64 MiB in total, are read. A
-`conda-meta` directory with more, or with a record that cannot be read, is refused the
-same way. A link inside the project, such as `.env -> ../shared-env`, to such an
-environment outside the project is refused too; start that environment's interpreter
-by its real path outside the project, or remove the link. An environment without `conda-meta` that has absolute paths compiled into its
-files cannot be detected; keep such an environment outside the project as well.
+causes the refusal. Every conda environment that contains Python has one: Python's build
+configuration module. At most 4096 records, 64 MiB in total, are read. A `conda-meta`
+directory with more, or with a record that cannot be read, is refused the same way. A
+link inside the project, such as `.env -> ../shared-env`, to such an environment outside
+the project is refused too; start that environment's interpreter by its real path
+outside the project, or remove the link. An environment without `conda-meta` that has
+absolute paths compiled into its files cannot be detected; keep such an environment
+outside the project as well.
 
 `/project`, the environment, the rewritten files, system directories and the sandbox
 root are read-only. Writes there fail with a read-only file system error.
@@ -351,7 +352,7 @@ source files, installs a runtime or infers arbitrary program dependencies.
 | Selected view | Contents |
 | --- | --- |
 | `/tools/NAME/ROOT` | Only the selected root's pinned files, directories and unchanged safe links. For a root that keeps its original path, a symlink to that path (a complete tree), or a directory whose files are symlinks to their original paths (a files-mode root). |
-| Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. This is where a root that keeps its original path is mounted, once; `os.path.realpath` of its `/tools` path is the original path. |
+| Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. This is where a root that keeps its original path is mounted, once; `os.path.realpath` of a file under its `/tools` path is that file's original path. |
 | `/tools/.commands/SCOPE_DIGEST` | Readonly command-name symlinks to exact pinned executables; first in the controlled PATH. |
 | Declared native library-search directories | Closed readonly trees synthesized from the selected runtime entries; all other host siblings are absent. |
 | Native profile's closed `/etc` | Only selected frozen configuration entries, the loader cache when required or declared, and the fixed empty regular `0444` preload file; undeclared host entries are absent. |

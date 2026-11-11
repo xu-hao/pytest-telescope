@@ -57,7 +57,8 @@ Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), teles
 state (`.pytest-telescope` and an explicitly selected in-project cache directory),
 pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environments
 (`.venv`, `venv`, a directory with a validated `pyvenv.cfg`, a conda-style
-directory with a `conda-meta` directory, or a link to either). Directory symlinks
+directory with a `conda-meta` directory, or a link to either). Discovery skips such
+directories too. Directory symlinks
 require an exact selected frozen-tool binding; all other directory symlinks, special
 files and unsupported paths are rejected.
 
@@ -316,7 +317,14 @@ exhaustion follows the bounded infrastructure-failure path, without changing cal
 
 Materialization reserves a complete bounded set of new owned paths before creating it.
 The aggregate includes capture copies, tool and projection roots, empty ancestors,
-closed-view members, command directories/symlinks and fixed loader controls. Count each
+closed-view members, the link directory of each files-mode root that keeps its original
+path (one owned path per entry), command directories/symlinks and fixed loader controls.
+A files-mode tool that keeps its original paths therefore uses up to three owned paths per
+entry: its capture copy, its closed-view member and its link. With the fixed controls of
+the native profile, a single native files-mode tool of N entries whose entries all lie in
+closed views uses 3N + 5 paths, so the largest such tool has 66,665 entries; larger ones
+refuse with `tool:bounds`. A files-mode root outside closed views uses two paths per entry.
+Count each
 directory-entry path once; separate hardlink destinations count separately even when
 they share an already-owned inode. Reusing an existing view adds no paths. A reservation
 that would exceed 200,000 refuses with `tool:bounds` before accepting the view or

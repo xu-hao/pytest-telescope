@@ -211,8 +211,9 @@ still fail explicitly.
 
 Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
 state (`.pytest-telescope` and an explicit in-project cache directory), pytest/bytecode
-caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, or
-a directory with validated `pyvenv.cfg`). Hidden and Git-ignored files can be declared.
+caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, a
+directory with a validated `pyvenv.cfg`, a conda-style directory with a `conda-meta`
+directory, or a link to either). Discovery skips such directories too. Hidden and Git-ignored files can be declared.
 pytest-telescope never walks or hashes undeclared project files for the current input
 contract.
 

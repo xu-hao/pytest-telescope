@@ -23,8 +23,9 @@ read-only copy of its declared project files that a scoped test sees in its sand
 - Results cached by earlier versions are not reused, because the sandbox view policy
   changed. The first run after the upgrade executes every scoped test again.
 - Most projects need no change. One kind of test does: a test that reads the source
-  directories in the mount table, or the raw `.pyc` bytes of an environment inside the
-  project, should stay ordinary or use `cache=False`.
+  directories in the mount table, the raw `.pyc` bytes of an environment inside the
+  project, or the real path of an environment inside the project that is a link to a
+  directory outside it, should stay ordinary or use `cache=False`.
 - A conda or pixi environment inside the project is now refused; move it outside the
   project.
 - In an interleaved benchmark of fresh execution against 0.1.0, no series had a slower
@@ -153,11 +154,21 @@ read-only copy of its declared project files that a scoped test sees in its sand
   second path is refused rather than given another mount. An environment reached
   through a host symbolic link is mounted once, at its real path, and the link is shown
   as a link. Version 0.1.0a7 also mounted it at the link's path. A frozen tool that
-  keeps its original path (`preserve_source`) is mounted once, there, and
-  `/tools/NAME/ROOT` is a symlink to it; 0.1.0a7 mounted it at both paths. A conda
-  environment, or a link to any environment, declared as an input refuses as a host
-  environment. See
+  keeps its original path (`preserve_source`) is mounted once, there. For a complete
+  tree, `/tools/NAME/ROOT` is a symlink to it; for a files-mode root it is a directory
+  of the pinned entries whose files are symlinks to their original paths. 0.1.0a7
+  mounted such a tool at both paths. A conda environment, or a link to any environment,
+  declared as an input refuses as a host environment, and discovery skips a directory
+  with a `conda-meta` directory. See
   [one path for every file](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#one-path-for-every-file).
+- A native files-mode frozen tool now uses three owned paths per entry instead of two:
+  the link directory of its `/tools` path adds one. The largest such tool is 66,665
+  entries (was 99,997, just under the 100,000-entry limit of one tool); a larger tool is
+  refused with `tool:bounds`. The 200,000-path bound itself is unchanged.
+- A link inside the project to a conda or pixi environment outside the project, such
+  as `.env -> ../shared-env`, is refused with `sandbox:environment` when that
+  environment depends on its host location. Start the environment's interpreter by its
+  real path outside the project, or remove the link.
 - pytest-telescope identifies an environment by starting its interpreter once on the
   host. That start is isolated and never writes bytecode, so identifying an environment
   never writes into it, whatever the calling job's own bytecode setting.
