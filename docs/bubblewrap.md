@@ -114,9 +114,17 @@ this, with the exceptions listed under
   editable install's finder; the installed metadata of a distribution installed from a
   location (every file of a `*.dist-info` directory that has a `direct_url.json`, and
   `.egg-link` files); and, for an environment inside the project, its `pyvenv.cfg` and
-  the text files of its scripts directory. The directory is matched as a whole path,
-  never as part of a longer path or name, as it is spelled literally, in a file URL and
-  in a Python or JSON string literal.
+  the text files of its scripts directory.
+- The directory is matched as a whole path, as it is spelled literally, in a file URL
+  with percent escapes in either case (`%C3%A9` or `%c3%a9`), and in a Python or JSON
+  string literal. A path directly after `=` is rewritten, for example `VIRTUAL_ENV=…`
+  in an environment's `activate` script, `key=…` and `--opt=…`. A longer path or name
+  that merely ends or starts with the directory is never rewritten: a match is blocked
+  after another path component and after a file-name character, including `~`, `+`, `@`
+  and `%`. One rare false match remains: below a directory whose name ends in `=`, as
+  in `/mnt/x=/home/dev/my_project`, the path after the `=` is rewritten.
+- As a result, identical checkouts whose paths contain no space, each with its own
+  environment inside the project, have the same sandbox identity and share results.
 - The host files are never modified. The copies live in the invocation's private scratch
   and are bound over the originals for that sandbox only.
 - Cached bytecode of a rewritten module is shown as an empty file, and the rewritten

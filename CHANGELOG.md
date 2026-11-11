@@ -210,6 +210,8 @@ for the ordinary route and scoped batches, with that noise in mind.
 - The CI and release workflows use four workers. In local runs limited to 4 CPUs, the
   serial functional stage took 13 to 16 minutes, close to its twenty-minute deadline, and
   four workers took 4 to 5 minutes.
+- The CI and release workflows try the Bubblewrap installation at most 3 times, 30
+  seconds apart, and then fail the job with an error.
 
 ## 0.1.0 (2026-11-10)
 
