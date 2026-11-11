@@ -340,16 +340,18 @@ A scoped test is meant to be *location-blind*: it cannot tell where its checkout
 so identical checkouts at different paths share scoped results. It sees its project at
 `/project`, wherever the checkout lives.
 
-**Not location-blind:** two things a scoped test can read still name its checkout's
+**Not location-blind:** three things a scoped test can read still name its checkout's
 location, which its cache key does not contain:
 
 - the source directories in the mount table (field 4 of `/proc/*/mountinfo`);
 - the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an environment inside
   the project.
+- the real path of an environment inside the project that is a symbolic link to a
+  directory outside it, such as `.venv -> ../shared-venv`.
 
 A reused result may have been produced by a checkout at another path, where the test
 would have read a different value.
-Leave a test that reads either one ordinary, or add `cache=False` to its scope.
+Leave a test that reads any of them ordinary, or add `cache=False` to its scope.
 See [what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
 The sandbox controls which files tests can see. Limit CPU, memory, processes and scratch

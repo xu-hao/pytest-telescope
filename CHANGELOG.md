@@ -18,7 +18,7 @@ read-only copy of its declared project files that a scoped test sees in its sand
 - `plan` now refuses the same oversized or unparsable declared sources as `run`.
 - A scoped test sees its project at one path, `/project`, wherever the checkout lives.
   Editable installs and an environment inside the project work there. A scoped test can no
-  longer tell where its checkout lives, with the two exceptions under
+  longer tell where its checkout lives, with the three exceptions under
   "Known limitations".
 - Results cached by earlier versions are not reused, because the sandbox view policy
   changed. The first run after the upgrade executes every scoped test again.
@@ -149,8 +149,10 @@ read-only copy of its declared project files that a scoped test sees in its sand
   read; more, or an unreadable record, also refuses. A plain virtual environment is not
   affected. An environment without `conda-meta` that has absolute paths compiled into
   its files cannot be detected.
-- A scoped session shows every file at exactly one path, and a layout that would need a
-  second path is refused rather than given another mount. See
+- A scoped session mounts every file at exactly one path, and a layout that would need a
+  second path is refused rather than given another mount. An environment reached
+  through a host symbolic link is mounted once, at its real path, and the link is shown
+  as a link. Version 0.1.0a7 also mounted it at the link's path. See
   [one path for every file](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#one-path-for-every-file).
 - pytest-telescope identifies an environment by starting its interpreter once on the
   host. That start is isolated and never writes bytecode, so identifying an environment
@@ -161,7 +163,7 @@ read-only copy of its declared project files that a scoped test sees in its sand
 
 ### Known limitations
 
-Two things a scoped test can read still name its checkout's location. See
+Three things a scoped test can read still name its checkout's location. See
 [what a scoped test can still see](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#what-a-scoped-test-can-still-see).
 
 - A test that reads the source directories in the mount table (field 4 of
@@ -182,6 +184,14 @@ Two things a scoped test can read still name its checkout's location. See
   Imported modules, `__file__`, `co_filename` and tracebacks report sandbox paths. An
   environment outside the project is not affected. See
   [an environment inside the project](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#an-environment-inside-the-project).
+- A test that reads the real path of an environment inside the project that is a
+  symbolic link to a directory outside it, such as `.venv -> ../shared-venv`, can
+  observe that directory's host path, which its cache key does not contain. Leave such
+  a test ordinary, or add `cache=False` to its scope.
+
+  Why: the sandbox mounts the environment once, at its real path, and shows the link
+  as a link that leads there. The link's text, `os.path.realpath(sys.prefix)` and the
+  environment's mount point name that path; `sys.prefix` names `/project/.venv`.
 
 In either case a result cached in one checkout could be reused in another checkout, where
 the test would have seen a different value.

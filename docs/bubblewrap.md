@@ -104,7 +104,10 @@ session as it does in an ordinary one.
 
 This is a design rule of the sandbox. Every change to the sandbox must keep it.
 
-- A scoped session shows every file at exactly one path.
+- Every file is mounted at exactly one path. A symlink that exists on the host is shown
+  as the same symlink, resolving to that one path; it is never turned into a second
+  mount. A link inside the project whose text would lead elsewhere from `/project`,
+  such as `.venv -> ../shared-venv`, shows its target's path instead.
 - The project, and everything inside the project directory, appears only below
   `/project`. Nothing is mounted at the project's host path.
 - No file is reachable at two paths.
@@ -112,6 +115,10 @@ This is a design rule of the sandbox. Every change to the sandbox must keep it.
   another mount. For example, an
   [environment inside the project](#an-environment-inside-the-project) that depends on
   its host location is refused.
+
+No mount is exempt from this rule. The system directories, `/proc`, `/dev`, the scratch
+directories, `/project` and each environment directory are each mounted from their own
+source, and none of them twice.
 
 ### A scoped test cannot tell where its checkout lives
 
@@ -160,9 +167,9 @@ beyond that bound that names the project directory refuses with `sandbox:environ
 
 ### What a scoped test can still see
 
-Two things a scoped test can read still name its checkout. They are outside the
+Three things a scoped test can read still name its checkout. They are outside the
 guarantee above. A result cached in one checkout could be reused in another, where a
-test that read either one would have seen a different value.
+test that read any of them would have seen a different value.
 
 **Not location-blind: the mount table's source directories.** A test that reads the
 source directories in the mount table (field 4 of `/proc/*/mountinfo`) can observe its
@@ -181,7 +188,7 @@ project at `/home/dev/my_project`, the line for `/project` reads:
 A test that parses field 4, or runs a tool that prints it, sees
 `<checkout>/.pytest-telescope/scratch/invocation-<id>/project`. The rest of the mount
 table is clean: the mount points (field 5), the mount options and every line of
-`/proc/self/mounts` name only sandbox paths.
+`/proc/self/mounts` name only sandbox paths, apart from the linked environment below.
 
 **Not location-blind: bytecode cached by an environment inside the project.** A test
 that reads the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an
@@ -204,6 +211,27 @@ bytes itself instead of importing the module, sees `<checkout>/.venv/...`. Every
 the interpreter reports is clean: an imported module's `__file__`, the `co_filename` of
 its code and tracebacks through it name sandbox paths below `/project/.venv`. An
 environment outside the project is not affected.
+
+**Not location-blind: an environment linked from inside the project.** A test that reads
+where an environment inside the project really lives can observe a host path, which its
+cache key does not contain, when that environment is a symbolic link to a directory
+outside the project. If the environment sits next to the checkout, that path names the
+checkout's parent directory. Leave such a test ordinary, or add `cache=False` to its
+scope.
+
+The sandbox mounts the environment once, at its real path, and shows the link as a link
+that leads there. With the project at `/home/dev/my_project` and `.venv` a link to
+`../shared-venv`:
+
+```text
+/project/.venv -> /home/dev/shared-venv
+os.path.realpath(sys.prefix) == "/home/dev/shared-venv"
+```
+
+The link's text, `os.path.realpath` and that environment's mount point in the mount
+table (field 5) name `/home/dev/shared-venv`. `sys.prefix`, `sys.executable` and the
+first `PATH` entry name `/project/.venv`. An environment that is a directory inside the
+project, not a link, is not affected.
 
 Scoped tests run with the same executable
 and installed distributions as the invoking pytest-telescope process, including the
@@ -246,7 +274,7 @@ the host is never modified to make room for it.
 
 The environment's other files are shown as they are, and its cached bytecode is used as
 it is. The raw bytes of those cache files still name the checkout. This is one of the
-two [documented exceptions](#what-a-scoped-test-can-still-see) to location blindness;
+[documented exceptions](#what-a-scoped-test-can-still-see) to location blindness;
 what the interpreter reports for the modules is not affected.
 
 An environment inside the project must not depend on its host location in files that
