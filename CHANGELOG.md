@@ -38,6 +38,23 @@
   collection, which every worker must reproduce exactly. The default stays one serial
   process; the CI and release workflows use four workers, and pytest-xdist joins the
   `dev` extra.
+- The benchmark ran on the same workstation under the same outer limits as the
+  2026-10-21 campaign: 4 CPUs, 8 GiB and five interleaved repetitions, with all 50
+  measurements valid (`benchmarks/results/2026-11-11-bubblewrap.json`). Every series
+  was slower and none was faster. Median wall time rose from 0.854 to 0.966 s (a
+  factor of 1.13) for plain pytest, by factors of 1.09 to 1.14 for the ordinary route,
+  from 3.92, 2.22 and 1.36 s to 5.05, 2.90 and 1.86 s (1.29 to 1.37) for scoped cases on
+  1, 2 and 4 workers, and from 1.62, 1.26 and 1.28 s to 2.05, 1.52 and 1.56 s (1.20 to
+  1.26) for scoped batches. Median CPU time rose by factors of 1.09 to 1.33. Relative to
+  plain pytest, scoped cases took 5.23, 3.01 and 1.92 times its wall time (was 4.59,
+  2.60 and 1.59) and scoped batches 2.12, 1.57 and 1.62 times (was 1.90, 1.48 and
+  1.49); the ordinary route stayed at 1.22 to 1.26 times. The two campaigns differ in
+  more than this release: the earlier one measured pytest-telescope 0.1.0a4 with pytest
+  8.3.5 and pluggy 1.5.0, this one 0.1.1 with pytest 9.2.0 and pluggy 1.7.0, and the
+  host was running other jobs at a one-minute load average of 13.2 to 14.1 on its 24
+  logical CPUs, while the earlier campaign's host load was not recorded. Plain pytest,
+  which runs no pytest-telescope code, was itself 13% slower, so these results do not
+  isolate the cost of this release.
 
 ## 0.1.0 (2026-11-10)
 
