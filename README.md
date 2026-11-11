@@ -99,9 +99,14 @@ to rerun cached tests or `run --no-cache` to bypass reading and recording result
 
 Identical checkouts at different paths share scoped results, so a scoped test sees its
 project at `/project`, wherever the checkout lives.
-**Not location-blind:** a test that reads the source directories in the mount table
-(field 4 of `/proc/*/mountinfo`) can observe its checkout's location, which its cache key
-does not contain. Leave such a test ordinary, or add `cache=False` to its scope. See
+**Not location-blind:** two things a scoped test can read still name its checkout's
+location, which its cache key does not contain:
+
+- the source directories in the mount table (field 4 of `/proc/*/mountinfo`);
+- the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an environment inside
+  the project.
+
+Leave a test that reads either one ordinary, or add `cache=False` to its scope. See
 [what a scoped test can still see](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#what-a-scoped-test-can-still-see).
 
 You can also use `pytest --telescope` and `pytest --telescope-plan`. Other pytest plugins

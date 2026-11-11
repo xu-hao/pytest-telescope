@@ -211,9 +211,15 @@ beyond that bound that names the project directory refuses with `sandbox:environ
 
 ### What a scoped test can still see
 
-**Not location-blind: the mount table's source directories.** A test that reads the source directories in the mount table (field 4 of
-`/proc/*/mountinfo`) can observe its checkout's location, which its cache key does not
-contain. Leave such a test ordinary, or add `cache=False` to its scope.
+**Not location-blind: the mount table's source directories.** A test that reads the
+source directories in the mount table (field 4 of `/proc/*/mountinfo`) can observe its
+checkout's location, which its cache key does not contain. Leave such a test ordinary,
+or add `cache=False` to its scope.
+
+**Not location-blind: bytecode cached by an environment inside the project.** A test
+that reads the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an
+environment inside the project can observe its checkout's location, which its cache key
+does not contain. Leave such a test ordinary, or add `cache=False` to its scope.
 
 Two things still name the checkout and are outside this guarantee:
 
@@ -232,9 +238,25 @@ Two things still name the checkout and are outside this guarantee:
   checkout could then be reused in another checkout, where the test would have seen a
   different value. The rest of the mount table is clean: the mount points (field 5), the
   mount options and every line of `/proc/self/mounts` name only sandbox paths.
-- An [environment inside the project](#an-environment-inside-the-project) keeps the
-  bytecode it cached for its own modules. Those cache files record the path each source
-  had when it was compiled. An imported module still reports its sandbox path.
+- **The raw bytes of bytecode cached by an environment inside the project.** An
+  [environment inside the project](#an-environment-inside-the-project) keeps the
+  bytecode it cached for its own modules. Each cache file records the path its source
+  had when it was compiled, which lies below the checkout. With the project at
+  `/home/dev/my_project` and its environment in `.venv`, the sandbox shows the cache
+  file at a sandbox path, but its bytes still contain the host path of its source:
+
+  ```text
+  file:   /project/.venv/lib/python3.12/site-packages/__pycache__/example.cpython-312.pyc
+  bytes:  … /home/dev/my_project/.venv/lib/python3.12/site-packages/example.py …
+  ```
+
+  A test that scans the environment's files for absolute paths, or reads a cache file's
+  bytes itself instead of importing the module, sees `<checkout>/.venv/...`. A result
+  cached in one checkout could then be reused in another checkout, where the test would
+  have seen a different value. Everything the interpreter reports is clean: an imported
+  module's `__file__`, the `co_filename` of its code and tracebacks through it name
+  sandbox paths below `/project/.venv`. Only the bytes of the cache files carry the host
+  path. An environment outside the project is not affected.
 
 A test that reads either one can observe the checkout's location although its cache key
 does not contain it. Leave such a test ordinary, or add `cache=False` to its scope.
@@ -276,8 +298,12 @@ example `/project/.venv`, and starts `/project/.venv/bin/python`. `sys.prefix`,
 and scripts are rewritten like every other file that names the project directory, so a
 console script whose first line names the environment's interpreter starts it at its
 sandbox path. The environment is not part of the frozen copy, and the frozen copy on
-the host is never modified to make room for it. Its other files are shown as they are;
-see the [bytecode exception](#what-a-scoped-test-can-still-see).
+the host is never modified to make room for it.
+
+The environment's other files are shown as they are, and its cached bytecode is used as
+it is. The raw bytes of those cache files still name the checkout. This is one of the
+two [documented exceptions](#what-a-scoped-test-can-still-see) to location blindness;
+what the interpreter reports for the modules is not affected.
 
 `/project`, the environment, the rewritten files, system directories and the sandbox
 root are read-only. Writes there fail with a read-only file system error.
