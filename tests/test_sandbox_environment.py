@@ -1,5 +1,7 @@
 """The interpreter environment a scoped view binds and its cache identity; no sandbox."""
 
+import os
+import py_compile
 import subprocess
 import sys
 import sysconfig
@@ -185,6 +187,42 @@ def shown(view):
     return {Path(name).name: content for name, content, _ in view.overlays}
 
 
+def entries(directory):
+    """Every entry below a directory: a file's bytes and times, or its kind."""
+    found = {}
+    for path in sorted(directory.rglob("*")):
+        status = path.lstat()
+        content = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+        found[str(path.relative_to(directory))] = (
+            status.st_mode,
+            status.st_mtime_ns,
+            status.st_ino,
+            content,
+        )
+    return found
+
+
+@pytest.mark.parametrize("ambient", [None, "1"])
+def test_describing_an_environment_writes_nothing_into_it(tmp_path, monkeypatch, ambient):
+    # Whatever the calling job sets. A plain start of this interpreter caches the
+    # bytecode of the module its .pth file imports.
+    if ambient is None:
+        monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    else:
+        monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", ambient)
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    editable_finder(site_packages, project / "src" / "toypkg")
+    before = entries(site_packages)
+    assert not (site_packages / "__pycache__").exists()
+    view = sandbox.describe(project, interpreter)
+    # The site directory is byte for byte what it was: no cache directory, no changed
+    # file. The startup hook did run, since its module is found and shown rewritten.
+    assert entries(site_packages) == before
+    assert sorted(shown(view)) == ["__editable___toypkg_0_1_finder.py"]
+
+
 def test_environment_files_that_name_the_project_are_shown_rewritten(tmp_path):
     interpreter, site_packages = environment(tmp_path / "env")
     project = tmp_path / "project"
@@ -194,7 +232,23 @@ def test_environment_files_that_name_the_project_are_shown_rewritten(tmp_path):
     record = install(site_packages, "toypkg", "0.1")
     (record / "direct_url.json").write_text(f'{{"url": "{project.as_uri()}"}}')
     (site_packages / "toypkg.egg-link").write_text(f"{project}\n.")
-    before = {path: path.read_bytes() for path in site_packages.rglob("*") if path.is_file()}
+    # Bytecode already cached from the original finder, at two optimization levels, as
+    # earlier starts of the environment's interpreter leave it. It names the project.
+    finder = site_packages / "__editable___toypkg_0_1_finder.py"
+    stale = [
+        Path(py_compile.compile(str(finder), doraise=True, optimize=level)) for level in (0, 1)
+    ]
+    assert all(os.fsencode(project) in path.read_bytes() for path in stale)
+    # Caches of other modules, including one whose name merely starts the same way.
+    others = [
+        stale[0].with_name(
+            "__editable___toypkg_0_1_finder_extra." + stale[0].name.split(".", 1)[1]
+        ),
+        stale[0].with_name("unrelated." + stale[0].name.split(".", 1)[1]),
+    ]
+    for path in others:
+        path.write_bytes(b"another module's bytecode")
+    before = entries(site_packages)
     assert shown(sandbox.describe(project, interpreter)) == {
         "__editable___toypkg_0_1_finder.py": (
             b"MAPPING = {'toypkg': '/project/src/toypkg'}\n\n\ndef install():\n    pass\n"
@@ -202,15 +256,11 @@ def test_environment_files_that_name_the_project_are_shown_rewritten(tmp_path):
         "paths.pth": b"/project/src\n/project\n",
         "direct_url.json": b'{"url": "file:///project"}',
         "toypkg.egg-link": b"/project\n.",
-        # Bytecode the probe's own start cached from the original finder: shown empty.
-        "__editable___toypkg_0_1_finder." + sys.implementation.cache_tag + ".pyc": b"",
+        # The stale bytecode of the rewritten module is shown empty; nothing else is.
+        **{path.name: b"" for path in stale},
     }
     # The environment itself is never modified.
-    assert {
-        path: path.read_bytes()
-        for path in site_packages.rglob("*")
-        if path.is_file() and "__pycache__" not in path.parts
-    } == {path: content for path, content in before.items()}
+    assert entries(site_packages) == before
 
 
 def test_only_the_whole_project_directory_is_rewritten(tmp_path):

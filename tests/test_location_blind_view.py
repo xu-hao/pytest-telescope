@@ -15,6 +15,7 @@ import os
 import py_compile
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ from test_isolated_child_imports import (
     toy_project,
 )
 
-from pytest_telescope import controller
+from pytest_telescope import controller, sandbox
 
 WHERE_TESTS = """\
 from pathlib import Path
@@ -473,6 +474,58 @@ def test_stale_bytecode_of_a_rewritten_startup_module_is_never_loaded(tmp_path, 
     assert code == 0, [failure for unit in report["units"] for failure in unit["failures"]]
     assert report["route_counts"]["scoped"]["executed"] == 1, report
     assert host_files(site_packages) == before
+
+
+LATER_BYTECODE_SUBJECT = """\
+import os
+
+import __editable___toypkg_0_1_finder as finder
+
+# Runs at collection, inside the sandbox. The cache file is the host's, unmasked, and
+# was compiled from the original finder; the module still comes from the shown source.
+assert os.path.getsize(finder.__cached__) > 0
+assert finder.MAPPING == {"toypkg": "/project/src/toypkg"}, finder.MAPPING
+
+
+def test_subject():
+    pass
+"""
+
+
+def test_bytecode_cached_after_the_environment_was_described_is_not_loaded(tmp_path):
+    project = toy_project(tmp_path / "checkout")
+    interpreter, site_packages = environment(tmp_path / "env")
+    install_editable(site_packages, project, "finder")
+    box = replace(sandbox.describe(project, interpreter), bwrap=shutil.which("bwrap"))
+    # Describing the environment cached nothing, so there was no bytecode to mask.
+    assert not (site_packages / "__pycache__").exists()
+    assert not [name for name, _, _ in box.overlays if name.endswith(".pyc")]
+    # A later start of the environment's interpreter caches the original finder's bytecode.
+    cache_bytecode(interpreter)
+    [bytecode] = cached(site_packages, "__editable___toypkg_0_1_finder")
+    assert os.fsencode(project / "src" / "toypkg") in bytecode.read_bytes()
+    with sandbox.invocation(project) as directory:
+        view = directory / "project"
+        put(view, "test_subject.py", LATER_BYTECODE_SUBJECT)
+        (view / "test_subject.py").chmod(0o444)
+        view.chmod(0o755)
+        with sandbox.invocation(project) as worker_directory:
+            inventory = sandbox.execute(
+                box,
+                view,
+                ["-p", "no:cacheprovider", "test_subject.py"],
+                {},
+                60,
+                root=project,
+                invocation_directory=worker_directory,
+                request={
+                    "mode": "collection",
+                    "context_id": "d" * 64,
+                    "registry": [],
+                    "selectors": [],
+                },
+            )
+    assert inventory["exit_code"] == 0, inventory["failures"]
 
 
 def test_the_environment_identity_covers_the_rewritten_files(tmp_path):
