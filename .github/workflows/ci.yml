@@ -36,4 +36,5 @@ jobs:
       - name: Check installed distribution and strict Sphinx documentation
         env:
           TMPDIR: ${{ runner.temp }}
-        run: .venv/bin/python scripts/check.py --functional-profile '${{ matrix.functional_profile }}' --artifacts "$RUNNER_TEMP/telescope-check"
+        # Hosted Linux runners provide 4 vCPUs: one functional test worker for each.
+        run: .venv/bin/python scripts/check.py --functional-profile '${{ matrix.functional_profile }}' --functional-workers 4 --artifacts "$RUNNER_TEMP/telescope-check"

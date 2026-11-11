@@ -21,6 +21,28 @@ dependencies may need network access. No package is uploaded by this command. Ea
 has a five-minute deadline, except the behavioral suite, which has twenty minutes.
 A timeout fails the gate.
 
+## Functional test workers
+
+Most functional tests start real Bubblewrap sessions, interpreter probes or pytest
+subprocesses and wait for them, so one serial process leaves most of a multi-CPU job idle.
+`check.py --functional-workers N` runs the behavioral suite on `N` worker processes; the
+default is one, the serial run. A larger count is an explicit resource request: each worker
+starts its own sandboxes, so give the outer job at least `N` CPUs and memory for `N`
+concurrent sessions. The hosted workflows pass `--functional-workers 4` on their 4-vCPU
+runners. On a 4-CPU job the serial suite has taken 13 to 16 minutes, close to its deadline,
+and four workers have taken 4 to 5 minutes.
+
+With more than one worker, the gate first records the functional membership from one
+ordinary serial collection, with the same profile selection and refusals as a serial run,
+before any test body. [pytest-xdist](https://pytest-xdist.readthedocs.io/) then runs
+whole test files on the workers, each started isolated and without bytecode writes, like
+the gate process. Every worker repeats the profile selection on its own collection and
+must reproduce the recorded membership exactly. The gate refuses before scheduling any
+test when a worker reports a different collection, and a worker refuses before its first
+body when its collection changes after it was reported. A crashed worker is not
+replaced. A successful run also requires every worker's confirmation that it ran the
+recorded membership. The membership file is the same for every worker count.
+
 ## Full qualification and core compatibility
 
 `check.py --functional-profile all` is the default and the only full qualification,
@@ -46,13 +68,14 @@ Collection receipts, rather than a static function count, establish the exact pa
 
 Both `functional_gate.py` modes require the same explicit `--functional-profile`
 argument. The `tests` mode additionally requires `--membership` naming a new owned
-artifact file; `harness` mode does not accept that artifact argument. Before any test
-body, the actual pytest collection records a bounded, exclusively created schema 1
-membership object with exactly `schema`, `profile`, `pytest_version`, `selected` and
-`deselected`. The last two fields contain complete node-ID lists, not only counts.
-The `all` profile admits no deselections. The `core` profile admits exactly its marked
-positive cases as deselected; an ambient selector or other unexplained deselection
-refuses before execution rather than being credited to the profile.
+artifact file and accepts `--workers` with a positive count; `harness` mode accepts
+neither argument. Before any test body, the actual pytest collection records a bounded,
+exclusively created schema 1 membership object with exactly `schema`, `profile`,
+`pytest_version`, `selected` and `deselected`. The last two fields contain complete
+node-ID lists, not only counts. The `all` profile admits no deselections. The `core`
+profile admits exactly its marked positive cases as deselected; an ambient selector or
+other unexplained deselection refuses before execution rather than being credited to the
+profile.
 
 This boundary includes late collection callbacks and collection-hook wrapper teardown.
 All collection callbacks must return before final membership is verified and its receipt
@@ -332,9 +355,9 @@ in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples
 
 The CI matrix covers core compatibility on pytest 8 and complete functional
 qualification on the pinned supported pytest 9 adapter, with Python 3.11/3.13 Linux
-runners and Bubblewrap installed. Core compatibility is labelled separately and cannot
-be reused as the full release or guarded-landing verdict. Keep build and documentation
-tools in development dependencies.
+runners and Bubblewrap installed. Every hosted gate runs four functional workers. Core
+compatibility is labelled separately and cannot be reused as the full release or
+guarded-landing verdict. Keep build and documentation tools in development dependencies.
 Use the [benchmark](benchmark.md) to compare fresh execution with plain pytest and
 Bubblewrap on the same workload.
 

@@ -13,7 +13,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", required=True, type=Path)
     parser.add_argument("--functional-profile", choices=("core", "all"), default="all")
+    parser.add_argument(
+        "--functional-workers",
+        type=int,
+        default=1,
+        help="functional test worker processes; provide at least this many CPUs",
+    )
     args = parser.parse_args()
+    if args.functional_workers < 1:
+        parser.error("--functional-workers must be a positive count")
     if sys.prefix == sys.base_prefix:
         parser.error("activate a dedicated virtual environment before running checks")
     claimed = os.environ.get("TMPDIR")
@@ -103,6 +111,8 @@ def main() -> None:
                 *arguments,
                 "--membership",
                 str(output / "functional-membership.json"),
+                "--workers",
+                str(args.functional_workers),
                 timeout=1200,
                 env=env,
             )
