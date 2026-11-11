@@ -281,7 +281,9 @@ The existing unguarded dependency range and default routes do not change.
 
 Before inspection, body-free `fixture-capture-v1` binds a provisional base context and
 ordered members and records registry and context-independent fixture-content commitments.
-The final group and cache identity derives from that base and both commitments. Then
+The final group and cache identity derives from that base and both commitments. Both name
+fixture source files and conftest plugins inside the project relative to the project, so
+identical checkouts at different paths keep one guarded identity. Then
 `fixture-inspection-v1` binds the final group context and must reproduce the captured
 registry and content before reuse or dispatch. Execution uses `batch-guard-v1` and
 profile `batch-available-v1` and revalidates the graph again. These new guarded protocols

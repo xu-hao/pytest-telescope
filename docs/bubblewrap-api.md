@@ -563,9 +563,11 @@ Each `links` entry has exactly:
 `path` is a canonical project-relative symlink with no symlink ancestor; `target` is its
 exact existing text. Bounded source resolution must reach `root`/`subpath`, whose root
 requires `preserve_source=true`. Selecting the tool automatically includes this actual
-project link at both project aliases. Inputs at or below it are allowed only with that
-selected binding. Relative text that resolves differently at `/project` and the mirrored
-project path refuses; a link is never changed into a directory to make it work.
+project link at the project's host path, the only path that shows the project. Inputs at
+or below it are allowed only with that selected binding. Relative link text resolves from
+the link's location below the project's host path; text that does not reach the declared
+`root`/`subpath` from there refuses, and a link is never changed into a directory to make
+it work.
 These links grant the selected frozen data view, including for a link named with a
 `.py` suffix. They do not authenticate external targets as project helper source.
 
@@ -661,10 +663,10 @@ administrator's AppArmor policy grants it user namespaces. pytest-telescope neve
 that policy. Check a host with `pytest-telescope run` on one scoped test: a
 `sandbox:namespaces` refusal reports Bubblewrap's own error. The interpreter environment
 must not contain the project directory, and the project must not live inside `/usr` or
-`/etc`. Because the sandbox also shows the project at its own host path, the project
+`/etc`. Because the sandbox shows the project at its own host path, the project
 directory must not be `/`, `/tmp` or `/dev/shm`, and must not lie inside `/metadata`,
-`/telescope`, `/proc`, `/dev` (other than `/dev/shm`) or a subdirectory of `/project`.
-The project may be `/project` itself.
+`/telescope`, `/proc` or `/dev` (other than `/dev/shm`). `/project` and its
+subdirectories are ordinary locations.
 
 ## Capability codes
 
@@ -676,7 +678,7 @@ The project may be `/project` itself.
 | `tool:identity` | A declared lock, runtime or content pin does not match. |
 | `sandbox:bubblewrap` | No `bwrap` executable on `PATH`. |
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
-| `sandbox:environment` | The interpreter could not start in the view, the environment layout overlaps the project or the sandbox's own mount points, or the project directory cannot also be shown at its host path. |
+| `sandbox:environment` | The interpreter could not start in the view, the environment layout overlaps the project or the sandbox's own mount points, or the project directory cannot be shown at its host path. |
 | `network:none`, `scratch:noexec` | A suite requested an isolation the sandbox does not provide. |
 | `pytest:distributed-scheduling` | Nested or external distributed scheduling was requested; telescope owns scoped workers. |
 | `pytest:configuration` | Unsupported pytest configuration format. |
@@ -703,8 +705,11 @@ all fields and accounting rules.
 
 - `execution` reports the execution mode, profile and configured `workers`.
 - `sandbox` reports `{"backend": "bubblewrap",
-  "policy": "bubblewrap-view-v2", "required": bool, "identity": digest-or-null}`.
+  "policy": "bubblewrap-view-v3", "required": bool, "identity": digest-or-null}`.
   `identity` is null until the interpreter probe and Bubblewrap preflight succeed.
+  Policy `bubblewrap-view-v3` shows the frozen project view only at the project's host
+  path; it replaces `bubblewrap-view-v2`, which also showed it at `/project`, and results
+  recorded under the earlier policy are never reused.
 - Every unit and group has `route`, `"ordinary"` or `"scoped"`. `route_counts` gives the
   same seven count keys as `counts` for each route.
 - Groups list `files`; an ordinary group is one suite session

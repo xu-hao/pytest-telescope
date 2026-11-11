@@ -69,9 +69,9 @@ versioned identity, file mode `0444`, directory mode `0755`, and epoch
 access/modification times. The sandbox mount is read-only. This representation
 participates in the exact case key and is mounted at `/metadata` only for that sandbox.
 The worker adds this metadata-only directory to Python's search path before pytest
-startup. Application imports resolve to separately declared source through `/project`
-and explicit pytest configuration. In a scope without a native tool selection, an
-editable install of the project can also reach the snapshot at its host path. Native
+startup. Application imports resolve to separately declared source at the project's host
+path through explicit pytest configuration. In a scope without a native tool selection,
+an editable install of the project reaches the same snapshot at the same path. Native
 startup closes interpreter prefixes and forbids selected startup hooks, as described
 [below](#frozen-installed-python-tools-development-contract). Child interpreters do not
 see `/metadata` or the parent's pytest import path unless their invocation explicitly
@@ -314,7 +314,7 @@ unrelated case results. See the
 ## Explicit capability refusals
 
 The sandbox provides the [filesystem view](bubblewrap.md): read-only declared project
-files (at `/project` and at the project's host path) and metadata, the read-only host
+files (at the project's host path only) and metadata, the read-only host
 interpreter, environment and system directories, private writable scratch, and the host
 network. It does not install tools, build runtimes, limit resources or isolate the
 network.
