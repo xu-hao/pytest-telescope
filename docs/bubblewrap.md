@@ -104,10 +104,11 @@ session as it does in an ordinary one.
 
 This is a design rule of the sandbox. Every change to the sandbox must keep it.
 
-- Every file is mounted at exactly one path. A symlink that exists on the host is shown
-  as the same symlink, resolving to that one path; it is never turned into a second
-  mount. A link inside the project whose text would lead elsewhere from `/project`,
-  such as `.venv -> ../shared-venv`, shows its target's path instead.
+- Every file is mounted at exactly one path. Any other name for it is a symlink that
+  resolves to that path: either a symlink the host already has, or one the sandbox
+  adds, such as `/tools/NAME/ROOT` for a tool that keeps its original path. No file is
+  mounted twice. A host link inside the project whose text would lead elsewhere from
+  `/project`, such as `.venv -> ../shared-venv`, shows its target's path instead.
 - The project, and everything inside the project directory, appears only below
   `/project`. Nothing is mounted at the project's host path.
 - No file is reachable at two paths.
@@ -117,8 +118,8 @@ This is a design rule of the sandbox. Every change to the sandbox must keep it.
   its host location is refused.
 
 No mount is exempt from this rule. The system directories, `/proc`, `/dev`, the scratch
-directories, `/project` and each environment directory are each mounted from their own
-source, and none of them twice.
+directories, `/project`, each environment directory and each frozen tool are each
+mounted from their own source, and none of them twice.
 
 ### A scoped test cannot tell where its checkout lives
 
@@ -349,8 +350,8 @@ source files, installs a runtime or infers arbitrary program dependencies.
 
 | Selected view | Contents |
 | --- | --- |
-| `/tools/NAME/ROOT` | Only the selected root's pinned files, directories and unchanged safe links. |
-| Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. |
+| `/tools/NAME/ROOT` | Only the selected root's pinned files, directories and unchanged safe links. For a root that keeps its original path, a symlink to that path (a complete tree), or a directory whose files are symlinks to their original paths (a files-mode root). |
+| Verified original-path aliases | The same frozen entries where a declared project link, executable loader or installed Python import requires them. This is where a root that keeps its original path is mounted, once; `os.path.realpath` of its `/tools` path is the original path. |
 | `/tools/.commands/SCOPE_DIGEST` | Readonly command-name symlinks to exact pinned executables; first in the controlled PATH. |
 | Declared native library-search directories | Closed readonly trees synthesized from the selected runtime entries; all other host siblings are absent. |
 | Native profile's closed `/etc` | Only selected frozen configuration entries, the loader cache when required or declared, and the fixed empty regular `0444` preload file; undeclared host entries are absent. |

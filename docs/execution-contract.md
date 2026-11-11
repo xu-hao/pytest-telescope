@@ -56,7 +56,8 @@ undeclared project files for it.
 Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
 state (`.pytest-telescope` and an explicitly selected in-project cache directory),
 pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environments
-(`.venv`, `venv`, or a directory with a validated `pyvenv.cfg`). Directory symlinks
+(`.venv`, `venv`, a directory with a validated `pyvenv.cfg`, a conda-style
+directory with a `conda-meta` directory, or a link to either). Directory symlinks
 require an exact selected frozen-tool binding; all other directory symlinks, special
 files and unsupported paths are rejected.
 

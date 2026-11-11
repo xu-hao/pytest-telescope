@@ -157,6 +157,10 @@ itself and all required entries. Root IDs are unique within the tool.
 - `preserve_source` is a boolean. Every root appears at `/tools/TOOL/ROOT`; `true` also
   preserves its verified original paths. Files-mode aliases expose only pinned entries,
   using individual file mounts or the closed directory projections described below.
+  With `true` the root is mounted once, at its original path, and `/tools/TOOL/ROOT` is
+  a symlink to it; for a files-mode root it is a directory of the pinned entries whose
+  files are symlinks to their original paths. Each file then has one real path, the
+  original one.
 
 Whole filesystem, home, environment prefix, site-packages, live checkout, repository
 metadata, credential and control trees are unsupported sources. A narrow installed

@@ -152,7 +152,11 @@ read-only copy of its declared project files that a scoped test sees in its sand
 - A scoped session mounts every file at exactly one path, and a layout that would need a
   second path is refused rather than given another mount. An environment reached
   through a host symbolic link is mounted once, at its real path, and the link is shown
-  as a link. Version 0.1.0a7 also mounted it at the link's path. See
+  as a link. Version 0.1.0a7 also mounted it at the link's path. A frozen tool that
+  keeps its original path (`preserve_source`) is mounted once, there, and
+  `/tools/NAME/ROOT` is a symlink to it; 0.1.0a7 mounted it at both paths. A conda
+  environment, or a link to any environment, declared as an input refuses as a host
+  environment. See
   [one path for every file](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#one-path-for-every-file).
 - pytest-telescope identifies an environment by starting its interpreter once on the
   host. That start is isolated and never writes bytecode, so identifying an environment
