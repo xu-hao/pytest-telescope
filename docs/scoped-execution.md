@@ -1,13 +1,9 @@
 # Metadata, independent suites, and parallel workers
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
-
 Use these settings when tests need local package metadata, when parts of your project
 have separate pytest configurations, or when you want to run scoped tests in parallel.
 The [declaration reference](execution-contract.md) explains how inputs are combined;
-the [execution contract](bubblewrap.md) describes the sandbox.
+[ordinary and Bubblewrap execution](bubblewrap.md) describes the sandbox.
 
 ## Static project metadata
 
@@ -74,7 +70,7 @@ and explicit pytest configuration. In a scope without a native tool selection, a
 editable install of the project reaches the same snapshot at `/project`, because the
 sandbox shows the install's files rewritten to that path. Native
 startup closes interpreter prefixes and forbids selected startup hooks, as described
-[below](#frozen-installed-python-tools-development-contract). Child interpreters do not
+[below](#frozen-installed-python-tools). Child interpreters do not
 see `/metadata` or the parent's pytest import path unless their invocation explicitly
 establishes those search paths. Generating metadata does not install a package or plugin.
 
@@ -85,7 +81,7 @@ metadata source, build input, entry point, generated representation, or relevant
 application source invalidates its consumers. Unrelated narrow resources do not.
 Missing/deleted required sources fail validation.
 
-## Frozen installed Python tools (development contract)
+## Frozen installed Python tools
 
 `distributions` above generates metadata from project inputs. A selected frozen tool's
 `python` records instead bind an **already-installed** distribution: actual package
@@ -306,12 +302,6 @@ infrastructure outcomes, and waits for cleanup before accepting results. Infrast
 remains at most two attempts per scoped case or batch; a retry occupies the same worker
 slot.
 
-Under the deferred frozen Git design, its declaration would supply a supported committed
-tree and history only to its consumers. That design is not implemented by this candidate.
-Its collection union would not grant that union to narrow execution or globally key
-unrelated case results. See the
-[deferred Git view](bubblewrap.md#frozen-git-checkout-development-contract).
-
 ## Explicit capability refusals
 
 The sandbox provides the [filesystem view](bubblewrap.md): read-only declared project
@@ -333,7 +323,7 @@ key does not contain:
 Leave a test that reads either one ordinary, or add `cache=False` to its scope.
 See [what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
-Explicit [frozen tools](bubblewrap.md#frozen-tools-and-runtime-files-development-contract)
+Explicit [frozen tools](bubblewrap.md#frozen-tools-and-runtime-files)
 add their declared immutable roots and aliases. Native selections close `/etc` to
 declared frozen configuration and loader controls and may narrow native search
 directories. The exact closure is per consumer; unselected external tool material is
@@ -382,11 +372,11 @@ metadata without source, negative lookup of other distributions, independent roo
 conftest behavior, structurally excluded modules and isolated child interpreters
 importing declared source through an editable install inside real Bubblewrap sandboxes,
 plus routing, selectors, workers, retries and cleanup. See [development](development.md) for
-the full gate and its current status.
+the full gate.
 
-## Required fixture guard boundary (unreleased)
+## Fixture guard boundary
 
-The planned [fixture guard](batching.md#required-fixture-guard-unreleased) applies only
+The opt-in [fixture guard](batching.md#fixture-guard) applies only
 to selected scoped cases within the invocation's effective suites and structural files.
 It refuses ordinary or mixed boundaries, preserves exact group inputs and does not claim
 conservation for excluded or unselected cases. Existing default routes remain unchanged.

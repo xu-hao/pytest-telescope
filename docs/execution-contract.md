@@ -1,12 +1,16 @@
 # Declarations, inventory and reuse
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
+This page is the canonical contract for how pytest-telescope reads declarations,
+discovers cases and decides whether to reuse their results. Read it when you need the
+exact rules; the [quickstart](index.md) covers everyday use, and
+[ordinary and Bubblewrap execution](bubblewrap.md) describes which tests run in a
+sandbox and which files they can see.
 
-This page explains how pytest-telescope reads declarations, discovers cases and decides
-whether to reuse their results. The [execution contract](bubblewrap.md) describes which
-tests run in a sandbox and which files they can see.
+A *declaration* is a literal `pytest.mark.telescope(...)` marker or a project setting
+that names a test's inputs. A *case* is one collected pytest test, including each
+variant of a parametrized test. A *bundle* is a named, reusable set of declarations in
+`pyproject.toml`. An *inventory* is the complete list of cases that pytest collects from
+the configured test files.
 
 ## User interface and scope
 
@@ -90,7 +94,7 @@ They cannot widen a scope or change a route. Source-call authentication and case
 ownership are separate checks; authenticating an unchanged call alone does not prove
 that its declaration belongs to a particular collected case.
 
-The development contract requires the complete observed declaration set to agree with
+pytest-telescope requires the complete observed declaration set to agree with
 the case's legitimate owners before constructing its route or effective grants.
 Module and class scopes and function decorators follow the actual module, applicable
 class method resolution order and defining callable in the containing test source.
@@ -126,8 +130,6 @@ earlier ordinary case executed.
 
 For a scoped view, this source guard also authenticates literal calls in explicitly
 readable frozen Python helpers, including package initializers and nested imports.
-This helper declaration support is unreleased development; published 0.1.0a6 does not
-provide it.
 Declare every required helper, initializer and import-time resource in the consumer's
 scope; the controller does not resolve imports or search undeclared source. A helper
 outside structural test membership can be imported without collecting its tests.
@@ -203,32 +205,12 @@ explicit `file::node` selector must match a genuinely collected alias: coverage 
 alone does not satisfy it. This applies to ordinary and scoped collection and to reused
 scoped inventory.
 
-### Frozen Git identity (development contract)
-
-This is a deferred design, not an implemented property of the current candidate.
-Under that future contract, `git="frozen-checkout-v1"` would add the verified frozen Git
-context and its executable/runtime identity to only consuming case and group keys.
-It adds the supported tracked tree to that scope; other cases retain their existing
-inputs. Collection uses the union needed by its potential consumers, but execution
-uses each case's own scope. A collection refresh caused by Git cannot by itself
-invalidate a nonconsumer's result. Equal-scope batching includes Git context in equality;
-Git and non-Git scopes cannot share a group. `cache=False` continues to disable reuse.
-
-Freeze once per invocation and validate the relevant source and frozen snapshot before
-accepting a hit, before execution and before publication. Changed HEAD, local refs, reachable history, tracked source,
-link text or target content, executable or its relevant runtime changes the consuming
-identity. Bounded capture, integrity and cleanup failures refuse or end in infrastructure
-failure after bounded retries; they never create reusable success or trigger ordinary
-fallback. Pending records become eligible only after owned cleanup succeeds; a terminal
-cleanup failure suppresses all new pending records while preserving prior valid records.
-See the [view and state limits](bubblewrap.md#frozen-git-checkout-development-contract).
-
 ## Frozen tool capture and reuse
 
 Literal `tools` names compose through the same inheritance, default and bundle rules as
 other scope inputs. Registration/defaults alone do not change an ordinary route. Only
 tools needed by structurally possible consumers have their manifests and external
-closure prepared. The [versioned manifest](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+closure prepared. The [versioned manifest](bubblewrap-api.md#frozen-tool-manifest)
 lists exact supported bytes, types, source modes, link text and runtime relations.
 
 Scoped discovery may receive the union of potential tools for its files, including a
@@ -604,10 +586,9 @@ after the bound, makes the result ineligible; the remaining processes end with t
 sandbox. The engine never waits for ongoing child work to turn an incomplete run into a
 reusable success.
 
-## Required fixture conservation (unreleased)
+## Fixture guard
 
-The optional [fixture guard](batching.md#required-fixture-guard-unreleased) is implemented
-in the unreleased candidate; published 0.1.0a6 does not provide it. It validates all available user
+The optional [fixture guard](batching.md#fixture-guard) validates all available user
 fixture definitions and actual package-collector xunit lifetimes in each exact group view
 before selected bodies and conservatively refuses shared lifetimes split across groups
 without broadening declared inputs. Mutable

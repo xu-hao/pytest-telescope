@@ -1,16 +1,16 @@
 # Optional identical-scope batches
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
+This page is for projects whose scoped tests are slow to start or share expensive
+fixtures. It explains batch mode and its rules.
 
-Batch mode lets scoped tests share a pytest session and its fixtures. It can reduce
-startup and fixture setup time when tests in the same module need exactly the same
-files. Ordinary cases already share one session per suite; batching applies only to
-scoped cases.
+A *batch* is a group of scoped cases that run one after another in one sandbox and one
+pytest session, so they share that session's fixtures. Batch mode can reduce startup
+and fixture setup time when tests in the same module need exactly the same files.
+Ordinary cases already share one session per suite; batching applies only to scoped
+cases.
 
-The [execution contract](bubblewrap.md) describes routing and the sandbox view. The
-[metadata and suite reference](scoped-execution.md) covers their configuration.
+[Ordinary and Bubblewrap execution](bubblewrap.md) describes routing and the sandbox
+view. The [metadata and suite reference](scoped-execution.md) covers their configuration.
 
 ## Choose fixture lifetime explicitly
 
@@ -36,10 +36,9 @@ the host's CPUs. Batching does not change which source or metadata a test can re
 ## Exact scope and deterministic membership
 
 Cases share a batch only when they belong to the same suite and source module and have
-exactly equal readable files, declared absence, generated metadata, effective environment
-names and captured presence/value context, and cache policy.
-Under the deferred frozen Git design, its declaration and context would participate in equality;
-Git consumers and nonconsumers remain in separate groups.
+exactly equal readable files, declared absence (paths declared `absent`), generated
+metadata, effective environment names and captured presence/value context, and cache
+policy.
 Frozen tools likewise require exactly equal selected names and complete closure identity:
 manifest/lock records, bytes/modes/links, original and logical aliases, command mappings,
 Python/executable runtime relations and closed native configuration and loader views.
@@ -196,9 +195,13 @@ selection/membership/order changes, partial or corrupt records, noncacheable gro
 bounded retries and cleanup. Measure startup overhead and fixture setup time in your own
 suite when deciding whether to use batching.
 
-## Required fixture guard (unreleased)
+## Fixture guard
 
-The following is a required development contract, not a released or qualified feature.
+In batch mode, a fixture with class, module, package or session scope is shared only
+inside one batch. If cases that would share such a fixture in plain pytest end up in
+different batches, each batch gets its own instance. The fixture guard detects that
+possibility and refuses the run instead of splitting the fixture.
+
 The opt-in `available-v1` guard applies to batch mode and all selected scoped cases in
 one invocation. It refuses a structurally ordinary or mixed-route boundary before an
 ordinary body, even when a later selector might have excluded that file. Without the
@@ -228,17 +231,16 @@ ownership or changed evidence is a conservative refusal. This preserves the coll
 lifetime within the selected boundary, not a promise of global ordinary-session
 equivalence or of detecting arbitrary Python mutations.
 
-The fixture rule includes
-fixtures available through autouse, inheritance, imports, overrides and dynamic
-`request.getfixturevalue`, even when a fixture is absent from the static dependency
-closure. Uncertain owners or bindings and possible cross-file, package or suite sharing
-refuse conservatively. Class lifetimes can be treated conservatively across the containing
-module when another selected group's class owner cannot be established. The current
-development adapter also refuses when a class-scoped user fixture is available to a
+The fixture rule includes fixtures available through autouse, inheritance, imports,
+overrides and dynamic `request.getfixturevalue`, even when a fixture is absent from the
+static dependency closure. Uncertain owners or bindings and possible cross-file, package
+or suite sharing refuse conservatively. Class lifetimes can be treated conservatively
+across the containing module when another selected group's class owner cannot be
+established. The adapter also refuses when a class-scoped user fixture is available to a
 module-level function, including a single case, even though pytest can give that fixture
-function lifetime. The present development adapter refuses package-scoped user fixture ownership rather than guessing
-the package owner. Extra refusals are permitted. Function-scoped fixtures do not
-create a shared instance across cases.
+function lifetime. The adapter refuses package-scoped user fixture ownership rather than
+guessing the package owner. Extra refusals are permitted. Function-scoped fixtures do
+not create a shared instance across cases.
 
 The discovery union is only an inventory view. Before bodies, collect each candidate
 again in its own exact frozen execution view, with its effective environment and
@@ -271,13 +273,13 @@ to its own group. It is not shared across groups, and the guard does not promise
 ordinary-session equivalence. User fixtures remain subject to the conservative rule
 above. Unknown or replaced framework objects refuse rather than receiving an exemption.
 
-The required private adapters target exact pytest 9.1.1 and 9.2.0 layouts, subject to
-qualification; a different version or unverified layout refuses the guard. Pytest
-9.1.1 requires its fixture-definition registry; 9.2.0 requires the union of its node and
-legacy-nodeid registries, and actual per-item pytest lookup order. No name-only lookup or
-fallback to one registry is sufficient. Controlled metadata observations for these
-versions do not qualify the guard, real Bubblewrap execution or arbitrary plugin state.
-The existing unguarded dependency range and default routes do not change.
+The private adapters target exact pytest 9.1.1 and 9.2.0 layouts; a different version or
+unverified layout refuses the guard. Pytest 9.1.1 requires its fixture-definition
+registry; 9.2.0 requires the union of its node and legacy-nodeid registries, and actual
+per-item pytest lookup order. No name-only lookup or fallback to one registry is
+sufficient. Controlled metadata observations for these versions do not qualify the
+guard, real Bubblewrap execution or arbitrary plugin state. The existing unguarded
+dependency range and default routes do not change.
 
 Before inspection, body-free `fixture-capture-v1` binds a provisional base context and
 ordered members and records registry and context-independent fixture-content commitments.
@@ -337,6 +339,6 @@ The guard bounds selected group membership to 4,096, fixture definitions per gro
 paths or identifiers to 4,096 bytes. Existing collection and
 64 MiB group response bounds also apply. Limit violations refuse; missing or invalid
 worker records are bounded infrastructure failures rather than successful defaults.
-The [API](bubblewrap-api.md#required-fixture-guard-api-unreleased) and
-[result reference](result-schema.md#required-guard-result-schema-5-unreleased) specify
+The [API](bubblewrap-api.md#fixture-guard-api) and
+[result reference](result-schema.md#guarded-result-schema-5) specify
 the opt-in and evidence.

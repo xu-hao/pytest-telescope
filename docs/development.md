@@ -1,5 +1,14 @@
 # Local development
 
+This page is for contributors to pytest-telescope. It covers the development
+environment, the full check that every change must pass, and how tests are classified.
+You do not need it to use pytest-telescope in your own project.
+
+The *functional gate* is the behavioral test stage of the full check below. Checks that
+depend on a particular host installation, such as a real browser, Node runtime or
+installed package, are *compatibility benchmarks* instead: they run only when selected
+explicitly and are described in the [benchmark guide](benchmark.md).
+
 Use a dedicated Python 3.11+ virtual environment. From the repository root:
 
 ```sh
@@ -119,7 +128,7 @@ of assigning a different location.
 
 ## Installed candidate and functional prerequisites
 
-This is the gate contract for the unreleased candidate. The default gate requires the
+The default gate requires the
 ordinary Python/pytest/Bubblewrap runner and build/documentation dependencies. It does
 not accept `--node`, select a program installation, prepare the `node` or `installed`
 profiles, or dispatch compatibility benchmarks. Those actual program-qualification
@@ -239,7 +248,7 @@ belongs to a separately selected
 Naming, copying or pinning that installation does not establish portability. Such
 qualification is not a functional prerequisite. Actual browser execution is always a
 separately invoked [benchmark](benchmark.md#browser-execution-benchmarks), including an
-owned page with explicit runtime inputs. It is not a functional readiness requirement.
+owned page with explicit runtime inputs. It is not required by the functional gate.
 Pinning whatever a developer happens to have installed does not make that installation
 a portable fixture.
 Host-dependent runtime compatibility checks run separately under
@@ -294,6 +303,14 @@ receipts when reclassifying work; do not relabel them as benchmark passes. A ben
 campaign requires its own explicit selection and is not started by the default gate.
 
 ## Controlled program qualification
+
+Program qualification uses explicit runtime prerequisites for separately selected Node
+and installed-plugin benchmarks. The
+[installed gate](#installed-candidate-and-functional-prerequisites) verifies the exact
+candidate wheel without preparing those program profiles. Full-browser execution is a
+separately invoked benchmark. Keeping actual browser execution in separately invoked
+[benchmarks](benchmark.md#browser-execution-benchmarks), outside the functional gate,
+does not change the filesystem contract or permit broader access.
 
 The explicitly selected Node and installed-plugin benchmarks use the actual invoking worker runtime
 alongside explicitly selected program files. Preparation records every selected
@@ -384,13 +401,10 @@ guarded-landing verdict. Keep build and documentation tools in development depen
 Use the [benchmark](benchmark.md) to compare fresh execution with plain pytest and
 Bubblewrap on the same workload.
 
-## Qualification status
-
-Version 0.1.0a6 passed the complete gate with 412 behavioral tests and nine benchmark
-harness checks on a host that permits Bubblewrap namespaces. The hosted Python 3.11/3.13
-and pytest 8/9 matrix passed on both the pull request and merged source. The published
-wheel and sdist matched the reviewed artifacts, a clean wheel installation passed seven
-focused CLI controls, and the matching Read the Docs build succeeded. See the
-[release](https://github.com/xu-hao/pytest-telescope/releases/tag/v0.1.0a6).
-
 Run the gate again for each candidate change.
+
+## Unimplemented designs
+
+The [frozen Git checkout design](design-frozen-git.md) records the rules for a feature
+that pytest-telescope does not implement. Keep it consistent with the rest of the
+documentation, and present it to users only as unsupported.
