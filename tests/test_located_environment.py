@@ -175,3 +175,30 @@ def test_unreadable_install_records_refuse(tmp_path):
         sandbox.describe(project, interpreter)
     assert refused.value.capability == "sandbox:environment"
     assert Path(".env/conda-meta/broken-1.0-0.json").name in str(refused.value)
+
+
+def test_a_link_inside_the_project_to_a_located_environment_outside_it_refuses(tmp_path):
+    # The environment already lives outside the project; the link inside it is what
+    # starts the interpreter below /project, so the remedy names the link.
+    project = toy_project(tmp_path / "checkout")
+    prefix = tmp_path / "shared-env"
+    interpreter, _ = environment(prefix)
+    located_files(prefix)
+    record(prefix, "located", [("lib/libtoy.so", "binary")])
+    (project / ".env").symlink_to("../shared-env")
+    put(project, "tests/test_scoped.py", SCOPED_TEST)
+    cache = tmp_path / "results"
+    code, report = refusal(project / ".env" / "bin" / "python", project, cache)
+    assert code == 4, report
+    assert report["capability"] == "sandbox:environment", report
+    message = report["error"]
+    assert message.startswith("the environment .env is a link inside the project "), message
+    assert "start its interpreter by its real path outside the project" in message, message
+    assert "remove the link" in message, message
+    assert "place the environment outside the project directory" not in message, message
+    assert str(project) not in message and str(tmp_path) not in message, message
+    assert recorded(cache) == []
+    # Started by its real path, the same environment is outside the project and runs.
+    code, report = run(interpreter, project)
+    assert code == 0, report
+    assert report["route_counts"]["scoped"]["executed"] == 1, report

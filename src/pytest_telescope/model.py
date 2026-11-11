@@ -362,9 +362,14 @@ def excluded_namespace(root, name, excluded=()):
     if excluded_path(name, excluded):
         return True
     parts = Path(name).parts
+    linked = False
     for depth in range(1, len(parts) + 1):
         directory = Path(*parts[:depth])
         config = directory / "pyvenv.cfg"
+        linked = linked or (root / directory).is_symlink()
+        if linked and os.path.isfile(root / config):
+            # An environment reached through a link: never read through the link.
+            return True
         if os.path.lexists(root / config):
             regular_bytes(root, config.as_posix(), 65536)
             return True

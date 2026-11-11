@@ -101,7 +101,8 @@ def test_the_environment_resolves_to_its_one_mount():
     assert os.path.realpath(sys.prefix) == REAL
     mounted = [row[4] for row in mount_rows()]
     assert REAL in mounted
-    assert GIVEN == REAL or (os.path.islink(GIVEN) or GIVEN not in mounted)
+    if GIVEN != REAL:
+        assert GIVEN not in mounted
     assert os.path.isfile(os.path.join(sys.prefix, "pyvenv.cfg"))
 """
 

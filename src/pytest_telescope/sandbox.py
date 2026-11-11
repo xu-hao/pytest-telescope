@@ -780,20 +780,28 @@ def _check_location(description, project):
     rewritten = {row[0] for row in description["rewrites"]}
     scanned = set()
     for name in sorted(description["prefixes"]):
-        for prefix in dict.fromkeys(Path(convert(name)) for convert in NORMALIZERS):
-            meta = prefix / "conda-meta"
-            if not _inside(prefix, project) or not meta.is_dir():
-                continue
-            if os.path.realpath(meta) in scanned:
-                continue
-            scanned.add(os.path.realpath(meta))
-            reason = _location_reason(prefix, meta, rewritten)
-            if reason is not None:
-                _refuse(
-                    f"the environment {prefix.relative_to(project).as_posix()[:200]} inside "
-                    f"the project {reason}; place the environment outside the project "
-                    "directory"
-                )
+        given, real = (Path(convert(name)) for convert in NORMALIZERS)
+        shown = given if _inside(given, project) else real
+        meta = real / "conda-meta"
+        if not _inside(shown, project) or not meta.is_dir() or str(meta) in scanned:
+            continue
+        scanned.add(str(meta))
+        reason = _location_reason(real, meta, rewritten)
+        if reason is None:
+            continue
+        where = shown.relative_to(project).as_posix()[:200]
+        if not _inside(real, project):
+            # The environment already lives outside the project; a link inside the
+            # project is what starts its interpreter below /project.
+            _refuse(
+                f"the environment {where} is a link inside the project to an environment "
+                f"that {reason}; start its interpreter by its real path outside the "
+                "project, or remove the link"
+            )
+        _refuse(
+            f"the environment {where} inside the project {reason}; place the environment "
+            "outside the project directory"
+        )
 
 
 def _project_paths(description, project):

@@ -99,3 +99,29 @@ def test_suite_directories_reject_symlink_ancestors(tmp_path, field):
     )
     with pytest.raises(DeclarationError):
         load(tmp_path)
+
+
+@pytest.mark.parametrize("declared", ["myenv", "myenv/pyvenv.cfg"])
+@pytest.mark.parametrize("form", ["directory", "link"])
+def test_a_declared_environment_is_named_as_not_a_project_input(
+    tmp_path, monkeypatch, capsys, declared, form
+):
+    project = tmp_path / "checkout"
+    project.mkdir()
+    environment = tmp_path / "shared-venv" if form == "link" else project / "myenv"
+    environment.mkdir()
+    (environment / "pyvenv.cfg").write_text("home = /synthetic/interpreter\n")
+    if form == "link":
+        (project / "myenv").symlink_to("../shared-venv")
+    (project / "test_public.py").write_text(
+        f"import pytest\npytestmark = pytest.mark.telescope(inputs=[{declared!r}])\n"
+        "def test_public(): pass\n"
+    )
+    (project / "pyproject.toml").write_text(
+        '[tool.pytest_telescope]\ntest_roots=["test_public.py"]\n'
+    )
+    monkeypatch.chdir(project)
+    assert controller.main(["run"]) == 4
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "declaration_error", output
+    assert output["error"] == "metadata, cache and host environments are not project inputs"
