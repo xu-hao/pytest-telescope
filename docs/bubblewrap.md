@@ -20,8 +20,8 @@ baseline. See the
 This section preserves a deferred design contract. The current four-component candidate
 and published 0.1.0a6 do not implement the selector or frozen-checkout/history capture.
 Under the future contract, `git="frozen-checkout-v1"` would scope a case and grant an
-owned, integrity-verified read-only Git checkout at the project's host path, where scoped
-sessions see the project. The supported committed source tree, normalized index, HEAD and
+owned, integrity-verified read-only Git checkout at `/project`, where scoped sessions
+see the project. The supported committed source tree, normalized index, HEAD and
 reachable local branch and tag history are visible. Untracked files require separate
 input declarations. The default without this declaration retains the existing no-Git
 view. Actual Git commands such as `rev-parse`, `log`, `show`, `ls-tree`, `diff` and
@@ -143,8 +143,10 @@ invocation. Inside, the filesystem looks like this:
 
 | Path in the sandbox | Contents | Access |
 | --- | --- | --- |
-| The project directory's host path | Frozen copy of the effective declared project files for this case or batch | read-only |
-| Host interpreter and environment paths | `sys.prefix`, base and exec prefixes, and every import directory on the interpreter's isolated `sys.path`, at their host paths | read-only |
+| `/project` | Frozen copy of the effective declared project files for this case or batch | read-only |
+| The project directory's host path | Absent: nothing is mounted there | none |
+| Host interpreter and environment paths | `sys.prefix`, base and exec prefixes, and every import directory on the interpreter's isolated `sys.path` outside the project, at their host paths | read-only |
+| Environment files that name the project directory | Rewritten copies in which that directory reads `/project`, over the originals | read-only |
 | `/usr`, `/etc`, `/bin`, `/sbin`, `/lib*` | Host system directories (symbolic links stay links) | read-only |
 | `/proc` | A new process filesystem for the sandbox's PID namespace | kernel-controlled |
 | `/dev` | Minimal device nodes | read-only, except `/dev/shm` |
@@ -160,21 +162,63 @@ An undeclared project file does not exist in the sandbox.
 `open`, `stat`, `os.path.exists`, native code and subprocesses all see it as absent.
 Trying to open it gives a missing-file error.
 
-The frozen copy appears at the project's own host path and nowhere else. If the project
-lives at `/home/dev/my_project`, then `/home/dev/my_project/src/my_package/__init__.py`
-inside the sandbox is the declared, read-only frozen file, and an undeclared
-`/home/dev/my_project/notes.txt` does not exist. The live checkout is never mounted.
-Nothing is mounted at `/project` unless the project itself lives there.
+The frozen copy appears at `/project` and nowhere else. If the project lives at
+`/home/dev/my_project`, then `/project/src/my_package/__init__.py` inside the sandbox is
+the declared, read-only frozen file, and `/home/dev/my_project` does not exist there at
+all, declared files included. The live checkout is never mounted.
 
-Each scoped session runs at that path, as an ordinary session does. The working
-directory is the suite's `cwd` below it, and pytest receives the suite's configuration
-file, root directory and test files there. Test modules, editable installs and every other
-reference to the project therefore name the same files at one path. A test that checks
-an imported package module lies below its own checkout root, for example
+Each scoped session runs at `/project`. The working directory is the suite's `cwd` below
+it, and pytest receives the suite's configuration file (`-c /project/...`), root
+directory (`--rootdir=/project/...`) and test files there. `Path.cwd()`, `__file__`, the
+pytest root path, tracebacks and the modules of an editable install all name `/project`,
+whatever the checkout is called and wherever it lives. A test that checks an imported
+package module lies below its own project root, for example
 `Path(my_package.__file__).is_relative_to(Path(__file__).parents[1])`, passes in a scoped
-session exactly as it does in an ordinary one. Scoped tests consequently observe the
-checkout's location, for example in `Path.cwd()`, `__file__` and the pytest root path.
-Cache keys still exclude it; see [cache identity](#collection-cache-identity-and-reuse).
+session as it does in an ordinary one.
+
+### A scoped test cannot tell where its checkout lives
+
+Identical checkouts at different paths share scoped results, so nothing a scoped test
+observes may depend on the checkout's path. The view policy `bubblewrap-view-v3` provides
+this:
+
+- The project is shown only at `/project`; its host path is not mounted.
+- Files of the environment that name the project directory are shown as rewritten,
+  read-only copies in which the directory reads `/project`. These are the `.pth` files
+  of the interpreter's site directories; the modules they load at startup, such as an
+  editable install's finder; the installed metadata of a distribution installed from a
+  location (every file of a `*.dist-info` directory that has a `direct_url.json`, and
+  `.egg-link` files); and, for an environment inside the project, its `pyvenv.cfg` and
+  the text files of its scripts directory. The directory is matched as a whole path,
+  never as part of a longer path or name, as it is spelled literally, in a file URL and
+  in a Python or JSON string literal.
+- The host files are never modified. The copies live in the invocation's private scratch
+  and are bound over the originals for that sandbox only.
+- Cached bytecode of a rewritten module is shown as an empty file, and the rewritten
+  source carries a different modification time from the original, which is the one a
+  cache of the original records. The interpreter therefore always compiles the rewritten
+  source, including when the stale cache is an unchecked hash-based file that is never
+  compared with its source.
+- The sandbox environment is cleared; `PWD` is the working directory below `/project`,
+  and `OLDPWD`, `VIRTUAL_ENV` and `PYTHONPATH` are unset unless declared. A declared
+  variable is forwarded with its value, which is part of the case's key.
+- `/proc/self/mounts` and the mount points and options in `/proc/self/mountinfo` name
+  only sandbox paths.
+
+The rewritten copies of one environment may total at most 1 MiB; an environment file
+beyond that bound that names the project directory refuses with `sandbox:environment`.
+
+Two things still name the checkout and are outside this guarantee:
+
+- The fourth field of each `/proc/self/mountinfo` line is the bind source's directory
+  within its filesystem. The frozen copy and the invocation's other files live below the
+  project's `.pytest-telescope/scratch` directory, so that field names the checkout.
+- An [environment inside the project](#an-environment-inside-the-project) keeps the
+  bytecode it cached for its own modules. Those cache files record the path each source
+  had when it was compiled. An imported module still reports its sandbox path.
+
+A test that reads either one can observe the checkout's location although its cache key
+does not contain it. Leave such a test ordinary, or add `cache=False` to its scope.
 
 Scoped tests run with the same executable
 and installed distributions as the invoking pytest-telescope process, including the
@@ -186,14 +230,14 @@ directory that contains or lies inside the project is never bound from the host.
 
 In a scope without a native tool selection, installing the project into the
 invoking environment in editable form, for example with `pip install -e .`, leaves a
-`.pth` path entry or a finder module that points at the checkout's host path. Because
-that path shows the frozen copy, the project's packages import from declared files in
-the test itself, in `sys.executable` children and in isolated `-I` children, which ignore
-`PYTHONPATH` and the working directory. An undeclared module of the package raises
-`ModuleNotFoundError`. An editable install of a different directory, such as another
-checkout, points outside the view and is absent. The parent pytest process can also
-import declared source through pytest `pythonpath`; both resolve to the same files at the
-same path.
+`.pth` path entry or a finder module that points at the checkout's host path. The
+sandbox shows those files rewritten to `/project`, so the project's packages import from
+the declared files of the frozen copy in the test itself, in `sys.executable` children
+and in isolated `-I` children, which ignore `PYTHONPATH` and the working directory. An
+undeclared module of the package raises `ModuleNotFoundError`. An editable install of a
+different directory, such as another checkout, is not rewritten, points outside the view
+and is absent. The parent pytest process can also import declared source through pytest
+`pythonpath`; both resolve to the same files below `/project`.
 
 A selected native tool instead closes the supported interpreter prefixes to its
 explicit frozen runtime. Selected `.pth`, finder and other startup hooks are unsupported;
@@ -203,12 +247,21 @@ by its own invocation and the closed filesystem view; generated metadata and the
 pytest import path are not automatically inherited as Python search-path entries. See
 the [native startup contract](bubblewrap-api.md#invoking-python-startup-closure).
 
-An environment inside the project directory, such as `.venv`, keeps its host path:
-the sandbox mounts it there on top of the project's view, read-only. It is not part of
-the frozen copy, and the frozen copy on the host is never modified to make room for it.
+### An environment inside the project
 
-The project's host path, the environment, system directories and the sandbox root are
-read-only. Writes there fail with a read-only file system error.
+An environment inside the project directory, such as `.venv`, keeps its place in the
+project: the sandbox mounts it read-only at the same relative path below `/project`, for
+example `/project/.venv`, and starts `/project/.venv/bin/python`. `sys.prefix`,
+`sys.executable`, `sys.path`, the first `PATH` entry and child interpreters all name
+`/project/.venv`. Its `.pth` files, startup modules, installed metadata, `pyvenv.cfg`
+and scripts are rewritten like every other file that names the project directory, so a
+console script whose first line names the environment's interpreter starts it at its
+sandbox path. The environment is not part of the frozen copy, and the frozen copy on
+the host is never modified to make room for it. Its other files are shown as they are;
+see the [bytecode exception](#a-scoped-test-cannot-tell-where-its-checkout-lives).
+
+`/project`, the environment, the rewritten files, system directories and the sandbox
+root are read-only. Writes there fail with a read-only file system error.
 `/tmp` (also `HOME` and `TMPDIR`) and `/dev/shm` are private to one sandbox and removed
 when it exits. Pytest's cache provider is disabled and bytecode is not written.
 
@@ -362,8 +415,9 @@ A scoped result is keyed by the case's actual pytest identity, the frozen bytes 
 modes of its effective declared files, declared absence, selected metadata, the
 containing file's case inventory, the suite configuration and arguments, the effective
 forwarded environment names and their captured presence and values, the runner
-implementation, the sandbox policy version (`bubblewrap-view-v3`, the single host-path
-view; results recorded under an earlier policy are never reused), the
+implementation, the sandbox policy version (`bubblewrap-view-v3`, the single `/project`
+view with rewritten environment files; results recorded under an earlier policy are
+never reused), the
 interpreter identity (implementation, full version and build string, ABI and platform),
 the sorted names and versions of every distribution visible to the isolated
 interpreter, and how the environment reaches into the project. Installing, upgrading or
@@ -371,20 +425,18 @@ removing a package therefore invalidates scoped results. Only explicitly selecte
 tool runtime files add host-tool byte identity; the remaining host system directories
 and the host network are not part of the key.
 
-How the environment reaches into the project is recorded relative to the project: the
-`.pth` files of the interpreter's site directories and the modules they load at startup
-(such as an editable install's finder) that name the project directory, with that
-directory replaced by a placeholder, and the import directories that lie inside the
-project outside every environment prefix. Re-pointing an editable install, or moving a
-checkout whose editable install still names the old path, reruns its scoped cases.
-Identical checkouts at different paths with equivalent environments share results.
-Without an editable install the project's path is not part of the key.
+How the environment reaches into the project is recorded relative to the project: every
+environment file the sandbox shows [rewritten](#a-scoped-test-cannot-tell-where-its-checkout-lives),
+with the project directory replaced by a placeholder, and the import directories that
+lie inside the project outside every environment prefix. Re-pointing an editable
+install, changing its installed origin record, or moving a checkout whose editable
+install still names the old path, reruns its scoped cases. Identical checkouts at
+different paths with equivalent environments share results. Without such a file the
+project's path is not part of the key.
 
-Scoped sessions see the project at its host path, but no key or record contains that
-path. Case identities are pytest node IDs relative to the suite root. Declared inputs,
-inventories, skip and failure evidence, and fixture-guard identities record project files
-relative to the project. A case whose own pytest identity contains the path, such as a
-parameter ID built from `__file__`, is keyed by that identity like any other case.
+No key or record contains the project's path. Case identities are pytest node IDs
+relative to the suite root. Declared inputs, inventories, skip and failure evidence, and
+fixture-guard identities name project files relative to the project or below `/project`.
 
 `cache=False` keeps a scoped case sandboxed and fresh: it executes every time and never
 records a reusable result. `--force` reruns cached cases; `--no-cache` also prevents
@@ -428,8 +480,9 @@ that refuses or stops after ordinary sessions started does not prove that no tes
 | --- | --- |
 | `bwrap` is not installed | `unsupported`, `sandbox:bubblewrap` |
 | Bubblewrap cannot create the user, mount or PID namespace | `unsupported`, `sandbox:namespaces` |
-| The interpreter cannot start in the view, an environment prefix contains the project, the project lives in `/usr` or `/etc`, or an environment directory overlaps a sandbox mount point | `unsupported`, `sandbox:environment` |
-| The project directory cannot be shown at its host path: it is `/`, `/tmp` or `/dev/shm`, contains a directory the sandbox mounts, or lies inside `/metadata`, `/telescope`, `/proc` or `/dev` (other than `/dev/shm`) | `unsupported`, `sandbox:environment` |
+| The interpreter cannot start in the view, an environment prefix contains the project, or an environment directory outside the project overlaps a path the sandbox mounts itself (`/project`, `/metadata`, `/telescope`, `/proc`, `/dev`, or contains `/tmp`) | `unsupported`, `sandbox:environment` |
+| The sandbox would show the project's live files: the project lives in `/usr` or `/etc`, or is `/` | `unsupported`, `sandbox:environment` |
+| An environment file that names the project directory is too large to show rewritten | `unsupported`, `sandbox:environment` |
 | A suite requests `network:none` or `scratch:noexec` | `unsupported`, that capability |
 | Invalid, unsupported or mutated declaration | `declaration_error` |
 
