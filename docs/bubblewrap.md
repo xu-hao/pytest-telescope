@@ -180,7 +180,8 @@ session as it does in an ordinary one.
 
 Identical checkouts at different paths share scoped results, so nothing a scoped test
 observes may depend on the checkout's path. The view policy `bubblewrap-view-v3` provides
-this:
+this, with the exceptions listed under
+[What a scoped test can still see](#what-a-scoped-test-can-still-see):
 
 - The project is shown only at `/project`; its host path is not mounted.
 - Files of the environment that name the project directory are shown as rewritten,
@@ -208,11 +209,29 @@ this:
 The rewritten copies of one environment may total at most 1 MiB; an environment file
 beyond that bound that names the project directory refuses with `sandbox:environment`.
 
+### What a scoped test can still see
+
+**Not location-blind: the mount table's source directories.** A test that reads the source directories in the mount table (field 4 of
+`/proc/*/mountinfo`) can observe its checkout's location, which its cache key does not
+contain. Leave such a test ordinary, or add `cache=False` to its scope.
+
 Two things still name the checkout and are outside this guarantee:
 
-- The fourth field of each `/proc/self/mountinfo` line is the bind source's directory
-  within its filesystem. The frozen copy and the invocation's other files live below the
-  project's `.pytest-telescope/scratch` directory, so that field names the checkout.
+- **The source directory of each bind mount.** The fourth field of each
+  `/proc/self/mountinfo` line is the bind source's directory within its filesystem. The
+  frozen copy and the invocation's other files live below the project's
+  `.pytest-telescope/scratch` directory, so that field names the checkout. With the
+  project at `/home/dev/my_project`, the line for `/project` reads:
+
+  ```text
+  412 398 253:0 /home/dev/my_project/.pytest-telescope/scratch/invocation-<id>/project /project ro,nosuid,nodev,relatime - ext4 /dev/sda2 rw
+  ```
+
+  A test that parses field 4, or runs a tool that prints it, sees
+  `<checkout>/.pytest-telescope/scratch/invocation-<id>/project`. A result cached in one
+  checkout could then be reused in another checkout, where the test would have seen a
+  different value. The rest of the mount table is clean: the mount points (field 5), the
+  mount options and every line of `/proc/self/mounts` name only sandbox paths.
 - An [environment inside the project](#an-environment-inside-the-project) keeps the
   bytecode it cached for its own modules. Those cache files record the path each source
   had when it was compiled. An imported module still reports its sandbox path.
@@ -258,7 +277,7 @@ and scripts are rewritten like every other file that names the project directory
 console script whose first line names the environment's interpreter starts it at its
 sandbox path. The environment is not part of the frozen copy, and the frozen copy on
 the host is never modified to make room for it. Its other files are shown as they are;
-see the [bytecode exception](#a-scoped-test-cannot-tell-where-its-checkout-lives).
+see the [bytecode exception](#what-a-scoped-test-can-still-see).
 
 `/project`, the environment, the rewritten files, system directories and the sandbox
 root are read-only. Writes there fail with a read-only file system error.
