@@ -706,7 +706,7 @@ below `/project`. A frozen-tool source or original-path alias may not lie inside
 | `tool:identity` | A declared lock, runtime or content pin does not match. |
 | `sandbox:bubblewrap` | No `bwrap` executable on `PATH`. |
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
-| `sandbox:environment` | The interpreter could not start in the view, the environment contains the project or overlaps the sandbox's own mount points, the sandbox would show the project's live files (the project is `/` or inside `/usr` or `/etc`), or an environment file that names the project directory is too large to show rewritten. |
+| `sandbox:environment` | The interpreter could not start in the view, the environment contains the project or overlaps the sandbox's own mount points, the sandbox would show the project's live files (the project is `/` or inside `/usr` or `/etc`), an environment file that names the project directory is too large to show rewritten, or an environment inside the project depends on its host location (see [an environment inside the project](bubblewrap.md#an-environment-inside-the-project)). |
 | `network:none`, `scratch:noexec` | A suite requested an isolation the sandbox does not provide. |
 | `pytest:distributed-scheduling` | Nested or external distributed scheduling was requested; telescope owns scoped workers. |
 | `pytest:configuration` | Unsupported pytest configuration format. |

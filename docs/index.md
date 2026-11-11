@@ -113,6 +113,9 @@ python -m pytest -q
 python -m pip install pytest-telescope
 ```
 
+Keep a conda or pixi environment outside the project directory; scoped tests refuse one
+inside it.
+
 Keep your normal dependency setup, including `pip install -e .` if your project uses an
 editable install. Add pytest-telescope to your test dependency file or dependency group
 to reproduce this setup in CI.

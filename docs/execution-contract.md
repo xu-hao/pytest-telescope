@@ -4,7 +4,8 @@ This page is the canonical contract for how pytest-telescope reads declarations,
 discovers cases and decides whether to reuse their results. Read it when you need the
 exact rules; the [quickstart](index.md) covers everyday use, and
 [ordinary and Bubblewrap execution](bubblewrap.md) describes which tests run in a
-sandbox and which files they can see.
+sandbox and which files they can see. Every scoped sandbox shows each file at
+[one path](bubblewrap.md#one-path-for-every-file): the project only below `/project`.
 
 A *declaration* is a literal `pytest.mark.telescope(...)` marker or a project setting
 that names a test's inputs. A *case* is one collected pytest test, including each
