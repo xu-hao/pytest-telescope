@@ -575,7 +575,7 @@ def _symlinks(name):
             current = current.parent
             continue
         candidate = current / part
-        if not candidate.is_symlink():
+        if not os.path.islink(candidate):
             current = candidate
             continue
         if len(found) >= 40:
@@ -783,7 +783,7 @@ def _check_location(description, project):
         given, real = (Path(convert(name)) for convert in NORMALIZERS)
         shown = given if _inside(given, project) else real
         meta = real / "conda-meta"
-        if not _inside(shown, project) or not meta.is_dir() or str(meta) in scanned:
+        if not _inside(shown, project) or not os.path.isdir(meta) or str(meta) in scanned:
             continue
         scanned.add(str(meta))
         reason = _location_reason(real, meta, rewritten)

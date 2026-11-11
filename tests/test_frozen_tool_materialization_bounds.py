@@ -136,6 +136,7 @@ def test_cleanup_counts_each_of_113_admitted_paths_once(sparse_pair, monkeypatch
         capture.view(("first", "second"))
         actual = owned_paths(capture.directory)
         assert len(actual) == 113
+        assert capture.materialized == {capture.directory / name for name in actual}
         assert len([row for row in actual.values() if stat.S_ISDIR(row[2])]) == 23
         print("OWNED_MATERIALIZATION", {"admitted": len(actual), "limit": 113}, flush=True)
     assert not (stage / "tools").exists()

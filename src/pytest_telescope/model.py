@@ -357,33 +357,54 @@ def excluded_path(name, excluded=()):
     )
 
 
-def excluded_namespace(root, name, excluded=()):
-    """Apply the same environment boundary to explicit and discovered inputs."""
+def excluded_namespace(root, name, excluded=(), memo=None):
+    """Apply the same environment boundary to explicit and discovered inputs.
+
+    `memo` keeps each ancestor directory's verdict across the names of one declaration
+    set, so a shared ancestor is examined once.
+    """
     if excluded_path(name, excluded):
         return True
     parts = Path(name).parts
     linked = False
     for depth in range(1, len(parts) + 1):
-        directory = Path(*parts[:depth])
-        config = directory / "pyvenv.cfg"
-        linked = linked or (root / directory).is_symlink()
-        if linked and (os.path.isfile(root / config) or conda_environment(root / directory)):
-            # An environment reached through a link: never read through the link.
-            return True
-        if conda_environment(root / directory, follow=False):
-            return True
-        if os.path.lexists(root / config):
-            regular_bytes(root, config.as_posix(), 65536)
+        directory = "/".join(parts[:depth])
+        known = None if memo is None else memo.get(directory)
+        if known is None:
+            known = _environment_directory(root, directory, linked)
+            if memo is not None:
+                memo[directory] = known
+        linked, environment = known
+        if environment:
             return True
     return False
 
 
+def _environment_directory(root, directory, linked):
+    """Whether `directory` is reached through a link, and whether it is an environment.
+
+    Uses checks that report an unsearchable path as absent rather than raising.
+    """
+    path = os.path.join(root, directory)
+    config = os.path.join(path, "pyvenv.cfg")
+    linked = linked or os.path.islink(path)
+    if linked and (os.path.isfile(config) or conda_environment(path)):
+        # An environment reached through a link: never read through the link.
+        return linked, True
+    if conda_environment(path, follow=False):
+        return linked, True
+    if os.path.lexists(config):
+        regular_bytes(root, directory + "/pyvenv.cfg", 65536)
+        return linked, True
+    return linked, False
+
+
 def conda_environment(directory, *, follow=True):
     """A conda-style environment, which has no pyvenv.cfg, is marked by `conda-meta`."""
-    records = Path(directory) / "conda-meta"
+    records = os.path.join(directory, "conda-meta")
     if follow:
-        return records.is_dir()
-    return not records.is_symlink() and records.is_dir()
+        return os.path.isdir(records)
+    return not os.path.islink(records) and os.path.isdir(records)
 
 
 def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), budget=None):
@@ -430,9 +451,10 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None, tool_
     found = set()
     if budget is None:
         budget = [0]
+    memo = {}
     for name in sequence(names, label):
         name = relative(name)
-        if excluded_namespace(root, name, excluded):
+        if excluded_namespace(root, name, excluded, memo):
             raise DeclarationError("metadata, cache and host environments are not project inputs")
         if name == ".":
             raise DeclarationError("declare project subdirectories or files, not the checkout root")
@@ -598,13 +620,14 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         names = sequence(overrides[suite.name], "structural_files")
         if len(names) != len(set(names)):
             raise DeclarationError("structural_files cannot contain duplicate paths")
+        memo = {}
         for name in names:
             if (
                 relative(name) != name
                 or not name.endswith(".py")
                 or len(name.encode()) > 4096
                 or any(ord(char) < 32 for char in name)
-                or excluded_namespace(root, name, excluded)
+                or excluded_namespace(root, name, excluded, memo)
             ):
                 raise DeclarationError(
                     "structural_files requires canonical project-relative Python test files"

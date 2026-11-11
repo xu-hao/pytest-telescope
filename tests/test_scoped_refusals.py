@@ -74,6 +74,79 @@ def test_automatic_inputs_cannot_include_host_environments(tmp_path, environment
         load(tmp_path)
 
 
+def test_discovery_and_globs_skip_a_conda_environment(tmp_path):
+    # A conda environment has no pyvenv.cfg; its conda-meta directory marks it.
+    def put_file(name, text):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+
+    put_file("envs/conda-meta/history", "")
+    put_file("envs/lib/test_inside.py", "def test_inside(): pass\n")
+    put_file(
+        "test_public.py",
+        "import os\nimport pytest\n"
+        "pytestmark = pytest.mark.telescope(inputs=['**/*.py'])\n"
+        "def test_public():\n"
+        "    assert not os.path.lexists('/project/envs')\n",
+    )
+    put_file("pyproject.toml", '[tool.pytest_telescope]\ntest_roots=["."]\n')
+    report = controller.run(tmp_path, explain=True, timeout=20)
+    assert report["kind"] == "run", report
+    assert sorted({unit["file"] for unit in report["units"]}) == ["test_public.py"], report
+    assert report["counts"]["executed"] == 1 and report["counts"]["failed"] == 0, report
+
+
+def test_an_input_below_an_unsearchable_directory_is_a_missing_input(tmp_path, monkeypatch, capsys):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "data.txt").write_text("hidden\n")
+    (tmp_path / "test_public.py").write_text(
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=['locked/data.txt'])\n"
+        "def test_public(): pass\n"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest_telescope]\ntest_roots=["test_public.py"]\n'
+    )
+    locked.chmod(0)
+    try:
+        monkeypatch.chdir(tmp_path)
+        assert controller.main(["run"]) == 4
+    finally:
+        locked.chmod(0o755)
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "declaration_error", output
+    assert output["error"] == "missing inputs; declare expected absence explicitly", output
+
+
+@pytest.mark.parametrize("marker", ["pyvenv.cfg", "conda-meta"])
+def test_many_names_below_one_environment_are_each_refused(tmp_path, monkeypatch, capsys, marker):
+    # Names below one environment share their ancestors' checks; each still refuses.
+    environment = tmp_path / "shared" / "env"
+    environment.mkdir(parents=True)
+    if marker == "pyvenv.cfg":
+        (environment / "pyvenv.cfg").write_text("home = /synthetic/interpreter\n")
+    else:
+        (environment / "conda-meta").mkdir()
+    names = [f"shared/data{index}.txt" for index in range(3)] + [
+        f"shared/env/lib/module{index}.py" for index in range(3)
+    ]
+    for name in names:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("")
+    for declared in (names[:3] + names[3:4], names[3:]):
+        (tmp_path / "test_public.py").write_text(
+            f"import pytest\npytestmark = pytest.mark.telescope(inputs={declared!r})\n"
+            "def test_public(): pass\n"
+        )
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.pytest_telescope]\ntest_roots=["test_public.py"]\n'
+        )
+        monkeypatch.chdir(tmp_path)
+        assert controller.main(["run"]) == 4
+        output = json.loads(capsys.readouterr().out)
+        assert output["error"] == "metadata, cache and host environments are not project inputs"
+
+
 @pytest.mark.parametrize(
     "arguments", [[], ["unknown-command"], ["run", "--timeout", "not-a-number"]]
 )
