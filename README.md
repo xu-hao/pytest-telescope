@@ -97,6 +97,13 @@ the test uncached. Adding `cache=False` to a scoped declaration keeps the sandbo
 runs the test every time. `cache=False` alone leaves a test ordinary. Use `run --force`
 to rerun cached tests or `run --no-cache` to bypass reading and recording results.
 
+Identical checkouts at different paths share scoped results, so a scoped test sees its
+project at `/project`, wherever the checkout lives.
+**Not location-blind:** a test that reads the source directories in the mount table
+(field 4 of `/proc/*/mountinfo`) can observe its checkout's location, which its cache key
+does not contain. Leave such a test ordinary, or add `cache=False` to its scope. See
+[what a scoped test can still see](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#what-a-scoped-test-can-still-see).
+
 You can also use `pytest --telescope` and `pytest --telescope-plan`. Other pytest plugins
 may run during startup with these commands; `python -m pytest_telescope` avoids that
 initial host pytest session. Running pytest without telescope mode keeps its usual
