@@ -396,14 +396,26 @@ the frozen source relabels those parses per import origin and never parses again
 
 That verification reads and hashes each distinct frozen file once per invocation, when
 the first scoped view selects it, and compares its content hash and mode with its frozen
-record and with the static scan. The controller asks for a view's records several times
-per case: for collection, for the case key and before each fresh worker. Every later
-request checks, without reading the file, that it is still the same regular file with the
-same mode, size and modification time as when it was verified, and reads each selected
-link's text again. A frozen file or link that changed after its verification refuses as
-an infrastructure error. The later check compares that metadata, not content: only the
-first verification hashes the bytes. A file that failed verification is not remembered:
-every later view reads it again and refuses.
+record and with the static scan. The file it reads is the run's own frozen copy, in a
+private scratch directory below the project's `.pytest-telescope/scratch` that only the
+invoking user can enter. It is not the checkout.
+
+The controller asks for a view's records several times per case: for collection, for the
+case key and before each fresh worker. Every later request checks, without reading the
+file, that it is still a regular file with the same inode, mode, size and modification
+time as when it was verified, and reads each selected link's text again. A frozen file or
+link that is changed or replaced afterwards so that any of these differs refuses as an
+infrastructure error. An ordinary write or replacement does that.
+
+The later check does not hash content. A process of the same user that deliberately
+rewrites the private frozen copy during a run and leaves all four unchanged is not
+detected: a filesystem may reuse a freed inode, and freezing sets every modification
+time to 0.
+Edits to the checkout are handled separately: freezing refuses a declared source that
+changed after it was parsed, and every run freezes again. Earlier versions hashed each
+file again for every view; this release trades that for speed on large declared trees. A
+file that failed verification is not remembered: every later view reads it again and
+refuses.
 
 Parsing is single-threaded. Measured with Python 3.12 at the node total, installed library
 source repeated to 268 million nodes (about 199,000 files and 2.48 GB, beyond the source

@@ -57,13 +57,18 @@ read-only copy of its declared project files that a scoped test sees in its sand
   accepted such a declared source and only `run` refused it.
 - A run then freezes the project. Freezing refuses a declared source that changed after
   it was parsed.
-- A run verifies each distinct frozen declared Python file once per invocation. It reads
-  and hashes the file when the first scoped view selects it. Each later view checks only
-  the file's metadata: that it is still the same regular file with the same mode, size
-  and modification time. It also reads each selected link's text again. A frozen file or
-  link that changed after its verification refuses. Measured with Python 3.12, one 4 MiB
-  module with 800 symlink aliases took 17 ms for its first view and about 11 ms for each
-  later view.
+- A run verifies the content of each distinct frozen declared Python file once per
+  invocation. It reads and hashes the file when the first scoped view selects it. The
+  file is the run's own private frozen copy, not the checkout.
+- Each later view checks only that the file still has the same inode, mode, size and
+  modification time, and reads each selected link's text again. A file or link that is
+  changed or replaced afterwards so that any of these differs refuses. An ordinary write
+  or replacement does that.
+- A process of the same user that deliberately rewrites the private frozen copy during a
+  run and leaves all four unchanged is not detected. Earlier versions hashed each file
+  again for every view; this release trades that for speed on large declared trees.
+  Measured with Python 3.12, one 4 MiB module with 800 symlink aliases took 17 ms for
+  its first view and about 11 ms for each later view.
 
 ### One project path: `/project`
 
@@ -83,9 +88,11 @@ read-only copy of its declared project files that a scoped test sees in its sand
 
   The host files are never modified. The copies live in the invocation's private scratch
   and are bound over the originals for that sandbox only.
-- Stale bytecode of a rewritten module is never loaded. Its cached bytecode is shown as
-  an empty file, and the rewritten source carries a different modification time from the
-  original. The interpreter therefore always compiles the rewritten source.
+- Stale bytecode of a rewritten module is not loaded. Each cache file that exists when
+  the run identifies the environment is shown as an empty file, and the rewritten source
+  carries a different modification time from the original, so the interpreter compiles
+  the rewritten source. One case is not covered: an unchecked hash-based cache file
+  written after that point would be loaded.
 - Editable-installed modules and test modules share the `/project` root. A test that
   checks that an imported package module lies below its own project root passes, as it
   does in ordinary pytest. A child started with `python -I` imports declared source
@@ -110,9 +117,10 @@ read-only copy of its declared project files that a scoped test sees in its sand
   `bubblewrap-view-v2`. The policy is part of every scoped cache key, so results recorded
   by earlier versions are not reused.
 - Refusals removed: the project may now live anywhere outside the system directories that
-  the sandbox shares with the host. That includes `/tmp`, `/dev/shm` and a subdirectory of
-  `/project`, which version 0.1.0 refused together with a project inside `/metadata`,
-  `/telescope`, `/proc` or `/dev`. A project at `/project` itself was already accepted.
+  the sandbox shares with the host. Version 0.1.0 refused a project that was exactly
+  `/tmp` or `/dev/shm`, a subdirectory of `/project`, and a project inside `/metadata`,
+  `/telescope`, `/proc` or `/dev`. A project below `/tmp` or `/dev/shm`, such as
+  `/tmp/app`, was already accepted, and so was a project at `/project` itself.
 - Refusals added: an environment file that names the project directory and is too large
   to show rewritten refuses with `sandbox:environment`. The rewritten copies of one
   environment may total at most 1 MiB. A frozen-tool source or original-path alias inside

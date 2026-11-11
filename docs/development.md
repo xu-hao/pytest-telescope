@@ -42,8 +42,8 @@ subprocesses and wait for them, so one serial process leaves most of a multi-CPU
 default is one, the serial run. A larger count is an explicit resource request: each worker
 starts its own sandboxes, so give the outer job at least `N` CPUs and memory for `N`
 concurrent sessions. The hosted workflows pass `--functional-workers 4` on their 4-vCPU
-runners. On a 4-CPU job the serial suite has taken 13 to 16 minutes, close to its deadline,
-and four workers have taken 4 to 5 minutes.
+runners. In local runs limited to 4 CPUs, the serial suite has taken 13 to 16 minutes,
+close to its deadline, and four workers have taken 4 to 5 minutes.
 
 With more than one worker, the gate first records the functional membership from one
 ordinary serial collection, with the same profile selection and refusals as a serial run,
