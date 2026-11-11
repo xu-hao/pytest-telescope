@@ -330,6 +330,27 @@ def write_blind_tests(project, environment_name=None):
     )
 
 
+def cache_bytecode(interpreter, *modules):
+    """Start the scratch environment's interpreter the way its owner would have.
+
+    An interpreter's start caches the bytecode of its startup hook, and an import caches
+    that module's. These tests need those caches to exist before the run, whatever the
+    job that runs them allows: an isolated start with an explicit environment ignores an
+    ambient request not to write bytecode. Only modules of the scratch environment are
+    imported, so nothing is written anywhere else.
+    """
+    subprocess.run(
+        [str(interpreter), "-I", "-c", "".join(f"import {name}\n" for name in modules)],
+        check=True,
+        timeout=60,
+        env={"PATH": os.defpath},
+    )
+
+
+def cached(site_packages, module):
+    return sorted((site_packages / "__pycache__").glob(module + ".*.pyc"))
+
+
 def failed_lines(report):
     return sorted(
         (failure["file"], failure["line"], failure["exception_type"])
@@ -363,8 +384,9 @@ def test_a_scoped_session_cannot_observe_its_checkout_location(tmp_path):
     # in the installed origin record.
     project, interpreter, site_packages = blind_project(tmp_path / "kestrel checkout")
     write_blind_tests(project)
-    # The host interpreter caches bytecode of its startup hook the first time it starts.
-    subprocess.run([str(interpreter), "-c", "pass"], check=True, timeout=60)
+    # The finder's bytecode is cached from the original, which names the checkout.
+    cache_bytecode(interpreter)
+    assert cached(site_packages, "__editable___toypkg_0_1_finder")
     before = host_files(site_packages)
     cache = tmp_path / "results"
     code, report = run(interpreter, project, "--cache-dir", str(cache))
@@ -385,8 +407,12 @@ def test_an_environment_inside_the_project_does_not_reveal_the_checkout_location
         "import sys\nimport toypkg\nprint(sys.prefix, toypkg.__file__)\n"
     )
     script.chmod(0o755)
-    # Cache the module's bytecode on the host, as importing it there would.
-    subprocess.run([str(interpreter), "-c", "import toyextra"], check=True, timeout=60)
+    # Cache the module's bytecode on the host, as importing it there would. It records
+    # the module's host path, which is what the open channel's test reads.
+    cache_bytecode(interpreter, "toyextra")
+    assert cached(site_packages, "__editable___toypkg_0_1_finder")
+    [bytecode] = cached(site_packages, "toyextra")
+    assert os.fsencode(project) in bytecode.read_bytes()
     write_blind_tests(project, ".venv")
     before = host_files(project / ".venv")
     cache = tmp_path / "results"
