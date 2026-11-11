@@ -445,9 +445,14 @@ def invocation(root):
 
 
 def _probe(executable, project):
-    """Describe an interpreter exactly as an isolated child of it sees its environment."""
+    """Describe an interpreter exactly as an isolated child of it sees its environment.
+
+    The interpreter starts on the host with a minimal environment of its own, so it is
+    told not to write bytecode: describing an environment never writes into it, whatever
+    the calling job allows.
+    """
     code, output = capture(
-        [executable, "-I", "-c", PROBE, str(project), str(MAX_REWRITE)],
+        [executable, "-I", "-B", "-c", PROBE, str(project), str(MAX_REWRITE)],
         30,
         env=_host_environment(),
         cwd="/",
