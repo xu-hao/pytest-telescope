@@ -13,7 +13,10 @@ from test_functional_gate import invocation as invocation
 from test_gate_profiles import profile_session as profile_session
 from test_workflow_gate_preflight import workflow_roles
 
+import pytest_telescope
+
 ACTUAL = importlib.metadata.version("pytest")
+VERIFIED = str(Path(pytest_telescope.__file__))
 CORE = "tests/test_profile.py::test_core"
 POSITIVE = "tests/test_profile.py::test_guard"
 RECORD = {
@@ -34,6 +37,27 @@ def test_parallel_workers_record_the_serial_membership_and_run_selected_bodies(
     assert (value.root / "core-ran").exists()
     assert not (value.root / "guard-ran").exists()
     assert value.verified == [True, False]
+
+
+def test_worker_importing_another_candidate_origin_refuses_before_any_body(profile_session):
+    value = profile_session
+    # Only parallel workers resolve the candidate to this owned stand-in package.
+    stand_in = value.root / "stand-in"
+    (stand_in / "pytest_telescope").mkdir(parents=True)
+    (stand_in / "pytest_telescope/__init__.py").write_text("")
+    (value.root / "tests/conftest.py").write_text(
+        "import sys\nimport pytest\n"
+        "@pytest.hookimpl(tryfirst=True)\n"
+        "def pytest_configure(config):\n"
+        "    if hasattr(config, 'workerinput'):\n"
+        "        for name in [name for name in sys.modules if name.split('.')[0] == 'pytest_telescope']:\n"
+        "            del sys.modules[name]\n"
+        f"        sys.path.insert(0, {str(stand_in)!r})\n"
+    )
+    assert value.run("core", ACTUAL, workers=2) != 0
+    assert json.loads(value.membership.read_text()) == RECORD
+    assert not (value.root / "core-ran").exists()
+    assert not (value.root / "guard-ran").exists()
 
 
 def test_worker_only_deselection_refuses_before_any_body(profile_session):
@@ -197,10 +221,11 @@ def test_hosted_workflows_request_one_functional_worker_per_runner_cpu(
 
 
 def test_controller_refuses_a_worker_collection_that_differs_before_scheduling(gates):
-    controller = gates.functional.parallel_plugin(pytest, dict(RECORD))
+    controller = gates.functional.parallel_plugin(pytest, dict(RECORD), VERIFIED)
     node = types.SimpleNamespace(gateway=types.SimpleNamespace(id="gw0"), workerinput={})
     controller.pytest_configure_node(node)
     assert node.workerinput[gates.functional.RECEIPT] == RECORD
+    assert node.workerinput[gates.functional.ORIGIN] == VERIFIED
     for ids in ([], [CORE, CORE], [POSITIVE], [CORE, POSITIVE]):
         with pytest.raises(pytest.UsageError, match="differs"):
             controller.pytest_xdist_node_collection_finished(node, ids)
@@ -222,3 +247,37 @@ def test_worker_without_an_exact_receipt_refuses_at_configuration(gates, receipt
     assert registered == []
     # Outside a parallel worker the same module is inert.
     gates.functional.pytest_configure(types.SimpleNamespace())
+
+
+def worker_configuration(gates, origin):
+    workerinput = {gates.functional.RECEIPT: dict(RECORD)}
+    if origin is not None:
+        workerinput[gates.functional.ORIGIN] = origin
+    registered = []
+    config = types.SimpleNamespace(
+        workerinput=workerinput,
+        pluginmanager=types.SimpleNamespace(register=lambda *args: registered.append(args)),
+    )
+    return config, registered
+
+
+@pytest.mark.parametrize("origin", [None, "elsewhere", ["list"], "parent"])
+def test_worker_refuses_at_configuration_unless_it_imports_the_verified_origin(
+    gates, tmp_path, origin
+):
+    if origin == "elsewhere":
+        origin = str(tmp_path / "pytest_telescope/__init__.py")
+    elif origin == "parent":
+        origin = str(Path(VERIFIED).parent)
+    elif origin is not None:
+        origin = [VERIFIED]
+    config, registered = worker_configuration(gates, origin)
+    with pytest.raises(pytest.UsageError, match="candidate origin"):
+        gates.functional.pytest_configure(config)
+    assert registered == []
+
+
+def test_worker_importing_the_verified_origin_registers_its_membership_check(gates):
+    config, registered = worker_configuration(gates, VERIFIED)
+    gates.functional.pytest_configure(config)
+    assert [name for _, name in registered] == ["telescope-functional-selection"]

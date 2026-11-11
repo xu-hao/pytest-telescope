@@ -47,6 +47,12 @@ body when its collection changes after it was reported. A crashed worker is not
 replaced. A successful run also requires every worker's confirmation that it ran the
 recorded membership. The membership file is the same for every worker count.
 
+The gate verifies the installed candidate's import origin once, in its own process,
+and passes that origin to every worker. A worker compares its own `pytest_telescope`
+import with it at configuration, as the gate process does after its first import, and
+refuses before collecting when it has no verified origin or imports the package from
+anywhere else.
+
 ## Full qualification and core compatibility
 
 `check.py --functional-profile all` is the default and the only full qualification,

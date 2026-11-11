@@ -18,6 +18,8 @@ from gate import read_json, verify_candidate, write_json  # noqa: E402
 
 # Parallel workers receive the recorded membership under this name and return their own.
 RECEIPT = "telescope_functional_membership"
+# Parallel workers receive the verified installed candidate origin under this name.
+ORIGIN = "telescope_functional_candidate_origin"
 # Each parallel worker loads this exact guard file before it configures pytest.
 WORKER_GUARD = """
 import sys
@@ -141,14 +143,26 @@ def pytest_configure(config):
         "deselected",
     }:
         raise pytest.UsageError("parallel functional worker has no membership receipt")
+    origin = workerinput.get(ORIGIN)
+    if type(origin) is not str:
+        raise pytest.UsageError("parallel functional worker has no verified candidate origin")
+    import pytest_telescope
+
+    # The serial gate process makes this same comparison after its first import.
+    filename = getattr(pytest_telescope, "__file__", None)
+    if type(filename) is not str or Path(filename) != Path(origin):
+        raise pytest.UsageError("parallel functional worker imported another candidate origin")
     config.pluginmanager.register(
         selection_plugin(pytest, expected["profile"], None, pytest.__version__, expected=expected),
         "telescope-functional-selection",
     )
 
 
-def parallel_plugin(pytest, record):
-    """Bind every parallel worker to the recorded membership before any test is scheduled."""
+def parallel_plugin(pytest, record, origin):
+    """Bind every parallel worker to the recorded membership and verified candidate origin.
+
+    Both reach a worker before it configures, so it refuses before any test is scheduled.
+    """
 
     class Parallel:
         def __init__(self):
@@ -162,6 +176,7 @@ def parallel_plugin(pytest, record):
 
         def pytest_configure_node(self, node):
             node.workerinput[RECEIPT] = record
+            node.workerinput[ORIGIN] = origin
 
         @pytest.hookimpl(tryfirst=True)
         def pytest_xdist_node_collection_finished(self, node, ids):
@@ -177,8 +192,11 @@ def parallel_plugin(pytest, record):
     return Parallel()
 
 
-def run_parallel(pytest, workers, scratch, selection):
-    """Record membership from one serial collection, then run files on `workers` processes."""
+def run_parallel(pytest, workers, scratch, selection, origin):
+    """Record membership from one serial collection, then run files on `workers` processes.
+
+    Each worker must import the candidate from `origin`, the verified installed package.
+    """
     try:
         import xdist  # noqa: F401
     except ImportError:
@@ -191,7 +209,7 @@ def run_parallel(pytest, workers, scratch, selection):
     )
     if status or selection.record is None:
         return status
-    controller = parallel_plugin(pytest, selection.record)
+    controller = parallel_plugin(pytest, selection.record, origin)
     # Each worker starts like this gate process: isolated, without bytecode writes.
     python = shlex.join([sys.executable, "-I"])
     status = int(
@@ -294,7 +312,7 @@ def main():
                 )
             )
         else:
-            status = run_parallel(pytest, args.workers, args.scratch, selection)
+            status = run_parallel(pytest, args.workers, args.scratch, selection, origin)
         if selection.digest is not None:
             if read_json(args.membership, selection.digest) != selection.record:
                 raise ValueError("functional membership changed during qualification")
