@@ -125,7 +125,19 @@ def skip_reason(report):
     )
 
 
+# A session names the same few files hundreds of times. Both tables live for one
+# session: main() clears them when it sets the project root.
+PROJECT_FILES = {}
+CANONICAL_FILES = {}
+
+
 def project_file(filename):
+    """The project-relative name of a path, which must lie inside the project."""
+    key = os.fspath(filename)
+    try:
+        return PROJECT_FILES[key]
+    except KeyError:
+        pass
     path = Path(os.path.abspath(PROJECT_ROOT / filename)).relative_to(PROJECT_ROOT)
     text = path.as_posix()
     if (
@@ -136,6 +148,7 @@ def project_file(filename):
         or "\\" in text
     ):
         raise ValueError("invalid project path")
+    PROJECT_FILES[key] = text
     return text
 
 
@@ -695,6 +708,8 @@ def main(request=None, *, ordinary=False):
     if type(root) is not str or not os.path.isabs(root):
         raise ValueError("sessions require an absolute project root")
     PROJECT_ROOT = Path(root)
+    PROJECT_FILES.clear()
+    CANONICAL_FILES.clear()
     if request.get("metadata"):
         from importlib import metadata
 
@@ -724,8 +739,12 @@ def main(request=None, *, ordinary=False):
 
     def canonical_nodeid(value):
         filename, separator, suffix = value.partition("::")
-        path = (PROJECT_ROOT / suite_root / filename).resolve()
-        return project_file(path) + (separator + suffix if separator else "")
+        try:
+            name = CANONICAL_FILES[filename]
+        except KeyError:
+            path = (PROJECT_ROOT / suite_root / filename).resolve()
+            name = CANONICAL_FILES[filename] = project_file(path)
+        return name + (separator + suffix if separator else "")
 
     mode = request["mode"]
     guard_mode = mode in ("guard-capture", "guard-inspection", "guard-batch")

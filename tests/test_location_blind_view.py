@@ -13,10 +13,12 @@ in-project environment's own cached bytecode.
 import json
 import os
 import py_compile
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from frozen_tool_fixtures import ToolProject, assert_counts
 from test_isolated_child_imports import (
     DECLARED,
     environment,
@@ -25,6 +27,8 @@ from test_isolated_child_imports import (
     run,
     toy_project,
 )
+
+from pytest_telescope import controller
 
 WHERE_TESTS = """\
 from pathlib import Path
@@ -53,11 +57,14 @@ def case_identities(report):
 def run_checkouts(tmp_path, expected):
     """Run identical checkouts at two paths with one environment and one results directory."""
     interpreter, _ = environment(tmp_path / "env")
+    cache = tmp_path / "shared-results"
     reports = []
     for name in ("checkout-a", "checkout-b"):
         project = toy_project(tmp_path / name)
         put(project, "tests/test_where.py", WHERE_TESTS.format(expected=expected))
-        reports.append(run(interpreter, project, "--cache-dir", str(tmp_path / "shared-results")))
+        reports.append(run(interpreter, project, "--cache-dir", str(cache)))
+        # Results, failure evidence and inventories never record the checkout.
+        assert_nothing_recorded_names(project, reports[-1][1], cache)
     return reports
 
 
@@ -184,9 +191,15 @@ def mount_rows():
 
 
 def test_process_and_mount_tables():
-    values = [read("/proc/self/" + name) for name in ("mounts", "cmdline", "maps", "status")]
-    values += [read("/proc/1/cmdline")]
+    tables = ("mounts", "mountstats", "cmdline", "maps", "status", "cgroup")
+    values = [read("/proc/self/" + name) for name in tables]
+    values += [read("/proc/1/cmdline"), read("/proc/1/environ")]
     values += [os.readlink("/proc/self/" + name) for name in ("cwd", "exe", "root")]
+    for descriptor in os.listdir("/proc/self/fd"):
+        try:
+            values.append(os.readlink("/proc/self/fd/" + descriptor))
+        except OSError:
+            pass
     # Every mountinfo field except the fourth, the bind's source directory.
     values += [" ".join(row[:3] + row[4:]) for row in mount_rows()]
     assert named(values) == []
@@ -454,3 +467,71 @@ def test_the_environment_identity_covers_the_rewritten_files(tmp_path):
     record.write_text(json.dumps({"url": Path(project).as_uri(), "dir_info": {}}))
     third = run(interpreter, project)
     assert third[0] == 0 and third[1]["counts"]["executed"] == 1, third
+
+
+TOOL_SHARED_TEST = """\
+import os
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.telescope(tools=["frontend"], inputs=["node_modules/value.txt"])
+
+
+def test_tool_consumer_runs_at_project():
+    link = Path(__file__).parents[1] / "node_modules"
+    assert Path.cwd() == Path("/project") and link.is_symlink()
+    assert (link / "value.txt").read_text() == "frontend"
+    assert Path("/tools/frontend/install/value.txt").read_text() == "frontend"
+"""
+
+TOOL_BLIND_TEST = """\
+import os
+from pathlib import Path
+
+import pytest
+
+HOST = bytes.fromhex({host!r}).decode()
+NAME = bytes.fromhex({name!r}).decode()
+pytestmark = pytest.mark.telescope(tools=["frontend"], inputs=["node_modules/value.txt"])
+
+
+def test_tool_consumer_view_does_not_name_the_checkout():
+    values = [*os.environ, *os.environ.values(), open("/proc/self/mounts").read()]
+    # Every mountinfo field except the fourth, the open channel stated elsewhere.
+    for line in open("/proc/self/mountinfo").read().splitlines():
+        fields = line.split(" ")
+        values.append(" ".join(fields[:3] + fields[4:]))
+    link = Path("/project/node_modules")
+    values += [os.readlink(link), *map(str, Path("/tools").rglob("*"))]
+    values += [str(path.resolve()) for path in (link, link / "value.txt")]
+    values += [path.read_text() for path in Path("/project/tool-locks").iterdir()]
+    assert [value[:300] for value in values if HOST in value or NAME in value] == []
+    assert not os.path.lexists(HOST)
+"""
+
+
+def test_frozen_tool_views_do_not_name_the_checkout_and_are_shared_between_checkouts(tmp_path):
+    first = ToolProject(tmp_path / "kestrel-checkout-a", tmp_path / "owned-tools")
+    first.add_tree("frontend", preserve=True)
+    first.bind_link("frontend")
+    first.module("test_tool_shared.py", TOOL_SHARED_TEST)
+    # An identical second checkout of the same project, using the same installed tool.
+    second = tmp_path / "kestrel-checkout-b"
+    shutil.copytree(first.root, second, symlinks=True)
+    cache = tmp_path / "shared-results"
+    reports = []
+    for root in (first.root, second):
+        # Only this module differs between the checkouts: it spells its own location.
+        put(
+            root,
+            "tests/test_tool_blind.py",
+            TOOL_BLIND_TEST.format(host=str(root).encode().hex(), name=root.name.encode().hex()),
+        )
+        reports.append(controller.run(root, explain=True, timeout=20, cache_dir=cache))
+    assert_counts(reports[0], executed=2)
+    # The identical consumer is reused at the second checkout; its tool view, project
+    # link and key do not depend on where the checkout lives.
+    assert_counts(reports[1], executed=1, reused=1)
+    assert_nothing_recorded_names(first.root, reports[0], cache)
+    assert_nothing_recorded_names(second, reports[1], cache)
