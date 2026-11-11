@@ -1,41 +1,55 @@
 # pytest-telescope
 
-pytest-telescope caches pytest results to reduce repeated test work in merge queues.
-When coding agents produce changes faster than CI can check them, rerunning tests whose
-inputs haven't changed adds to the wait.
+pytest-telescope is a pytest plugin that avoids rerunning tests whose inputs have not
+changed. It is for Linux projects whose tests run often, for example in CI or in a merge
+queue that checks many changes, where rerunning unaffected tests wastes time.
 
-Tell pytest-telescope which project files a test needs. It runs the test in a Linux
-[Bubblewrap](https://github.com/containers/bubblewrap) sandbox and saves a successful
-result. On later runs, it can reuse that result if the declared inputs and test
-environment still match. Tests without input declarations run every time as ordinary
-pytest.
+It treats each test in one of two ways:
 
-For example, these two tests use different data files:
+- A *scoped* test declares the project files it reads. It runs in a
+  [Bubblewrap](https://github.com/containers/bubblewrap) sandbox that shows only those
+  project files, read-only, together with the installed Python environment and system
+  directories. When it passes, pytest-telescope saves the result. A later run reuses that
+  result instead of running the test again, as long as the declared files, the
+  interpreter and the installed packages are unchanged.
+- An *ordinary* test declares nothing. It runs every time as plain pytest, with no
+  sandbox and no cache.
+
+You can scope one test at a time. Every test you have not scoped keeps running as before.
+
+## A minimal example
+
+`pyproject.toml` tells pytest-telescope where the tests are:
+
+```toml
+[tool.pytest_telescope]
+test_roots = ["tests"]
+```
+
+`tests/test_colors.py` declares that `test_red` reads `data/red.json`:
 
 ```python
+import json
+from pathlib import Path
+
 import pytest
 
 
-@pytest.mark.telescope(inputs=["data/red.json"], bundles=["pricing"])
-def test_red(): ...
+@pytest.mark.telescope(inputs=["data/red.json"])
+def test_red():
+    assert json.loads(Path("data/red.json").read_text())["name"] == "red"
 
 
-@pytest.mark.telescope(inputs=["data/blue.json"], bundles=["pricing"])
-def test_blue(): ...
-
-
-def test_note(): ...  # ordinary: runs every time, no sandbox, no cache
+def test_note():  # ordinary: runs every time, no sandbox, no cache
+    assert 1 + 1 == 2
 ```
 
-Change `data/red.json` and `test_red` runs again; `test_blue` can reuse its result.
-Both tests also depend on the files in the configured `pricing` bundle. Changing a
-shared input reruns both. `test_note` runs every time.
-
-A test with an input declaration is called *scoped*. Its sandbox shows the declared
-project files, the installed Python environment and system directories, all read-only.
-Other project files are absent, so a test cannot quietly read an undeclared data file.
-Tests can write temporary files in private scratch, including through pytest's
-`tmp_path` fixture.
+Run `python -m pytest_telescope run -- -q` twice. The first run executes both tests.
+The second runs `test_note` again and reuses the result of `test_red`. Edit
+`data/red.json` and `test_red` runs again. Inside its sandbox, `test_red` can read
+`data/red.json`, its own test file and the project configuration; other project files do
+not exist there, so a test cannot quietly read an undeclared data file. Tests can write
+temporary files in private scratch, including through pytest's `tmp_path` fixture.
 
 ## Add it to your project
 
@@ -45,7 +59,7 @@ environment you normally use for tests:
 
 ```sh
 python -m pytest -q
-python -m pip install pytest-telescope==0.1.0a6
+python -m pip install pytest-telescope
 ```
 
 Follow the [quickstart](https://pytest-telescope.readthedocs.io/en/latest/)
@@ -78,6 +92,7 @@ scoped test adds overhead, especially for short tests.
 The sandbox controls which files tests can see. Limit and measure CPU, memory, processes
 and scratch space in the job that runs pytest. Tests share the host network; leave tests
 that depend on changing network services ordinary, or disable caching for them.
+Frozen Git history is not supported.
 The cache also checks the interpreter and installed distributions, so installing or
 upgrading a package reruns scoped tests. An editable install of the project
 (`pip install -e .`) resolves to the declared files, including in
@@ -114,9 +129,18 @@ may run during startup with these commands; `python -m pytest_telescope` avoids 
 initial host pytest session. Running pytest without telescope mode keeps its usual
 behavior. `-p no:telescope` disables the plugin entirely.
 
-See the [execution contract](https://github.com/xu-hao/pytest-telescope/blob/main/docs/bubblewrap.md),
-[API reference](https://github.com/xu-hao/pytest-telescope/blob/main/docs/bubblewrap-api.md),
-[marker/project reference](https://github.com/xu-hao/pytest-telescope/blob/main/docs/specification.md),
-[development guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/development.md), and
-[publishing guide](https://github.com/xu-hao/pytest-telescope/blob/main/docs/publishing.md).
+## Learn more
+
+- [Ordinary and Bubblewrap execution](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/):
+  what a scoped test can see and what makes a saved result reusable.
+- [Marker and project reference](https://pytest-telescope.readthedocs.io/en/latest/specification/):
+  every marker field and `pyproject.toml` setting.
+- [API and configuration](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap-api/):
+  the Python API, command line and capability codes.
+- [Declarations, inventory and reuse](https://pytest-telescope.readthedocs.io/en/latest/execution-contract/):
+  the exact rules for declarations and cache reuse.
+- [Development guide](https://pytest-telescope.readthedocs.io/en/latest/development/) and
+  [publishing guide](https://pytest-telescope.readthedocs.io/en/latest/publishing/), for
+  contributors and maintainers.
+
 Licensed under the [MIT License](https://github.com/xu-hao/pytest-telescope/blob/main/LICENSE).
