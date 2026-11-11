@@ -10,9 +10,8 @@ from pytest_telescope.model import InfrastructureError, case_unit, fingerprint, 
 from pytest_telescope.result import owner_identity, ownership_matches, validate_collection
 
 
-@pytest.fixture
-def collected(tmp_path):
-    root = tmp_path / "project"
+def genuine_collection(root):
+    """Collect and execute one owned project for real; return its persisted evidence."""
     root.mkdir()
     (root / "pyproject.toml").write_text('[tool.pytest_telescope]\ntest_roots = ["."]\n')
     (root / "test_cases.py").write_text(
@@ -56,6 +55,24 @@ def test_choice(value): pass
     return root, manifest, path, record, position, module, sibling
 
 
+@pytest.fixture
+def collected(tmp_path):
+    """A private genuine collection for a case that changes its project or cache."""
+    return genuine_collection(tmp_path / "project")
+
+
+@pytest.fixture(scope="module")
+def unchanged_collection(tmp_path_factory):
+    """One genuine collection shared by cases that only read it and fault private copies."""
+    value = genuine_collection(tmp_path_factory.mktemp("ownership") / "project")
+    root, _, path, record, _, _, _ = value
+    evidence = path.read_bytes(), copy.deepcopy(record)
+    yield value
+    # Sharing is valid only while every consumer leaves the genuine evidence untouched.
+    assert (path.read_bytes(), record) == evidence
+    assert not list((root / ".pytest-telescope/scratch").iterdir())
+
+
 FAULTS = (
     "missing_owners",
     "empty_owners",
@@ -81,8 +98,10 @@ FAULTS = (
 
 
 @pytest.mark.parametrize("fault", FAULTS)
-def test_genuine_collection_rejects_malformed_missing_stale_or_extra_ownership(collected, fault):
-    _, manifest, _, record, position, module, sibling = collected
+def test_genuine_collection_rejects_malformed_missing_stale_or_extra_ownership(
+    unchanged_collection, fault
+):
+    _, manifest, _, record, position, module, sibling = unchanged_collection
     changed = copy.deepcopy(record["result"])
     item = changed["items"][position]
     original = record["result"]["items"][position]

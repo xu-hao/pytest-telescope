@@ -1,8 +1,13 @@
-"""Guard the installed candidate before functional tests or portable harness checks."""
+"""Guard the installed candidate before functional tests or portable harness checks.
+
+Parallel functional workers load this module as a plugin before pytest configures, so it
+opts out of assertion rewriting (PYTEST_DONT_REWRITE); it holds no test assertions.
+"""
 
 import argparse
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -11,9 +16,25 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gate import read_json, verify_candidate, write_json  # noqa: E402
 
+# Parallel workers receive the recorded membership under this name and return their own.
+RECEIPT = "telescope_functional_membership"
+# Each parallel worker loads this exact guard file before it configures pytest.
+WORKER_GUARD = """
+import sys
+from pathlib import Path
+sys.path.insert(0, {directory!r})
+import functional_gate
+if Path(functional_gate.__file__).resolve() != Path({filename!r}):
+    raise ImportError("parallel worker loaded a different functional guard")
+"""
 
-def selection_plugin(pytest, profile, membership, version):
-    """Record the actual collection and permit only the explicit profile exclusion."""
+
+def selection_plugin(pytest, profile, membership, version, expected=None):
+    """Record the actual collection and permit only the explicit profile exclusion.
+
+    With `expected`, a parallel worker instead proves that its own collection equals the
+    recorded membership exactly; it writes no file and runs no body on a mismatch.
+    """
 
     class Selection:
         def __init__(self):
@@ -93,10 +114,112 @@ def selection_plugin(pytest, profile, membership, version):
                 "selected": selected,
                 "deselected": self.deselected,
             }
-            self.digest = write_json(membership, self.record)
+            if expected is None:
+                self.digest = write_json(membership, self.record)
+            elif self.record != expected:
+                raise pytest.UsageError("parallel worker membership differs from its receipt")
+            else:
+                session.config.workeroutput[RECEIPT] = self.record
             yield
 
     return Selection()
+
+
+def pytest_configure(config):
+    """Guard each parallel functional worker; inert in every other pytest process."""
+    workerinput = getattr(config, "workerinput", None)
+    if workerinput is None:
+        return
+    import pytest
+
+    expected = workerinput.get(RECEIPT)
+    if type(expected) is not dict or set(expected) != {
+        "schema",
+        "profile",
+        "pytest_version",
+        "selected",
+        "deselected",
+    }:
+        raise pytest.UsageError("parallel functional worker has no membership receipt")
+    config.pluginmanager.register(
+        selection_plugin(pytest, expected["profile"], None, pytest.__version__, expected=expected),
+        "telescope-functional-selection",
+    )
+
+
+def parallel_plugin(pytest, record):
+    """Bind every parallel worker to the recorded membership before any test is scheduled."""
+
+    class Parallel:
+        def __init__(self):
+            self.collected = set()
+            self.confirmed = set()
+
+        def pytest_xdist_newgateway(self, gateway):
+            guard = Path(__file__).resolve()
+            source = WORKER_GUARD.format(directory=str(guard.parent), filename=str(guard))
+            gateway.remote_exec(source).waitclose(60)
+
+        def pytest_configure_node(self, node):
+            node.workerinput[RECEIPT] = record
+
+        @pytest.hookimpl(tryfirst=True)
+        def pytest_xdist_node_collection_finished(self, node, ids):
+            # Scheduling follows this hook; a refusal here stops before any test body.
+            if list(ids) != record["selected"]:
+                raise pytest.UsageError("parallel worker collection differs from the membership")
+            self.collected.add(node.gateway.id)
+
+        def pytest_testnodedown(self, node, error):
+            if getattr(node, "workeroutput", {}).get(RECEIPT) == record:
+                self.confirmed.add(node.gateway.id)
+
+    return Parallel()
+
+
+def run_parallel(pytest, workers, scratch, selection):
+    """Record membership from one serial collection, then run files on `workers` processes."""
+    try:
+        import xdist  # noqa: F401
+    except ImportError:
+        raise ValueError("parallel functional workers require pytest-xdist") from None
+    status = int(
+        pytest.main(
+            ["-qq", "--collect-only", "--basetemp", str(scratch / "collection"), "tests"],
+            plugins=[selection],
+        )
+    )
+    if status or selection.record is None:
+        return status
+    controller = parallel_plugin(pytest, selection.record)
+    # Each worker starts like this gate process: isolated, without bytecode writes.
+    python = shlex.join([sys.executable, "-I"])
+    status = int(
+        pytest.main(
+            [
+                "-q",
+                "--basetemp",
+                str(scratch / "tests"),
+                "-p",
+                "xdist",
+                "-p",
+                "functional_gate",
+                "--dist",
+                "loadfile",
+                "--max-worker-restart",
+                "0",
+                "--tx",
+                f"{workers}*popen//python={python}//dont_write_bytecode",
+                "tests",
+            ],
+            plugins=[controller],
+        )
+    )
+    if status == 0 and (
+        len(controller.collected) != workers or controller.confirmed != controller.collected
+    ):
+        raise ValueError("parallel workers did not confirm the functional membership")
+    return status
 
 
 def main():
@@ -107,9 +230,12 @@ def main():
     parser.add_argument("--scratch", required=True, type=Path)
     parser.add_argument("--functional-profile", required=True, choices=("core", "all"))
     parser.add_argument("--membership", type=Path)
+    parser.add_argument("--workers", type=int)
     args = parser.parse_args()
     if (args.mode == "tests") != (args.membership is not None):
         parser.error("tests mode requires --membership; harness mode does not accept it")
+    if args.workers is not None and (args.mode != "tests" or args.workers < 1):
+        parser.error("--workers takes a positive count of tests-mode worker processes")
     if (
         args.membership is not None
         and args.membership.parent.resolve() != args.binding.parent.resolve()
@@ -161,11 +287,14 @@ def main():
         selection = selection_plugin(
             pytest, args.functional_profile, args.membership, pytest.__version__
         )
-        status = int(
-            pytest.main(
-                ["-q", "--basetemp", str(args.scratch / "tests"), "tests"], plugins=[selection]
+        if (args.workers or 1) == 1:
+            status = int(
+                pytest.main(
+                    ["-q", "--basetemp", str(args.scratch / "tests"), "tests"], plugins=[selection]
+                )
             )
-        )
+        else:
+            status = run_parallel(pytest, args.workers, args.scratch, selection)
         if selection.digest is not None:
             if read_json(args.membership, selection.digest) != selection.record:
                 raise ValueError("functional membership changed during qualification")
