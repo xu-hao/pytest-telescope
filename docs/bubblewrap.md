@@ -121,9 +121,12 @@ this, with the exceptions listed under
   and are bound over the originals for that sandbox only.
 - Cached bytecode of a rewritten module is shown as an empty file, and the rewritten
   source carries a different modification time from the original, which is the one a
-  cache of the original records. The interpreter therefore always compiles the rewritten
+  cache of the original records. The interpreter therefore compiles the rewritten
   source, including when the stale cache is an unchecked hash-based file that is never
-  compared with its source.
+  compared with its source. Only cache files that exist when the run identifies the
+  environment are shown empty: a timestamp or checked hash-based cache written later is
+  rejected by the different modification time, but an unchecked hash-based cache written
+  later would be loaded.
 - The sandbox environment is cleared; `PWD` is the working directory below `/project`,
   and `OLDPWD`, `VIRTUAL_ENV` and `PYTHONPATH` are unset unless declared. A declared
   variable is forwarded with its value, which is part of the case's key.
@@ -135,55 +138,50 @@ beyond that bound that names the project directory refuses with `sandbox:environ
 
 ### What a scoped test can still see
 
+Two things a scoped test can read still name its checkout. They are outside the
+guarantee above. A result cached in one checkout could be reused in another, where a
+test that read either one would have seen a different value.
+
 **Not location-blind: the mount table's source directories.** A test that reads the
 source directories in the mount table (field 4 of `/proc/*/mountinfo`) can observe its
 checkout's location, which its cache key does not contain. Leave such a test ordinary,
 or add `cache=False` to its scope.
+
+Field 4 of each mount table line is the bind source's directory within its filesystem.
+The frozen copy and the invocation's other files live below the project's
+`.pytest-telescope/scratch` directory, so that field names the checkout. With the
+project at `/home/dev/my_project`, the line for `/project` reads:
+
+```text
+412 398 253:0 /home/dev/my_project/.pytest-telescope/scratch/invocation-<id>/project /project ro,nosuid,nodev,relatime - ext4 /dev/sda2 rw
+```
+
+A test that parses field 4, or runs a tool that prints it, sees
+`<checkout>/.pytest-telescope/scratch/invocation-<id>/project`. The rest of the mount
+table is clean: the mount points (field 5), the mount options and every line of
+`/proc/self/mounts` name only sandbox paths.
 
 **Not location-blind: bytecode cached by an environment inside the project.** A test
 that reads the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an
 environment inside the project can observe its checkout's location, which its cache key
 does not contain. Leave such a test ordinary, or add `cache=False` to its scope.
 
-Two things still name the checkout and are outside this guarantee:
+An [environment inside the project](#an-environment-inside-the-project) keeps the
+bytecode it cached for its own modules. Each cache file records the path its source had
+when it was compiled, which lies below the checkout. With the project at
+`/home/dev/my_project` and its environment in `.venv`, the sandbox shows the cache file
+at a sandbox path, but its bytes still contain the host path of its source:
 
-- **The source directory of each bind mount.** The fourth field of each
-  `/proc/self/mountinfo` line is the bind source's directory within its filesystem. The
-  frozen copy and the invocation's other files live below the project's
-  `.pytest-telescope/scratch` directory, so that field names the checkout. With the
-  project at `/home/dev/my_project`, the line for `/project` reads:
+```text
+file:   /project/.venv/lib/python3.12/site-packages/__pycache__/example.cpython-312.pyc
+bytes:  … /home/dev/my_project/.venv/lib/python3.12/site-packages/example.py …
+```
 
-  ```text
-  412 398 253:0 /home/dev/my_project/.pytest-telescope/scratch/invocation-<id>/project /project ro,nosuid,nodev,relatime - ext4 /dev/sda2 rw
-  ```
-
-  A test that parses field 4, or runs a tool that prints it, sees
-  `<checkout>/.pytest-telescope/scratch/invocation-<id>/project`. A result cached in one
-  checkout could then be reused in another checkout, where the test would have seen a
-  different value. The rest of the mount table is clean: the mount points (field 5), the
-  mount options and every line of `/proc/self/mounts` name only sandbox paths.
-- **The raw bytes of bytecode cached by an environment inside the project.** An
-  [environment inside the project](#an-environment-inside-the-project) keeps the
-  bytecode it cached for its own modules. Each cache file records the path its source
-  had when it was compiled, which lies below the checkout. With the project at
-  `/home/dev/my_project` and its environment in `.venv`, the sandbox shows the cache
-  file at a sandbox path, but its bytes still contain the host path of its source:
-
-  ```text
-  file:   /project/.venv/lib/python3.12/site-packages/__pycache__/example.cpython-312.pyc
-  bytes:  … /home/dev/my_project/.venv/lib/python3.12/site-packages/example.py …
-  ```
-
-  A test that scans the environment's files for absolute paths, or reads a cache file's
-  bytes itself instead of importing the module, sees `<checkout>/.venv/...`. A result
-  cached in one checkout could then be reused in another checkout, where the test would
-  have seen a different value. Everything the interpreter reports is clean: an imported
-  module's `__file__`, the `co_filename` of its code and tracebacks through it name
-  sandbox paths below `/project/.venv`. Only the bytes of the cache files carry the host
-  path. An environment outside the project is not affected.
-
-A test that reads either one can observe the checkout's location although its cache key
-does not contain it. Leave such a test ordinary, or add `cache=False` to its scope.
+A test that scans the environment's files for absolute paths, or reads a cache file's
+bytes itself instead of importing the module, sees `<checkout>/.venv/...`. Everything
+the interpreter reports is clean: an imported module's `__file__`, the `co_filename` of
+its code and tracebacks through it name sandbox paths below `/project/.venv`. An
+environment outside the project is not affected.
 
 Scoped tests run with the same executable
 and installed distributions as the invoking pytest-telescope process, including the
