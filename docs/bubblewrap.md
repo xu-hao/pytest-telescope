@@ -391,7 +391,9 @@ starts.
 
 ## Order of an invocation
 
-1. Parse declarations statically, without importing project code, and route every file.
+1. Parse test declarations and the declared Python sources of scoped views statically,
+   within one [parse budget](execution-contract.md#static-parse-budget), without importing
+   project code, and route every file.
 2. If any scoped case is possible, probe the interpreter environment and run a Bubblewrap
    preflight. A failure refuses the whole run before any test code executes.
 3. Collect files that are scoped as a whole, in a sandbox (or reuse a valid inventory).

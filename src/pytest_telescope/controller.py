@@ -926,7 +926,9 @@ def run(
                 ):
                     pool = pool_directory / "project"
                     records = snapshot(manifest, manifest.pool, pool)
-                    frozen_registry = FrozenRegistry(pool, records, manifest.pool.tool_links)
+                    frozen_registry = FrozenRegistry(
+                        pool, records, manifest.pool.tool_links, manifest.scans
+                    )
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}

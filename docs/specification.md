@@ -163,10 +163,11 @@ as another grant.
 
 Package initializers, nested helpers and resources read during import remain explicit
 dependencies. The controller does not follow imports to add them automatically. The
-same [literal syntax and source budgets](execution-contract.md#static-discovery-and-real-pytest-agreement)
-apply to readable helpers; computed, dynamically created and modified inherited markers
-remain unsupported. Relative leaf links retain the existing requirement to declare
-their exact destination.
+same [literal syntax](execution-contract.md#static-discovery-and-real-pytest-agreement)
+and [parse budget](execution-contract.md#static-parse-budget) apply to readable helpers,
+which `plan` checks as `run` does; computed, dynamically created and modified inherited
+markers remain unsupported. Relative leaf links retain the existing requirement to
+declare their exact destination.
 
 ## Project configuration
 

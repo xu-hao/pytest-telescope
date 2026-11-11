@@ -6,12 +6,15 @@ import hashlib
 import io
 import json
 import os
+import posixpath
 import stat
 import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from . import markers
 
 
 class DeclarationError(ValueError):
@@ -92,6 +95,8 @@ class Manifest:
     ordinary_files: dict = field(default_factory=dict)
     pool: Unit | None = None
     tools: dict = field(default_factory=dict)
+    # Each Python import origin of the pool that has a source, mapped to its file's scan.
+    scans: dict = field(default_factory=dict)
 
     @cached_property
     def registry_by_id(self):
@@ -184,7 +189,7 @@ def parent_fd(root, name):
         os.close(descriptor)
 
 
-def regular_bytes(root, name, limit):
+def regular_bytes(root, name, limit, *, oversize="declared file exceeds its size limit"):
     with parent_fd(root, name) as (directory, leaf):
         descriptor = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         with os.fdopen(descriptor, "rb") as stream:
@@ -201,8 +206,134 @@ def regular_bytes(root, name, limit):
             ):
                 raise InfrastructureError("input changed while freezing its snapshot")
             if len(content) > limit:
-                raise DeclarationError("declared file exceeds its size limit")
+                raise DeclarationError(oversize)
             return content, before
+
+
+def canonical_path(name):
+    return (
+        type(name) is str
+        and bool(name)
+        and len(name) <= 4096
+        and not name.startswith("/")
+        and "\\" not in name
+        and "\x00" not in name
+        and len(PurePosixPath(name).parts) <= 64
+        and all(part not in ("", ".", "..") for part in name.split("/"))
+    )
+
+
+class SourceLinkError(InfrastructureError):
+    """A leaf-link chain that a view cannot follow to a declared source."""
+
+
+def follow_source(origin, entry, inputs, absent, tool_links):
+    """Return the regular file that a Python origin's leaf-link chain reaches in a view.
+
+    ``entry(name)`` returns the kind of a view member and, for a symlink, its target text.
+    None means the origin has no source: a directory, or a dangling link to a declared
+    expected-absent path. A chain the view cannot follow raises ``SourceLinkError``.
+    """
+    name, seen = origin, set()
+    while True:
+        kind, text = entry(name)
+        if kind != "symlink":
+            return name if kind == "file" else None
+        if name in seen or len(seen) >= 64:
+            raise SourceLinkError("cyclic frozen declaration source link")
+        if name in tool_links:
+            raise SourceLinkError("a tool link is not a project declaration source")
+        seen.add(name)
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(name), text))
+        if not canonical_path(target) or target not in inputs:
+            # A supported dangling leaf remains absent, never an authentication source.
+            if canonical_path(target) and target in absent:
+                return None
+            raise SourceLinkError("frozen declaration source link escaped its view")
+        name = target
+
+
+class StaticDiscovery:
+    """One parse budget over test files and declared Python sources, shared by plan and run.
+
+    Each distinct regular file is read and parsed at most once; its bytes and AST nodes
+    count once. Literal marker calls count once per import origin, because a leaf-link
+    alias authenticates its own records, which relabel the single parse.
+    """
+
+    def __init__(self, root):
+        self.root = root
+        self.files = {}
+        self.origins = set()
+        self.source = self.nodes = self.markers = 0
+
+    def scan(self, name):
+        found = self.files.get(name)
+        if found is not None:
+            return found
+        try:
+            content, _ = regular_bytes(
+                self.root, name, markers.MAX_SOURCE, oversize=markers.oversize_message()
+            )
+        except DeclarationError as exc:
+            raise DeclarationError(f"{exc}: {name}") from exc
+        self.source += len(content)
+        if self.source > markers.MAX_TOTAL_SOURCE:
+            raise DeclarationError(
+                "Python source for static discovery exceeds the "
+                f"{markers.size_text(markers.MAX_TOTAL_SOURCE)} total budget"
+            )
+        try:
+            rows, nodes = markers.scan(content)
+        except markers.MarkerError as exc:
+            raise DeclarationError(f"{exc}: {name}") from exc
+        self.nodes += nodes
+        if self.nodes > markers.MAX_TOTAL_NODES:
+            raise DeclarationError(
+                "Python syntax for static discovery exceeds the total budget of "
+                f"{markers.MAX_TOTAL_NODES:,} AST nodes"
+            )
+        found = self.files[name] = markers.Scan(name, hashlib.sha256(content).hexdigest(), rows)
+        return found
+
+    def origin(self, origin, name):
+        """Count one import origin of the regular file ``name`` and return its scan."""
+        found = self.scan(name)
+        if origin not in self.origins:
+            self.origins.add(origin)
+            self.markers += len(found.rows)
+            if self.markers > markers.MAX_MARKERS:
+                raise DeclarationError(
+                    "static discovery exceeds the total budget of "
+                    f"{markers.MAX_MARKERS:,} literal telescope marker calls"
+                )
+        return found
+
+    def live_entry(self, name):
+        """A pool member's kind and link text, without following links or replaced parents."""
+        with parent_fd(self.root, name) as (directory, leaf):
+            metadata = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+            if stat.S_ISLNK(metadata.st_mode):
+                return "symlink", os.readlink(leaf, dir_fd=directory)
+        if stat.S_ISREG(metadata.st_mode):
+            return "file", None
+        return "directory" if stat.S_ISDIR(metadata.st_mode) else "other", None
+
+    def pool(self, pool):
+        """Scan every Python origin that a scoped view of ``pool`` could authenticate."""
+        scans = {}
+        inputs, absent = set(pool.inputs), set(pool.absent)
+        for origin in pool.inputs:
+            if not origin.endswith(".py") or origin in pool.tool_links:
+                continue
+            try:
+                name = follow_source(origin, self.live_entry, inputs, absent, pool.tool_links)
+            except SourceLinkError:
+                # Every view containing this origin refuses before authenticating it.
+                continue
+            if name is not None:
+                scans[origin] = self.origin(origin, name)
+        return scans
 
 
 MAX_VISITS = 200_000
@@ -374,7 +505,6 @@ REMOVED_SETTINGS = {
 
 def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     from . import tool_context
-    from .markers import MAX_MARKERS, MAX_TOTAL_NODES, MAX_TOTAL_SOURCE, MarkerError, discover
 
     root = Path(root).resolve()
     excluded = set()
@@ -591,20 +721,12 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         hashes[suite.config] = hashlib.sha256(suite.raw).hexdigest()
     for distribution in distributions.values():
         hashes.update(distribution.source_hashes)
-    total_bytes = total_nodes = 0
+    # Test files and, below, the pool's declared Python sources share one parse budget.
+    discovery = StaticDiscovery(root)
     for filename in sorted(inventory):
-        content, _ = regular_bytes(root, filename, 4 * 1024 * 1024)
-        total_bytes += len(content)
-        if total_bytes > MAX_TOTAL_SOURCE:
-            raise DeclarationError("test source exceeds the 64 MiB discovery budget")
-        try:
-            found, nodes = discover(content, filename)
-        except MarkerError as exc:
-            raise DeclarationError(str(exc)) from exc
-        total_nodes += nodes
-        if total_nodes > MAX_TOTAL_NODES or len(registry) + len(found) > MAX_MARKERS:
-            raise DeclarationError("test declaration syntax exceeds total node/marker limits")
-        hashes[filename] = hashlib.sha256(content).hexdigest()
+        scan = discovery.origin(filename, filename)
+        found = markers.label(scan.rows, filename)
+        hashes[filename] = scan.sha256
         registry.extend(found)
         for row in found:
             declarations[row["id"]] = declaration(row["kwargs"], row["id"])
@@ -721,6 +843,11 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         if pool_inputs
         else None
     )
+    # Every scoped view is a subset of the pool, so run parses nothing plan has not bounded.
+    scans = {} if pool is None else discovery.pool(pool)
+    for scan in scans.values():
+        # Freezing refuses a declared source that changed after it was parsed.
+        hashes[scan.file] = scan.sha256
     return Manifest(
         root,
         raw,
@@ -739,6 +866,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         ordinary_files,
         pool,
         tools,
+        scans,
     )
 
 
@@ -897,7 +1025,7 @@ def snapshot(manifest, unit, destination):
     }
     for name, expected in manifest.source_hashes.items():
         if name in unit.inputs and measured_hashes.get(name) != expected:
-            raise InfrastructureError("test declarations changed while freezing inputs")
+            raise InfrastructureError("declaration sources changed while freezing inputs")
     return records
 
 

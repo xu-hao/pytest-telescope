@@ -359,10 +359,7 @@ normal phase/lifecycle validation and output/session/cardinality limits remain i
 
 ## Bounds and performance
 
-Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited entries while expanding declared directories and globs; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB per Python source file and 64 MiB of Python source in total, 200,000 AST nodes per file and 2,000,000 total, depth 128, and 100,000 literal marker calls. Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
-
-Python-source and marker parsing budgets also cover declared helper source used by the
-guard. Validating a helper never expands its own declarations into additional inputs.
+Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited entries while expanding declared directories and globs; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB, 200,000 AST nodes and depth 128 per Python source file, and in total 2 GiB of Python source, 268,435,456 (2^28) AST nodes and 100,000 literal marker calls, as described [below](#static-parse-budget). Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
 
 Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
 
@@ -375,6 +372,51 @@ Each cache miss still starts a sandboxed pytest session: one per case by default
 one per group in batch mode. Repeated collection of a large parametrized module can
 therefore be expensive. Reusing an inventory or result starts no sandbox. Ordinary
 sessions always run.
+
+### Static parse budget
+
+One parse budget covers every structurally selected test file and every declared Python
+source that a scoped view could authenticate. A declared source is each `.py` input of the
+union of scoped views that is not a frozen tool link, followed through leaf symlinks within
+that union, at most 64 links, to a regular file. A link to a declared expected-absent path
+has no source, and tool links are never followed. A chain that cycles, exceeds 64 links or
+leaves the union is never parsed; a scoped view that selects it refuses the link.
+Validating a helper never expands its own declarations into additional inputs.
+
+The totals scale with the frozen project rather than with test files alone. The 2 GiB
+source total equals the frozen project byte bound, and the node total allows one AST node
+per eight bytes of that source. Installed library source measures about 0.108 nodes per
+byte, so the source total binds first for ordinary code, at about 232 million nodes, and
+the node total only for unusually dense syntax. The per-file, depth and marker-call limits
+are unchanged.
+
+Each distinct regular file is read and parsed at most once per invocation, and its bytes
+and nodes count once. Literal marker calls count once per import origin: a leaf-symlink
+alias authenticates its own records, with its own `file` and identity, so the marker total
+also bounds the records that aliases multiply. An alias's records relabel the single parse
+of its file and equal the records of parsing the same bytes under the alias name.
+Relabeling costs nothing for a file without markers and about a tenth of a reparse for a
+file with 2,000 marker calls, so counting an alias's bytes and nodes again would refuse
+projects without bounding any additional work.
+
+`plan` and `run` apply the same budget in the same static pass, before any sandbox is
+prepared or any case runs. An over-budget project refuses with a declaration error that
+names the exceeded total. A syntax error, a per-file size, node or depth violation, or an
+unsupported literal marker call in a test file or declared source refuses with a
+declaration error that names the cause and the file. The run then freezes the project and
+verifies each declared source's frozen bytes against the hash that static discovery
+parsed; a source changed in between refuses as an infrastructure error. Authentication of
+the frozen source relabels those parses per import origin and never parses again.
+
+Parsing is single-threaded. Measured with Python 3.12 at the node total, installed library
+source repeated to 268 million nodes (about 199,000 files and 2.48 GB, beyond the source
+total) took 404 s at 0.66 million nodes per second with a 110 MB peak resident set. Syntax
+at the per-file node bound (1,343 files of 199,986 nodes in 200 KB each, 268 million nodes)
+took 570 s at 0.47 million nodes per second with a 159 MB peak. Memory is bounded per
+file: each parse tree is released before the next file and only literal marker rows are
+retained. A project near the totals therefore spends several minutes in static discovery
+for each plan or run; the cost scales with declared Python source, not with the number of
+cases.
 
 ## Project configuration
 
