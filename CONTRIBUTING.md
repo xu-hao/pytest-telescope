@@ -1,7 +1,8 @@
 # Contributing
 
-See [development](docs/development.md) for installation and checks, and the
-[execution contract](docs/bubblewrap.md) for routing and the sandbox view.
+See [development](docs/development.md) for installation and checks, the
+[execution contract](docs/execution-contract.md) for declarations, inventory and reuse,
+and the [sandbox page](docs/bubblewrap.md) for routing and the sandbox view.
 
 Include behavioral regression tests and documentation with behavior changes. Sandbox
 tests must run real Bubblewrap and check which files a test can see; skipped or

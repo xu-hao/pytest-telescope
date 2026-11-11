@@ -159,34 +159,36 @@ the test would have seen a different value.
 
 ### Performance
 
-Two benchmarks ran on one workstation under the same outer limits as the 2026-10-21
-campaign: 4 CPUs, 8 GiB and five interleaved repetitions. Every measurement runs the
-16-case workload fresh, so these numbers show execution overhead, not the benefit of
-reuse. The campaign measured 0.1.1 with pytest 9.2.0 and pluggy 1.7.0, and all 50
+Both benchmarks below ran on one workstation under the same outer limits as the
+2026-10-21 campaign: 4 CPUs, 8 GiB and five interleaved repetitions. Every measurement
+runs the 16-case workload fresh, so the numbers show execution overhead, not the benefit
+of reuse. The campaign measured 0.1.1 with pytest 9.2.0 and pluggy 1.7.0. All 50
 measurements were valid (`benchmarks/results/2026-11-11-bubblewrap.json`). Against
 2026-10-21, plain pytest was slower: its median wall time rose from 0.854 to 0.889 s, a
-factor of 1.04. Every pytest-telescope series was faster. Median wall time fell from
-1.07, 1.07 and 1.08 s to 0.98 s for the ordinary route (factors of 0.90 to 0.92), from
-3.92, 2.22 and 1.36 s to 3.80, 2.16 and 1.32 s for scoped cases on 1, 2 and 4 workers
-(0.97), and from 1.62, 1.26 and 1.28 s to 1.59, 1.23 and 1.23 s for scoped batches (0.96
-to 0.98). Median CPU time changed by similar factors: 1.04 for plain pytest and 0.90 to
-0.98 for the others. Relative to plain pytest, scoped cases took 4.27, 2.43 and 1.49
-times its wall time (was 4.59, 2.60 and 1.59), scoped batches 1.79, 1.39 and 1.38 times
-(was 1.90, 1.48 and 1.49), and the ordinary route 1.10 to 1.11 times (was 1.25 to 1.26).
-The two campaigns differ in more than this release: the earlier one measured 0.1.0a4
-with pytest 8.3.5 and pluggy 1.5.0. A second benchmark therefore isolates this release.
-It measured 0.1.0 and 0.1.1 on pytest 9.2.0 with otherwise identical packages,
-alternating the two versions measurement by measurement, for seven configurations. All
-70 measurements were valid; its record is not checked in. No series had a slower median
-in 0.1.1. Median wall time fell from 4.43 to 3.86 s for scoped cases on 1 worker (0.87)
-and from 1.70 to 1.38 s on 4 workers (0.81), from 1.92 to 1.74 s (0.91) and from 1.45 to
-1.37 s (0.95) for scoped batches on 1 and 4 workers, and from 1.10 to 1.05 s (0.95) and
-from 1.08 to 1.02 s (0.94) for the ordinary route. Median CPU time fell by factors of
-0.77 to 0.95. This comparison was noisier than the campaign. Plain pytest, which runs no
-pytest-telescope code, measured 0.923 and 0.901 s (0.98) beside the two versions, and
-the sample ranges of the two versions overlapped in every series. Of the 30 paired
-pytest-telescope measurements, 0.1.1 was faster in 28 and slower in two. Read the
-smaller differences, for the ordinary route and scoped batches, with that noise in mind.
+factor of 1.04. Every pytest-telescope series was faster. By median wall time, the
+ordinary route fell from 1.07, 1.07 and 1.08 s to 0.98 s (factors of 0.90 to 0.92).
+Scoped cases on 1, 2 and 4 workers fell from 3.92, 2.22 and 1.36 s to 3.80, 2.16 and
+1.32 s (0.97). Scoped batches fell from 1.62, 1.26 and 1.28 s to 1.59, 1.23 and 1.23 s
+(0.96 to 0.98). Median CPU time changed by similar factors: 1.04 for plain pytest and
+0.90 to 0.98 for the others. Relative to plain pytest, scoped cases took 4.27, 2.43 and
+1.49 times its wall time (was 4.59, 2.60 and 1.59). Scoped batches took 1.79, 1.39 and
+1.38 times (was 1.90, 1.48 and 1.49). The ordinary route took 1.10 to 1.11 times (was
+1.25 to 1.26). The two campaigns differ in more than this release: the earlier one
+measured 0.1.0a4 with pytest 8.3.5 and pluggy 1.5.0.
+
+A second, interleaved benchmark therefore isolates this release. It measured 0.1.0 and
+0.1.1 on pytest 9.2.0 with otherwise identical packages. The two versions alternated
+measurement by measurement, for seven configurations. All 70 measurements were valid.
+Its record is not checked in. No series had a slower median in 0.1.1. By median wall
+time, scoped cases fell from 4.43 to 3.86 s on 1 worker (0.87) and from 1.70 to 1.38 s
+on 4 workers (0.81). Scoped batches on 1 and 4 workers fell from 1.92 to 1.74 s (0.91)
+and from 1.45 to 1.37 s (0.95). The ordinary route fell from 1.10 to 1.05 s (0.95) and
+from 1.08 to 1.02 s (0.94). Median CPU time fell by factors of 0.77 to 0.95. This
+comparison was noisier than the campaign. Plain pytest, which runs no pytest-telescope
+code, measured 0.923 and 0.901 s (0.98) beside the two versions. The sample ranges of
+the two versions overlapped in every series. Of the 30 paired pytest-telescope
+measurements, 0.1.1 was faster in 28 and slower in two. Read the smaller differences,
+for the ordinary route and scoped batches, with that noise in mind.
 
 ### Qualification
 
@@ -197,9 +199,9 @@ smaller differences, for the ordinary route and scoped batches, with that noise 
   schedules any test. A crashed worker is not replaced.
 - The `dev` extra pins the worker runner exactly: `pytest-xdist==3.8.0` with its transport
   `execnet==2.1.2`.
-- The CI and release workflows use four workers. On a 4-CPU job the serial functional
-  stage has taken 13 to 16 minutes, close to its twenty-minute deadline, and four workers
-  have taken 4 to 5 minutes.
+- The CI and release workflows use four workers. In local runs limited to 4 CPUs, the
+  serial functional stage took 13 to 16 minutes, close to its twenty-minute deadline, and
+  four workers took 4 to 5 minutes.
 
 ## 0.1.0 (2026-11-10)
 
