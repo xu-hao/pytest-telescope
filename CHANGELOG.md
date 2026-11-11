@@ -2,59 +2,171 @@
 
 ## 0.1.1
 
-- Static-parse totals now scale with the frozen project: 2 GiB of Python source (was
-  64 MiB) and 268,435,456 AST nodes (was 2,000,000). The per-file limits of 4 MiB,
-  200,000 nodes and depth 128 and the total of 100,000 literal marker calls are
-  unchanged. Each distinct file is parsed once per invocation; a symlink alias adds only
-  its own marker records. Measured with Python 3.12 at the node total, parsing ran at
-  0.47 to 0.66 million nodes per second with a peak resident set of at most 159 MB, as
-  documented in the execution contract's static parse budget.
-- `plan` now parses and bounds declared Python sources exactly as `run` does, in the
-  same static pass. A project over a parse total, or a declared source that cannot be
-  parsed or exceeds a per-file size, node or depth limit, refuses with a declaration
-  error that names the exceeded total or the cause and file, before any sandbox is
-  prepared or any case runs. Previously `plan` accepted such a project and `run` refused
-  it after preparing the sandbox. Freezing refuses a declared source that changed after
+Version 0.1.0 was tagged but never published to PyPI, because its release build's
+functional stage exceeded its deadline. 0.1.1 is therefore the first official release on
+PyPI after 0.1.0a7. It includes every change listed under 0.1.0 below.
+
+### Summary
+
+Three terms are used below. A *scoped* test declares the project files it needs. It runs
+in a Bubblewrap sandbox, and its successful result can be reused. An *ordinary* test has
+no such declaration and runs every time as plain pytest. The *frozen view* is the
+read-only copy of its declared project files that a scoped test sees in its sandbox.
+
+- Larger projects fit. The totals for statically parsed Python source rise from 64 MiB to
+  2 GiB, and from 2,000,000 to 268,435,456 AST nodes.
+- `plan` now refuses the same oversized or unparsable declared sources as `run`.
+- A scoped test sees its project at one path, `/project`, wherever the checkout lives.
+  Editable installs and an environment inside the project work there. A scoped test can no
+  longer tell where its checkout lives, with the two exceptions under
+  "Known limitations".
+- Results cached by earlier versions are not reused, because the sandbox view policy
+  changed. The first run after the upgrade executes every scoped test again.
+- Most projects need no change. One kind of test does: a test that reads the source
+  directories in the mount table, or the raw `.pyc` bytes of an environment inside the
+  project, should stay ordinary or use `cache=False`.
+
+### Static parse bounds
+
+- Static discovery parses test files and declared Python sources without importing them.
+  Its totals are now 2 GiB of Python source (was 64 MiB) and 268,435,456 AST nodes (was
+  2,000,000). The source total equals the existing 2 GiB bound on a project's frozen
+  bytes, and the node total allows one AST node per eight bytes of it. The per-file limits
+  of 4 MiB, 200,000 nodes and depth 128 are unchanged. So is the total of 100,000 literal
+  marker calls.
+- Each distinct file is read and parsed once per invocation, and its bytes and nodes count
+  once. A symlink alias of a file is not parsed again: its marker records are relabeled
+  from that one parse. Marker calls count once per import origin, so the marker total also
+  bounds the records that aliases add.
+- Parsing is single-threaded. Measured with Python 3.12 at the node total, installed
+  library source took 404 s at 0.66 million nodes per second, with a peak resident set of
+  110 MB. Syntax at the per-file node bound took 570 s at 0.47 million nodes per second,
+  with a peak of 159 MB. A project near the totals therefore spends several minutes in
+  static discovery for each `plan` or `run`. Memory is bounded per file. See
+  [bounds and performance](https://pytest-telescope.readthedocs.io/en/latest/execution-contract/#bounds-and-performance).
+
+### `plan` and `run` apply the same bounds
+
+- `plan` and `run` enforce the parse bounds in the same static pass, before any sandbox is
+  prepared and before any case runs. A project over a total refuses with a declaration
+  error that names the exceeded total. A test file or declared source with a syntax
+  error, a per-file size, node or depth violation, or an unsupported literal marker call
+  refuses with a declaration error that names the cause and the file. Previously `plan`
+  accepted such a declared source and only `run` refused it.
+- A run then freezes the project. Freezing refuses a declared source that changed after
   it was parsed.
-- Scoped sessions show the frozen project at one path, the project's host path. The
-  working directory, pytest's `-c` and `--rootdir`, the test-file arguments, the
-  worker's project root and editable installs all name the same files, so a test that
-  checks that an imported package module lies below its checkout passes as it does in
-  ordinary pytest. Nothing is mounted at `/project` unless the project lives there, and
-  scoped tests now observe the checkout's location, for example in `Path.cwd()` and
-  `__file__`. The sandbox view policy is `bubblewrap-view-v3` (was
-  `bubblewrap-view-v2`), so results recorded by earlier versions are not reused.
-- Identical checkouts at different paths still share results: no cache key or record
-  contains the project's path, and fixture-guard identities now record project source
-  files and conftest plugin names relative to the project.
-- A project inside `/project`, an environment under `/project`, and relative
-  project-link text that resolved differently from `/project` are no longer refused.
-  Relative link text resolves from the link's location below the project's host path
-  and must still reach its declared root.
-- Failure evidence names a location in a project module imported through an editable
-  install by its project-relative file instead of `<runtime>`.
-- `scripts/check.py --functional-workers N` runs the functional stage on `N`
-  pytest-xdist workers after recording the functional membership from one serial
-  collection, which every worker must reproduce exactly. The default stays one serial
-  process; the CI and release workflows use four workers, and pytest-xdist joins the
-  `dev` extra.
-- The benchmark ran on the same workstation under the same outer limits as the
-  2026-10-21 campaign: 4 CPUs, 8 GiB and five interleaved repetitions, with all 50
-  measurements valid (`benchmarks/results/2026-11-11-bubblewrap.json`). Every series
-  was slower and none was faster. Median wall time rose from 0.854 to 0.966 s (a
-  factor of 1.13) for plain pytest, by factors of 1.09 to 1.14 for the ordinary route,
-  from 3.92, 2.22 and 1.36 s to 5.05, 2.90 and 1.86 s (1.29 to 1.37) for scoped cases on
-  1, 2 and 4 workers, and from 1.62, 1.26 and 1.28 s to 2.05, 1.52 and 1.56 s (1.20 to
-  1.26) for scoped batches. Median CPU time rose by factors of 1.09 to 1.33. Relative to
-  plain pytest, scoped cases took 5.23, 3.01 and 1.92 times its wall time (was 4.59,
-  2.60 and 1.59) and scoped batches 2.12, 1.57 and 1.62 times (was 1.90, 1.48 and
-  1.49); the ordinary route stayed at 1.22 to 1.26 times. The two campaigns differ in
-  more than this release: the earlier one measured pytest-telescope 0.1.0a4 with pytest
-  8.3.5 and pluggy 1.5.0, this one 0.1.1 with pytest 9.2.0 and pluggy 1.7.0, and the
-  host was running other jobs at a one-minute load average of 13.2 to 14.1 on its 24
-  logical CPUs, while the earlier campaign's host load was not recorded. Plain pytest,
-  which runs no pytest-telescope code, was itself 13% slower, so these results do not
-  isolate the cost of this release.
+- A run verifies each distinct frozen declared Python file once per invocation. It reads
+  and hashes the file when the first scoped view selects it. Each later view checks only
+  the file's metadata: that it is still the same regular file with the same mode, size
+  and modification time. It also reads each selected link's text again. A frozen file or
+  link that changed after its verification refuses. Measured with Python 3.12, one 4 MiB
+  module with 800 symlink aliases took 17 ms for its first view and about 11 ms for each
+  later view.
+
+### One project path: `/project`
+
+- The sandbox shows the frozen view at one path, `/project`. Nothing is mounted at the
+  checkout's host path, and the live checkout is never mounted. The working directory,
+  pytest's `-c` and `--rootdir`, the test files, `Path.cwd()`, `__file__` and tracebacks
+  all name `/project`. Version 0.1.0 also showed the frozen view at the checkout's host
+  path.
+- Environment files that name the checkout are shown as read-only rewritten copies, in
+  which the checkout's directory reads `/project`. These files are:
+  - the `.pth` files of the interpreter's site directories;
+  - the modules those files load at startup, such as an editable install's finder;
+  - the installed metadata of a distribution installed from a location: every file of a
+    `*.dist-info` directory that has a `direct_url.json`, and `.egg-link` files;
+  - for an environment inside the project, its `pyvenv.cfg` and the text files of its
+    scripts directory.
+
+  The host files are never modified. The copies live in the invocation's private scratch
+  and are bound over the originals for that sandbox only.
+- Stale bytecode of a rewritten module is never loaded. Its cached bytecode is shown as
+  an empty file, and the rewritten source carries a different modification time from the
+  original. The interpreter therefore always compiles the rewritten source.
+- Editable-installed modules and test modules share the `/project` root. A test that
+  checks that an imported package module lies below its own project root passes, as it
+  does in ordinary pytest. A child started with `python -I` imports declared source
+  through the rewritten install.
+- A scoped test cannot observe where its checkout lives, apart from the exceptions under
+  "Known limitations". The sandbox environment is cleared: `PWD` is the working directory
+  below `/project`, and `OLDPWD`, `VIRTUAL_ENV` and `PYTHONPATH` are unset unless
+  declared. `/proc/self/mounts`, and the mount points and options in
+  `/proc/self/mountinfo`, name only sandbox paths. See
+  [a scoped test cannot tell where its checkout lives](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#a-scoped-test-cannot-tell-where-its-checkout-lives).
+- Identical checkouts at different paths share results. No cache key or record contains
+  the project's path, and fixture-guard identities name project files by their `/project`
+  paths.
+- An environment inside the project, such as `.venv`, runs at the same relative path
+  below `/project`, for example `/project/.venv`. The session starts
+  `/project/.venv/bin/python`, and `sys.prefix`, `sys.executable`, `sys.path` and the
+  first `PATH` entry name that path. A console script whose first line names the
+  environment's interpreter starts it there. Version 0.1.0 kept such an environment at
+  its host path. See
+  [an environment inside the project](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#an-environment-inside-the-project).
+- The sandbox view policy is `bubblewrap-view-v3`. Version 0.1.0 used
+  `bubblewrap-view-v2`. The policy is part of every scoped cache key, so results recorded
+  by earlier versions are not reused.
+- Refusals removed: the project may now live anywhere outside the system directories that
+  the sandbox shares with the host. That includes `/tmp`, `/dev/shm` and a subdirectory of
+  `/project`, which version 0.1.0 refused together with a project inside `/metadata`,
+  `/telescope`, `/proc` or `/dev`. A project at `/project` itself was already accepted.
+- Refusals added: an environment file that names the project directory and is too large
+  to show rewritten refuses with `sandbox:environment`. The rewritten copies of one
+  environment may total at most 1 MiB. A frozen-tool source or original-path alias inside
+  `/project` refuses with `tool:layout`.
+- Refusals kept: a project that is `/` or lies inside `/usr` or `/etc` still refuses with
+  `sandbox:environment`, because the sandbox would show its live files. So does an
+  environment that contains the project, and an environment directory outside the project
+  that overlaps `/project`, `/metadata`, `/telescope`, `/proc` or `/dev`, or contains
+  `/tmp`. Relative link text of a frozen tool's project link must still reach its declared
+  target both from the checkout and from `/project`.
+- pytest-telescope identifies an environment by starting its interpreter once on the
+  host. That start is isolated and never writes bytecode, so identifying an environment
+  never writes into it, whatever the calling job's own bytecode setting.
+- Failure evidence names a frame in a project module by its project-relative file however
+  the module was imported, including through an editable install. Such a frame was
+  labeled `<runtime>` before.
+
+### Known limitations
+
+Two things a scoped test can read still name its checkout's location. See
+[what a scoped test can still see](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#what-a-scoped-test-can-still-see).
+
+- A test that reads the source directories in the mount table (field 4 of
+  `/proc/*/mountinfo`) can observe its checkout's location, which its cache key does not
+  contain. Leave such a test ordinary, or add `cache=False` to its scope.
+
+  Why: the frozen view lives below the checkout's `.pytest-telescope/scratch` directory,
+  so the source directory of each bind mount names the checkout. The mount points
+  (field 5), the mount options and every line of `/proc/self/mounts` name only sandbox
+  paths.
+- A test that reads the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an
+  environment inside the project can observe its checkout's location, which its cache key
+  does not contain. Leave such a test ordinary, or add `cache=False` to its scope.
+
+  Why: each cache file records the path its source had when it was compiled, which lies
+  below the checkout. A test that scans the environment's files for absolute paths, or
+  reads a cache file's bytes itself instead of importing the module, sees that path.
+  Imported modules, `__file__`, `co_filename` and tracebacks report sandbox paths. An
+  environment outside the project is not affected. See
+  [an environment inside the project](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#an-environment-inside-the-project).
+
+In either case a result cached in one checkout could be reused in another checkout, where
+the test would have seen a different value.
+
+### Qualification
+
+- `scripts/check.py --functional-workers N` runs the functional stage on `N` pytest-xdist
+  worker processes. The default stays one serial process. With more than one worker, the
+  gate first records the functional membership from one serial collection. Every worker
+  must reproduce that one membership record exactly; otherwise the gate refuses before it
+  schedules any test. A crashed worker is not replaced.
+- The `dev` extra pins the worker runner exactly: `pytest-xdist==3.8.0` with its transport
+  `execnet==2.1.2`.
+- The CI and release workflows use four workers. On a 4-CPU job the serial functional
+  stage has taken 13 to 16 minutes, close to its twenty-minute deadline, and four workers
+  have taken 4 to 5 minutes.
 
 ## 0.1.0 (2026-11-10)
 
