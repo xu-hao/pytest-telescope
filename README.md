@@ -66,6 +66,9 @@ python -m pytest -q
 python -m pip install pytest-telescope
 ```
 
+Keep a conda or pixi environment outside the project directory; scoped tests refuse one
+inside it.
+
 Follow the
 [quickstart](https://pytest-telescope.readthedocs.io/en/latest/#quickstart-add-it-to-an-existing-project)
 to connect your existing pytest configuration and declare one test's inputs. You can

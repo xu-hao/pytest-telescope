@@ -100,6 +100,19 @@ package module lies below its own project root, for example
 `Path(my_package.__file__).is_relative_to(Path(__file__).parents[1])`, passes in a scoped
 session as it does in an ordinary one.
 
+### One path for every file
+
+This is a design rule of the sandbox. Every change to the sandbox must keep it.
+
+- A scoped session shows every file at exactly one path.
+- The project, and everything inside the project directory, appears only below
+  `/project`. Nothing is mounted at the project's host path.
+- No file is reachable at two paths.
+- A layout that would need a second path is refused with a named cause; it is not given
+  another mount. For example, an
+  [environment inside the project](#an-environment-inside-the-project) that depends on
+  its host location is refused.
+
 ### A scoped test cannot tell where its checkout lives
 
 Identical checkouts at different paths share scoped results, so nothing a scoped test
@@ -235,6 +248,35 @@ The environment's other files are shown as they are, and its cached bytecode is 
 it is. The raw bytes of those cache files still name the checkout. This is one of the
 two [documented exceptions](#what-a-scoped-test-can-still-see) to location blindness;
 what the interpreter reports for the modules is not affected.
+
+An environment inside the project must not depend on its host location in files that
+pytest-telescope does not rewrite. Such an environment cannot run at `/project`, so
+scoped tests refuse it with `unsupported`, `sandbox:environment` before any session
+starts. The message names the environment relative to the project, for example `.env`
+or `.pixi/envs/default`. The remedy: place the environment outside the project
+directory. A plain virtual environment, such as one made by `python -m venv`, is not
+affected.
+
+Why: a conda environment, and a pixi environment, which is built the same way, writes
+its own absolute location into some of its files when it is installed. These include
+compiled libraries, such as OpenSSL's, and text files, such as Python's build
+configuration read by `sysconfig`. In the sandbox the environment is at `/project/.env`,
+but those files still point at its host path, which does not exist there. Things then
+break, some of them silently. For example, the environment's default SSL context trusts
+0 certificates in the sandbox, without an error, and `sysconfig` reports directories
+that do not exist. Showing the environment at its host path as well is not an option,
+because a scoped session shows every file at [one path](#one-path-for-every-file).
+
+How it is detected: such an environment lists, in `conda-meta/*.json`, every installed
+file that its location was written into. When the interpreter's environment, or the
+environment it was created from, lies inside the project and has a `conda-meta`
+directory, pytest-telescope reads those records once, while it identifies the
+environment. Any listed file, binary or text, that the sandbox does not show rewritten
+causes the refusal. Every conda environment that contains Python has one: Python's
+build configuration module. At most 4096 records, 64 MiB in total, are read. A
+`conda-meta` directory with more, or with a record that cannot be read, is refused the
+same way. An environment without `conda-meta` that has absolute paths compiled into its
+files cannot be detected; keep such an environment outside the project as well.
 
 `/project`, the environment, the rewritten files, system directories and the sandbox
 root are read-only. Writes there fail with a read-only file system error.
@@ -465,6 +507,7 @@ that refuses or stops after ordinary sessions started does not prove that no tes
 | The interpreter cannot start in the view, an environment prefix contains the project, or an environment directory outside the project overlaps a path the sandbox mounts itself (`/project`, `/metadata`, `/telescope`, `/proc`, `/dev`, or contains `/tmp`) | `unsupported`, `sandbox:environment` |
 | The sandbox would show the project's live files: the project lives in `/usr` or `/etc`, or is `/` | `unsupported`, `sandbox:environment` |
 | An environment file that names the project directory is too large to show rewritten | `unsupported`, `sandbox:environment` |
+| An [environment inside the project](#an-environment-inside-the-project) depends on its host location: its `conda-meta` records list a file with its location written in that the sandbox does not show rewritten, or the records are over their bound or cannot be read | `unsupported`, `sandbox:environment` |
 | A suite requests `network:none` or `scratch:noexec` | `unsupported`, that capability |
 | Invalid, unsupported or mutated declaration | `declaration_error` |
 

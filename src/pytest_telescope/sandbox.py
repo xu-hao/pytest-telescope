@@ -57,6 +57,10 @@ PROJECT = Path("/project")
 MOUNT_POINTS = (str(PROJECT), "/metadata", "/telescope", "/proc", "/dev")
 # A startup file that names the project directory is shown rewritten; larger ones refuse.
 MAX_REWRITE = 1_048_576
+# The install records read to tell whether an environment inside the project depends on
+# its host location; an environment with more refuses rather than passing unchecked.
+MAX_RECORDS = 4096
+MAX_RECORD_BYTES = 64 * 1_048_576
 # User, mount and PID namespaces only. A PID namespace with its own /proc keeps other
 # processes' root and working directories, which are host paths, out of the view. The
 # worker is PID 1, so it reaps orphans and every remaining process ends with it.
@@ -628,6 +632,98 @@ def _overlays(description):
 NORMALIZERS = (os.path.normpath, os.path.realpath)
 
 
+def _located_file(prefix, record, rewritten):
+    """The first file a conda install record lists with its install location written in.
+
+    conda writes the environment's location into each file whose entry has a
+    `prefix_placeholder`, in `binary` or `text` mode. A binary file keeps that host path
+    in the sandbox. A text file does too, unless the sandbox shows it rewritten.
+    """
+    listing = record.get("paths_data") if type(record) is dict else None
+    paths = listing.get("paths") if type(listing) is dict else None
+    if type(paths) is not list:
+        raise ValueError("no list of installed paths")
+    for entry in paths:
+        if type(entry) is not dict or not entry.get("prefix_placeholder"):
+            continue
+        name = entry.get("_path")
+        if type(name) is not str:
+            raise ValueError("an installed path without a name")
+        if entry.get("file_mode") == "text" and (
+            os.path.realpath(os.path.join(prefix, name)) in rewritten
+        ):
+            continue
+        return name
+    return None
+
+
+def _location_reason(prefix, meta, rewritten):
+    """Why the environment at `prefix` cannot run at /project, or None if it can."""
+    try:
+        with os.scandir(meta) as entries:
+            records = []
+            for entry in entries:
+                if entry.name.endswith(".json") and entry.is_file():
+                    records.append(entry.name)
+                    if len(records) > MAX_RECORDS:
+                        return (
+                            f"has more than {MAX_RECORDS} install records in conda-meta "
+                            "to check for its host location"
+                        )
+    except OSError:
+        return "has a conda-meta directory that cannot be read"
+    total = 0
+    for leaf in sorted(records):
+        try:
+            with open(meta / leaf, "rb") as stream:
+                data = stream.read(MAX_RECORD_BYTES - total + 1)
+            total += len(data)
+            if total > MAX_RECORD_BYTES:
+                return (
+                    f"has more than {MAX_RECORD_BYTES // 1_048_576} MiB of install records "
+                    "in conda-meta to check for its host location"
+                )
+            located = _located_file(prefix, json.loads(data), rewritten)
+        except (OSError, ValueError, UnicodeError, RecursionError):
+            return "has an install record that cannot be read: conda-meta/" + leaf[:200]
+        if located is not None:
+            return (
+                "depends on its host location, which is written into its file "
+                + located[:200]
+                + ", so it cannot run at /project"
+            )
+    return None
+
+
+def _check_location(description, project):
+    """Refuse an environment inside the project that depends on its host location.
+
+    The sandbox shows such an environment only below /project. A conda-style
+    environment lists in `conda-meta/*.json` the files its install location was written
+    into; any one the sandbox does not show rewritten names a path that does not exist
+    in the view, so the environment cannot run there. The records are read once, while
+    the environment is identified and before any session starts, within fixed bounds;
+    an environment beyond them refuses rather than passing unchecked.
+    """
+    rewritten = {row[0] for row in description["rewrites"]}
+    scanned = set()
+    for name in sorted(description["prefixes"]):
+        for prefix in dict.fromkeys(Path(convert(name)) for convert in NORMALIZERS):
+            meta = prefix / "conda-meta"
+            if not _inside(prefix, project) or not meta.is_dir():
+                continue
+            if os.path.realpath(meta) in scanned:
+                continue
+            scanned.add(os.path.realpath(meta))
+            reason = _location_reason(prefix, meta, rewritten)
+            if reason is not None:
+                _refuse(
+                    f"the environment {prefix.relative_to(project).as_posix()[:200]} inside "
+                    f"the project {reason}; place the environment outside the project "
+                    "directory"
+                )
+
+
 def _project_paths(description, project):
     """Import directories inside the project, outside every environment prefix."""
     prefixes = {Path(convert(name)) for name in description["prefixes"] for convert in NORMALIZERS}
@@ -921,6 +1017,7 @@ def describe(root, executable=None):
     project = Path(root).resolve()
     description = _probe(executable or sys.executable, project)
     binds = _binds(description, project)
+    _check_location(description, project)
     folders = [
         str(_shown(os.path.dirname(description["executable"]), project)),
         "/usr/local/bin",

@@ -25,6 +25,8 @@ read-only copy of its declared project files that a scoped test sees in its sand
 - Most projects need no change. One kind of test does: a test that reads the source
   directories in the mount table, or the raw `.pyc` bytes of an environment inside the
   project, should stay ordinary or use `cache=False`.
+- A conda or pixi environment inside the project is now refused; move it outside the
+  project.
 - In an interleaved benchmark of fresh execution against 0.1.0, no series had a slower
   median. See "Performance".
 
@@ -131,6 +133,25 @@ read-only copy of its declared project files that a scoped test sees in its sand
   that overlaps `/project`, `/metadata`, `/telescope`, `/proc` or `/dev`, or contains
   `/tmp`. Relative link text of a frozen tool's project link must still reach its declared
   target both from the checkout and from `/project`.
+- Refusal added: an environment inside the project that depends on its host location
+  refuses with `sandbox:environment` before any session starts. The message names the
+  environment relative to the project and says to place it outside the project
+  directory. Such an environment cannot run at `/project`: a conda environment writes
+  its absolute location into compiled libraries and text files such as Python's build
+  configuration, and in the sandbox these still point at a host path that does not
+  exist there. Its default SSL context, for example, trusts 0 certificates, without an
+  error. Version 0.1.0 ran such an environment because it also showed the checkout's
+  host path.
+- Detection reads the environment's `conda-meta/*.json` install records once, while the
+  environment is identified. Any file they list with its location written in, binary or
+  text, that the sandbox does not show rewritten refuses, so every conda environment
+  with Python inside the project refuses. At most 4096 records, 64 MiB in total, are
+  read; more, or an unreadable record, also refuses. A plain virtual environment is not
+  affected. An environment without `conda-meta` that has absolute paths compiled into
+  its files cannot be detected.
+- A scoped session shows every file at exactly one path, and a layout that would need a
+  second path is refused rather than given another mount. See
+  [one path for every file](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#one-path-for-every-file).
 - pytest-telescope identifies an environment by starting its interpreter once on the
   host. That start is isolated and never writes bytecode, so identifying an environment
   never writes into it, whatever the calling job's own bytecode setting.
