@@ -256,9 +256,10 @@ def follow_source(origin, entry, inputs, absent, tool_links):
 class StaticDiscovery:
     """One parse budget over test files and declared Python sources, shared by plan and run.
 
-    Each distinct regular file is read and parsed at most once; its bytes and AST nodes
-    count once. Literal marker calls count once per import origin, because a leaf-link
-    alias authenticates its own records, which relabel the single parse.
+    Static discovery reads and parses each distinct regular file once; its bytes and AST
+    nodes count once. Literal marker calls count once per import origin, because a
+    leaf-link alias authenticates its own records, which relabel the single parse. A run
+    verifies each file's frozen copy once per invocation, so an alias costs relabeling only.
     """
 
     def __init__(self, root):

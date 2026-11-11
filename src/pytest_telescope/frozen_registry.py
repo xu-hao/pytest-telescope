@@ -10,8 +10,20 @@ from .model import (
     canonical_path,
     fingerprint,
     follow_source,
+    parent_fd,
     regular_bytes,
 )
+
+
+def identity(measured):
+    """What an unchanged frozen file keeps; linking it into a view changes none of it."""
+    return (
+        measured.st_dev,
+        measured.st_ino,
+        measured.st_mode,
+        measured.st_size,
+        measured.st_mtime_ns,
+    )
 
 
 class FrozenRegistry:
@@ -19,6 +31,9 @@ class FrozenRegistry:
 
     Static discovery already parsed and bounded every declared source of the pool; this
     registry only verifies the frozen bytes against that scan and labels each origin.
+    Each distinct frozen file is read and hashed once per registry, which lives for one
+    invocation. Later views check only that the file kept its verified identity, so
+    repeated views and leaf-link aliases cost relabeling rather than another read.
     """
 
     def __init__(self, root, records, tool_links, scans):
@@ -29,6 +44,7 @@ class FrozenRegistry:
         }
         self.scans = scans
         self.labeled = {}
+        self.verified = {}
         fields = {
             "file": {"path", "kind", "sha256", "mode"},
             "directory": {"path", "kind", "mode"},
@@ -78,6 +94,33 @@ class FrozenRegistry:
         if actual != self.records[name]["target"]:
             raise InfrastructureError("frozen declaration source link changed")
 
+    def verify_file(self, name):
+        """Hash a frozen file against its record once, then require its unchanged identity."""
+        known = self.verified.get(name)
+        if known is not None:
+            try:
+                with parent_fd(self.root, name) as (directory, leaf):
+                    measured = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+            except OSError as exc:
+                raise InfrastructureError("cannot read frozen declaration source") from exc
+            if identity(measured) != known:
+                raise InfrastructureError(
+                    "frozen declaration source changed after its verification"
+                )
+            return
+        try:
+            content, measured = regular_bytes(self.root, name, markers.MAX_SOURCE)
+        except OSError as exc:
+            raise InfrastructureError("cannot read frozen declaration source") from exc
+        record = self.records[name]
+        if (
+            hashlib.sha256(content).hexdigest() != record["sha256"]
+            or measured.st_mode & 0o777 != record["mode"]
+        ):
+            raise InfrastructureError("frozen declaration source disagrees with its record")
+        # Only a file that agreed is remembered; a refused one is read again and refuses.
+        self.verified[name] = identity(measured)
+
     def entry(self, name):
         record = self.records[name]
         if record["kind"] == "symlink":
@@ -104,17 +147,13 @@ class FrozenRegistry:
             if name is not None:
                 sources[origin] = name
         registry = []
+        checked = set()
         for origin, name in sources.items():
-            try:
-                content, measured = regular_bytes(self.root, name, markers.MAX_SOURCE)
-            except OSError as exc:
-                raise InfrastructureError("cannot read frozen declaration source") from exc
+            if name not in checked:
+                # Aliases of one file share its single check in this view.
+                self.verify_file(name)
+                checked.add(name)
             record = self.records[name]
-            if (
-                hashlib.sha256(content).hexdigest() != record["sha256"]
-                or measured.st_mode & 0o777 != record["mode"]
-            ):
-                raise InfrastructureError("frozen declaration source disagrees with its record")
             scan = self.scans.get(origin)
             if scan is None or scan.file != name or scan.sha256 != record["sha256"]:
                 raise InfrastructureError(

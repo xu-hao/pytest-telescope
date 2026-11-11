@@ -366,7 +366,9 @@ Retain up to 100,000 successful execution records (singleton cases or atomic bat
 The controller freezes each distinct declared file once per invocation and reuses its
 file record when computing case keys. It prepares a sandbox view only for cases that
 need to run, using hard links to the frozen files without exposing the other frozen
-inputs. This avoids copying and hashing the project for every case.
+inputs. It also reads and hashes each distinct frozen Python source once per invocation
+to verify it, as described [below](#static-parse-budget). This avoids copying and hashing
+the project for every case.
 
 Each cache miss still starts a sandboxed pytest session: one per case by default, or
 one per group in batch mode. Repeated collection of a large parametrized module can
@@ -390,14 +392,16 @@ byte, so the source total binds first for ordinary code, at about 232 million no
 the node total only for unusually dense syntax. The per-file, depth and marker-call limits
 are unchanged.
 
-Each distinct regular file is read and parsed at most once per invocation, and its bytes
-and nodes count once. Literal marker calls count once per import origin: a leaf-symlink
-alias authenticates its own records, with its own `file` and identity, so the marker total
-also bounds the records that aliases multiply. An alias's records relabel the single parse
-of its file and equal the records of parsing the same bytes under the alias name.
-Relabeling costs nothing for a file without markers and about a tenth of a reparse for a
-file with 2,000 marker calls, so counting an alias's bytes and nodes again would refuse
-projects without bounding any additional work.
+Static discovery reads and parses each distinct regular file once per invocation, and
+its bytes and nodes count once. A run then reads and hashes that file's frozen copy once
+per invocation to verify it; `plan` freezes nothing. Literal marker calls count once per
+import origin: a leaf-symlink alias authenticates its own records, with its own `file` and
+identity, so the marker total also bounds the records that aliases multiply. An alias's
+records relabel the single parse of its file and equal the records of parsing the same
+bytes under the alias name. An alias therefore costs relabeling only: it adds no read,
+hash or parse of its file. Relabeling costs nothing for a file without markers and about a
+tenth of a reparse for a file with 2,000 marker calls, so counting an alias's bytes and
+nodes again would refuse projects without bounding any additional read, hash or parse.
 
 `plan` and `run` apply the same budget in the same static pass, before any sandbox is
 prepared or any case runs. An over-budget project refuses with a declaration error that
@@ -408,6 +412,17 @@ verifies each declared source's frozen bytes against the hash that static discov
 parsed; a source changed in between refuses as an infrastructure error. Authentication of
 the frozen source relabels those parses per import origin and never parses again.
 
+That verification reads and hashes each distinct frozen file once per invocation, when
+the first scoped view selects it, and compares its content hash and mode with its frozen
+record and with the static scan. The controller asks for a view's records several times
+per case: for collection, for the case key and before each fresh worker. Every later
+request checks, without reading the file, that it is still the same regular file with the
+same mode, size and modification time as when it was verified, and reads each selected
+link's text again. A frozen file or link that changed after its verification refuses as
+an infrastructure error. The later check compares that metadata, not content: only the
+first verification hashes the bytes. A file that failed verification is not remembered:
+every later view reads it again and refuses.
+
 Parsing is single-threaded. Measured with Python 3.12 at the node total, installed library
 source repeated to 268 million nodes (about 199,000 files and 2.48 GB, beyond the source
 total) took 404 s at 0.66 million nodes per second with a 110 MB peak resident set. Syntax
@@ -415,8 +430,13 @@ at the per-file node bound (1,343 files of 199,986 nodes in 200 KB each, 268 mil
 took 570 s at 0.47 million nodes per second with a 159 MB peak. Memory is bounded per
 file: each parse tree is released before the next file and only literal marker rows are
 retained. A project near the totals therefore spends several minutes in static discovery
-for each plan or run; the cost scales with declared Python source, not with the number of
-cases.
+for each plan or run; that cost scales with declared Python source, not with the number of
+cases. A run adds one read and hash of each distinct frozen source, which also does not
+grow with the number of cases. Each case then adds only work proportional to its own
+view: one metadata check per distinct Python file, and one link read and one set of
+relabeled records per import origin. Measured with Python 3.12, one 4 MiB module with 800
+leaf-symlink aliases took 17 ms for its first view, which read and hashed 4 MiB once, and
+about 11 ms for each later view, which read nothing.
 
 ## Project configuration
 
