@@ -13,6 +13,7 @@ in-project environment's own cached bytecode.
 import json
 import os
 import py_compile
+import re
 import shutil
 import subprocess
 from dataclasses import replace
@@ -493,18 +494,24 @@ def test_shown_lines():
 def shown_lines(tmp_path, name, lines):
     """Run a scoped test that compares an installed metadata file with `lines`.
 
-    Each line is a pair: what the host file says, with `{root}` for the checkout's path
-    and `{url}` for its file URL, and what the sandbox must show for it.
+    Each line is a pair: what the host file says, with `{root}` for the checkout's path,
+    `{url}` for its file URL and `{lower}` for that URL with lowercase hexadecimal
+    escapes, and what the sandbox must show for it.
     """
     project = toy_project(tmp_path / name)
     interpreter, site_packages = environment(tmp_path / "env")
     install_editable(site_packages, project, "pth")
-    root, url = str(project), project.as_uri()
+    names = {"{root}": str(project), "{url}": project.as_uri()}
+    names["{lower}"] = re.sub("%[0-9A-F]{2}", lambda match: match[0].lower(), names["{url}"])
+
+    def spelled(line):
+        for placeholder, value in names.items():
+            line = line.replace(placeholder, value)
+        return line
+
     record = site_packages / "toypkg-0.1.dist-info" / "locations.txt"
-    record.write_text(
-        "".join(line.replace("{root}", root).replace("{url}", url) + "\n" for line, _ in lines)
-    )
-    expected = [line.replace("{root}", root).replace("{url}", url) for _, line in lines]
+    record.write_text("".join(spelled(line) + "\n" for line, _ in lines))
+    expected = [spelled(line) for _, line in lines]
     put(project, "tests/test_shown.py", SHOWN_TEST.format(path=str(record), expected=expected))
     before = host_files(site_packages)
     code, report = run(interpreter, project)
@@ -743,3 +750,20 @@ def test_frozen_tool_views_do_not_name_the_checkout_and_are_shared_between_check
     assert_counts(reports[1], executed=1, reused=1)
     assert_nothing_recorded_names(first.root, reports[0], cache)
     assert_nothing_recorded_names(second, reports[1], cache)
+
+
+def test_a_file_url_with_lowercase_escapes_is_rewritten(tmp_path):
+    # A file URL may spell its percent-escapes with either case of hexadecimal digit.
+    # The comma in the directory's name is escaped as %2C or %2c.
+    name = "kestrel,checkout"
+    assert "%2C" in (tmp_path / name).as_uri()
+    shown_lines(
+        tmp_path,
+        name,
+        [
+            ("{url}/src", "file:///project/src"),
+            ("{lower}/src", "file:///project/src"),
+            ("origin={lower}", "origin=file:///project"),
+            ("{root}/src", "/project/src"),
+        ],
+    )

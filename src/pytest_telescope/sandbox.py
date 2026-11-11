@@ -78,11 +78,13 @@ def normalize(name):
     return re.sub(r"[-_.]+", "-", str(name or "")).lower()
 
 def spellings(root):
-    # The directory as files spell it: literally, percent-encoded in a file URL, and
-    # escaped in a Python or JSON string literal.
+    # The directory as files spell it: literally, percent-encoded in a file URL with
+    # either case of hexadecimal digit, and escaped in a Python or JSON string literal.
     raw = os.fsencode(root)
     safe = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~/"
-    found = {raw, b"".join(bytes([byte]) if byte in safe else b"%%%02X" % byte for byte in raw)}
+    found = {raw}
+    for escape in (b"%%%02X", b"%%%02x"):
+        found.add(b"".join(bytes([byte]) if byte in safe else escape % byte for byte in raw))
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
