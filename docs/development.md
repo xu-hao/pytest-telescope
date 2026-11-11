@@ -6,10 +6,14 @@ Use a dedicated Python 3.11+ virtual environment. From the repository root:
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install '.[dev]' 'pytest==9.2.0'
-mkdir -m 700 /tmp/telescope-check-scratch
-export TMPDIR=/tmp/telescope-check-scratch
+mkdir -m 700 /var/tmp/telescope-check-scratch
+export TMPDIR=/var/tmp/telescope-check-scratch
 python scripts/check.py --artifacts /tmp/telescope-check
 ```
+
+Choose a `TMPDIR` outside `/tmp` and `/dev/shm`: each sandbox mounts its own private
+scratch over both, which hides the stand-in system directories that some functional tests
+create below `TMPDIR`.
 
 The check command runs Ruff lint and formatting checks, builds the sdist and a wheel
 from it, validates package metadata, builds documentation with warnings as errors,

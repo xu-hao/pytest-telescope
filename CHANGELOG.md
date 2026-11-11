@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.1
+
+- Static-parse totals now scale with the frozen project: 2 GiB of Python source (was
+  64 MiB) and 268,435,456 AST nodes (was 2,000,000). The per-file limits of 4 MiB,
+  200,000 nodes and depth 128 and the total of 100,000 literal marker calls are
+  unchanged. Each distinct file is parsed once per invocation; a symlink alias adds only
+  its own marker records. Measured with Python 3.12 at the node total, parsing ran at
+  0.47 to 0.66 million nodes per second with a peak resident set of at most 159 MB, as
+  documented in the execution contract's static parse budget.
+- `plan` now parses and bounds declared Python sources exactly as `run` does, in the
+  same static pass. A project over a parse total, or a declared source that cannot be
+  parsed or exceeds a per-file size, node or depth limit, refuses with a declaration
+  error that names the exceeded total or the cause and file, before any sandbox is
+  prepared or any case runs. Previously `plan` accepted such a project and `run` refused
+  it after preparing the sandbox. Freezing refuses a declared source that changed after
+  it was parsed.
+- Scoped sessions show the frozen project at one path, the project's host path. The
+  working directory, pytest's `-c` and `--rootdir`, the test-file arguments, the
+  worker's project root and editable installs all name the same files, so a test that
+  checks that an imported package module lies below its checkout passes as it does in
+  ordinary pytest. Nothing is mounted at `/project` unless the project lives there, and
+  scoped tests now observe the checkout's location, for example in `Path.cwd()` and
+  `__file__`. The sandbox view policy is `bubblewrap-view-v3` (was
+  `bubblewrap-view-v2`), so results recorded by earlier versions are not reused.
+- Identical checkouts at different paths still share results: no cache key or record
+  contains the project's path, and fixture-guard identities now record project source
+  files and conftest plugin names relative to the project.
+- A project inside `/project`, an environment under `/project`, and relative
+  project-link text that resolved differently from `/project` are no longer refused.
+  Relative link text resolves from the link's location below the project's host path
+  and must still reach its declared root.
+- Failure evidence names a location in a project module imported through an editable
+  install by its project-relative file instead of `<runtime>`.
+- `scripts/check.py --functional-workers N` runs the functional stage on `N`
+  pytest-xdist workers after recording the functional membership from one serial
+  collection, which every worker must reproduce exactly. The default stays one serial
+  process; the CI and release workflows use four workers, and pytest-xdist joins the
+  `dev` extra.
+
 ## 0.1.0 (2026-11-10)
 
 - Add per-scope environment declarations that distinguish absent, empty and valued
