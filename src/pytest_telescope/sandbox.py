@@ -252,6 +252,8 @@ class Sandbox:
     `executable`, `path` and the destinations in `binds` are paths inside the sandbox.
     `overlays` are the environment's files that name the project directory, each as its
     host path, the content the sandbox shows there instead, and whether it is executable.
+    `links` are the host's symbolic links on the way to the environment, each as the
+    link text the sandbox shows and its path inside the sandbox.
     """
 
     bwrap: str
@@ -261,6 +263,7 @@ class Sandbox:
     identity: str
     description: dict
     overlays: tuple = ()
+    links: tuple = ()
 
 
 def _host_environment():
@@ -558,15 +561,57 @@ def _shown(path, project):
     return PROJECT / path.relative_to(project) if _inside(path, project) else path
 
 
+def _symlinks(name):
+    """The host's symbolic links met while resolving `name`, each as (location, text).
+
+    Every location's parent directory is a real directory, so the links, shown at their
+    locations with directories mounted at their real paths, resolve as on the host.
+    """
+    pending = list(Path(name).parts[1:])
+    current, found = Path("/"), []
+    while pending:
+        part = pending.pop(0)
+        if part == "..":
+            current = current.parent
+            continue
+        candidate = current / part
+        if not candidate.is_symlink():
+            current = candidate
+            continue
+        if len(found) >= 40:
+            _refuse("an interpreter environment path has too many levels of symbolic links")
+        text = os.readlink(candidate)
+        found.append((candidate, text))
+        parts = Path(text).parts
+        if os.path.isabs(text):
+            current, parts = Path("/"), parts[1:]
+        pending = [*parts, *pending]
+    return found
+
+
+def _link_text(location, text, project):
+    """The text of a host link as the sandbox shows it: unchanged where it resolves the
+    same way, and otherwise its target's sandbox path."""
+    target = Path(os.path.normpath(os.path.join(location.parent, text)))
+    if os.path.isabs(text):
+        return str(_shown(target, project)) if _inside(target, project) else text
+    if _inside(location, project) == _inside(target, project):
+        return text
+    return str(_shown(target, project))
+
+
 def _binds(description, project):
     """Map the interpreter's prefixes and import directories into the view, read-only.
 
-    An environment prefix that contains the project is refused: binding it would expose
-    the project. An import directory that contains or lies inside the project is not
-    bound: the project appears only as the frozen declared view at /project. An
-    environment prefix inside the project is bound below /project, at the same relative
-    path, so it does not reveal the checkout's location either. Every other directory
-    keeps its host path and may not overlap a path the sandbox mounts itself.
+    Every directory is mounted once, at its real path, and every host symbolic link on
+    the way to it is shown as a link, so a file has one path in the sandbox and
+    `os.path.realpath` resolves as on the host. An environment prefix that contains the
+    project is refused: binding it would expose the project. An import directory that
+    contains or lies inside the project is not bound: the project appears only as the
+    frozen declared view at /project. An environment prefix inside the project is bound
+    below /project, at the same relative path, so it does not reveal the checkout's
+    location either. Every other directory keeps its host path and may not overlap a
+    path the sandbox mounts itself. Returns the binds and the links.
     """
     _check_project(project)
     system = [Path(os.path.realpath(name)) for name in SYSTEM_DIRECTORIES]
@@ -574,7 +619,7 @@ def _binds(description, project):
         os.path.normpath(name)
         for name in [*description["prefixes"], os.path.dirname(description["executable"])]
     }
-    binds = {}
+    binds, found = {}, {}
     for name in [*sorted(prefixes), *description["path"]]:
         if not os.path.isabs(name) or not os.path.exists(name):
             continue
@@ -596,8 +641,10 @@ def _binds(description, project):
                 _inside(path, Path(point)) or _inside(Path(point), path) for point in MOUNT_POINTS
             ):
                 _refuse("an interpreter environment directory overlaps a sandbox mount point")
-        for destination in {given, real}:
-            binds[str(_shown(destination, project))] = str(real)
+        binds[str(_shown(real, project))] = str(real)
+        for location, text in _symlinks(given):
+            if not any(_inside(location, directory) for directory in system):
+                found[location] = text
     ordered = []
     for destination in sorted(binds, key=lambda value: (len(Path(value).parts), value)):
         source = binds[destination]
@@ -608,7 +655,32 @@ def _binds(description, project):
         ):
             continue
         ordered.append((destination, source))
-    return tuple((source, destination) for destination, source in ordered)
+    links = {}
+    for location, text in found.items():
+        shown = _shown(location, project)
+        # A link inside a mounted directory already appears there, as on the host.
+        if any(
+            _inside(shown, Path(destination))
+            and Path(source) / shown.relative_to(destination) == location
+            for destination, source in ordered
+        ):
+            continue
+        if not _inside(location, project) and (
+            _inside(Path("/tmp"), location)
+            or any(
+                _inside(location, Path(point)) or _inside(Path(point), location)
+                for point in MOUNT_POINTS
+            )
+        ):
+            _refuse("an interpreter environment directory overlaps a sandbox mount point")
+        links[str(shown)] = _link_text(location, text, project)
+    return (
+        tuple((source, destination) for destination, source in ordered),
+        tuple(
+            (links[location], location)
+            for location in sorted(links, key=lambda value: (len(Path(value).parts), value))
+        ),
+    )
 
 
 def _overlays(description):
@@ -842,6 +914,9 @@ def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False, clos
     for source, destination in box.binds:
         if project is None or not _inside(Path(destination), project):
             arguments += ["--ro-bind", source, destination]
+    for text, location in box.links:
+        if project is None or not _inside(Path(location), project):
+            arguments += ["--symlink", text, location]
     return arguments
 
 
@@ -850,18 +925,22 @@ def _project_arguments(box, view):
 
     Nothing is mounted at the project's own host path. An environment inside the project
     is bound below /project and needs a mount point there, and bwrap must never create
-    one inside the frozen copy on the host. /project is then a private tmpfs: it binds
-    the view's entries one by one, makes directories only on the way to each
-    environment, binds the environment and is made read-only.
+    one inside the frozen copy on the host. The same holds for a host symbolic link
+    inside the project on the way to an environment. /project is then a private tmpfs:
+    it binds the view's entries one by one, makes directories only on the way to each
+    environment or link, binds the environment, shows the link and is made read-only.
     """
     inside = [
         (source, Path(destination))
         for source, destination in box.binds
         if _inside(Path(destination), PROJECT)
     ]
-    if not inside:
+    links = [
+        (text, Path(location)) for text, location in box.links if _inside(Path(location), PROJECT)
+    ]
+    if not inside and not links:
         return ["--ro-bind", str(view), str(PROJECT)]
-    destinations = {destination for _, destination in inside}
+    destinations = {destination for _, destination in inside + links}
     ancestors = {
         parent
         for destination in destinations
@@ -891,6 +970,8 @@ def _project_arguments(box, view):
             pending.append(child)
     for source, destination in inside:
         arguments += ["--ro-bind", source, str(destination)]
+    for text, location in links:
+        arguments += ["--symlink", text, str(location)]
     return arguments + ["--remount-ro", str(PROJECT)]
 
 
@@ -1016,7 +1097,7 @@ def describe(root, executable=None):
     """
     project = Path(root).resolve()
     description = _probe(executable or sys.executable, project)
-    binds = _binds(description, project)
+    binds, links = _binds(description, project)
     _check_location(description, project)
     folders = [
         str(_shown(os.path.dirname(description["executable"]), project)),
@@ -1028,6 +1109,7 @@ def describe(root, executable=None):
         bwrap=None,
         executable=str(_shown(description["executable"], project)),
         binds=binds,
+        links=links,
         path=":".join(dict.fromkeys(folders)),
         identity=fingerprint(
             {
@@ -1236,7 +1318,7 @@ def execute(
             any(
                 _inside(Path(destination), Path("/tools"))
                 or _inside(Path("/tools"), Path(destination))
-                for _, destination in box.binds
+                for _, destination in (*box.binds, *box.links)
             )
             or (
                 project != PROJECT
@@ -1270,7 +1352,7 @@ def execute(
             for destination in tool_view.closed:
                 if not destinations[destination].is_dir():
                     raise InfrastructureError("native closed projection is not an owned directory")
-            box = replace(box, binds=startup_environment(box, tool_view.closed))
+            box = replace(box, binds=startup_environment(box, tool_view.closed), links=())
         from .tool_context import validate_environment
 
         validate_environment(environment, tool_view.names)

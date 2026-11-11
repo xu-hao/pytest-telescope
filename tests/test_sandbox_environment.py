@@ -306,3 +306,38 @@ def test_an_oversized_environment_file_naming_the_project_is_refused(tmp_path):
     # A large file that does not name the project is no obstacle.
     (site_packages / "large.pth").write_text("# padding\n" * 120_000)
     assert sandbox.describe(project, interpreter).overlays == ()
+
+
+@pytest.mark.parametrize("text", ["absolute", "relative"])
+def test_a_symlinked_environment_is_mounted_once_and_shown_as_a_link(tmp_path, text):
+    environment(tmp_path / "store" / "real-env")
+    (tmp_path / "linked").symlink_to(
+        tmp_path / "store" if text == "absolute" else Path("store"), target_is_directory=True
+    )
+    (tmp_path / "store" / "env").symlink_to("real-env")
+    given = tmp_path / "linked" / "env"
+    project = tmp_path / "project"
+    project.mkdir()
+    view = sandbox.describe(project, given / "bin" / "python")
+    real = str(tmp_path / "store" / "real-env")
+    assert (real, real) in view.binds
+    assert not any(str(given) == destination for _, destination in view.binds)
+    linked = "store" if text == "relative" else str(tmp_path / "store")
+    assert set(view.links) == {
+        (linked, str(tmp_path / "linked")),
+        ("real-env", str(tmp_path / "store" / "env")),
+    }
+    assert view.executable == str(given / "bin" / "python")
+
+
+def test_a_link_inside_the_project_to_an_environment_outside_it_is_shown_below_project(tmp_path):
+    project = tmp_path / "checkout"
+    project.mkdir()
+    environment(tmp_path / "shared-venv")
+    (project / ".venv").symlink_to("../shared-venv")
+    view = sandbox.describe(project, project / ".venv" / "bin" / "python")
+    real = str(tmp_path / "shared-venv")
+    assert (real, real) in view.binds
+    # At /project the relative text would name /shared-venv, so the link shows its target.
+    assert (real, "/project/.venv") in view.links
+    assert view.executable == "/project/.venv/bin/python"
