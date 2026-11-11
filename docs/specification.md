@@ -1,14 +1,12 @@
 # Marker and project reference
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
-
-Declare inputs beside tests, then use defaults and bundles in `pyproject.toml` to share
-declarations. If you're setting up pytest-telescope for the first time, start with the
-[quickstart](index.md). The [execution contract](bubblewrap.md) describes the sandbox,
-and [declarations, inventory and reuse](execution-contract.md) explains how results are
-cached.
+This reference lists every marker field and `pyproject.toml` setting. Declare inputs
+beside tests, then use *defaults* (settings added to every scoped case) and *bundles*
+(named, reusable sets of declarations) in `pyproject.toml` to share declarations. If
+you're setting up pytest-telescope for the first time, start with the
+[quickstart](index.md). [Ordinary and Bubblewrap execution](bubblewrap.md) describes the
+sandbox, and [declarations, inventory and reuse](execution-contract.md) explains how
+results are cached.
 
 ## Markers beside cases
 
@@ -29,6 +27,8 @@ def test_red(): ...
 | `tools=["frontend"]` | Select registered frozen tool/runtime closures. Also makes the case scoped, including when empty. |
 | `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not make a case scoped. |
 | `cache=False` | Never reuse or record success for this case; does not make a case scoped. |
+
+There is no `git` field: frozen Git history is not supported.
 
 Without an `inputs`, `bundles`, `distributions`, `env` or `tools` field on or above it, a case is
 ordinary: it runs in an ordinary pytest session every time, with no sandbox and no cache.
@@ -99,9 +99,9 @@ case. For example, if `test_left` declares `left.txt` and sibling `test_right` d
 `right.txt`, appending `test_left.pytestmark` to `test_right.pytestmark` is unsupported,
 even when the Mark is unchanged and both functions occupy the same source file.
 Put shared declarations on their legitimate module/class ancestor or repeat a direct
-literal declaration on each consumer instead. The development contract requires a
-declaration refusal before an unrelated declaration changes the consumer's route,
-inputs, metadata, environment, absence assertions or cache policy.
+literal declaration on each consumer instead. Such an unrelated declaration is refused
+before it can change the consumer's route, inputs, metadata, environment, absence
+assertions or cache policy.
 
 Every applicable declaration remains required, including explicit empty scope lists
 and inherited `cache=False`. Missing required declarations and invalid extra
@@ -115,9 +115,6 @@ individual execution never borrows another case's inputs. Each execution must co
 the same containing-file case inventory as discovery before running its selected case.
 
 ## Imported helpers with declarations
-
-Support for literal markers in readable imported helpers is unreleased development;
-published 0.1.0a6 does not provide it.
 
 An imported Python helper may contain its own supported literal Telescope markers.
 Declare the helper and its import-time dependencies explicitly, just as for an unmarked
@@ -163,10 +160,11 @@ as another grant.
 
 Package initializers, nested helpers and resources read during import remain explicit
 dependencies. The controller does not follow imports to add them automatically. The
-same [literal syntax and source budgets](execution-contract.md#static-discovery-and-real-pytest-agreement)
-apply to readable helpers; computed, dynamically created and modified inherited markers
-remain unsupported. Relative leaf links retain the existing requirement to declare
-their exact destination.
+same [literal syntax](execution-contract.md#static-discovery-and-real-pytest-agreement)
+and [parse budget](execution-contract.md#static-parse-budget) apply to readable helpers,
+which `plan` checks as `run` does; computed, dynamically created and modified inherited
+markers remain unsupported. Relative leaf links retain the existing requirement to
+declare their exact destination.
 
 ## Project configuration
 
@@ -213,10 +211,11 @@ still fail explicitly.
 
 Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
 state (`.pytest-telescope` and an explicit in-project cache directory), pytest/bytecode
-caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, or
-a directory with validated `pyvenv.cfg`). Hidden and Git-ignored files can be declared.
+caches (`.pytest_cache`, `__pycache__`), or host Python environments (`.venv`, `venv`, a
+directory with a validated `pyvenv.cfg`, a conda-style directory with a `conda-meta`
+directory, or a link to either). Discovery skips such directories too. Hidden and Git-ignored files can be declared.
 pytest-telescope never walks or hashes undeclared project files for the current input
-contract. The separate deferred Git design below is not an implemented grant.
+contract.
 
 The default suite keeps pytest settings in `[tool.pytest.ini_options]`.
 [Independent suites](scoped-execution.md) may declare other supported configuration formats. Forwarding environment names is not a secret-distribution mechanism.
@@ -238,9 +237,11 @@ every consumer's shared declarations. The scoped discovery union is never an exe
 environment. No raw values are recorded in summaries, worker requests, cache records or
 normal diagnostic logs. Ordinary sessions retain the inherited environment.
 
-## Frozen tools (development contract)
+## Frozen tools
 
-Register a manifest, then select it beside its consumers:
+A *frozen tool* is an existing installation outside the project, such as a Node runtime
+or an installed package, whose exact files are pinned in a manifest. Register a
+manifest, then select it beside its consumers:
 
 ```toml
 [tool.pytest_telescope.tools.frontend]
@@ -267,12 +268,12 @@ Before this opt-in, a project link such as `node_modules -> /opt/frontend-instal
 cannot be declared as an external directory input. With `tools=["frontend"]`, a manifest
 may pin that exact link text, a complete installation tree at `/opt/frontend-install`
 and its lock-file correspondence. The scoped view then retains the actual `node_modules`
-symlink at both project aliases, exposes only its pinned target read-only, and also
+symlink at its place below `/project`, exposes only its pinned target read-only, and also
 shows the tree at `/tools/frontend/install` for a root named `install`. The link is
 automatically included; an input at or below it requires the selected binding. Omitting
 the tool retains the existing refusal. This does not make other external links readable.
 
-Use the [exact manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+Use the [exact manifest reference](bubblewrap-api.md#frozen-tool-manifest)
 and its [complete data example](bubblewrap-api.md#a-complete-data-only-example).
 Manifests describe existing bytes and explicit runtime dependencies. They do not install
 tools, run a package manager, infer arbitrary imports or rewrite a caller's script.
@@ -280,33 +281,13 @@ An unchanged `#!/usr/bin/env node` command needs the actual pinned env, Node, co
 and native runtime. A browser additionally needs its complete declared executable,
 subprocess and resource closure; support is not inferred from a browser name or version.
 
-The [selected tool view](bubblewrap.md#frozen-tools-and-runtime-files-development-contract)
+The [selected tool view](bubblewrap.md#frozen-tools-and-runtime-files)
 can narrow native library search directories and control command lookup. Effective `env`
 names that conflict with its PATH, scratch or loader/Python controls refuse even when
 their values are absent or empty. The same declaration with no selected tools follows
 the existing environment rules above. Installed Python packages retain their real
 import paths, including in isolated children; see the
-[installed-package contract](scoped-execution.md#frozen-installed-python-tools-development-contract).
-
-## Frozen Git checkout (development contract)
-
-The following is a deferred design contract. Neither the current four-component
-candidate nor published 0.1.0a6 implements the selector or frozen-checkout/history
-capture. This records the future declaration form, not a runnable current example:
-
-```text
-@pytest.mark.telescope(git="frozen-checkout-v1")
-def test_revision(): ...
-```
-
-Under that future contract, the same literal string may appear in defaults or bundles. Module, class,
-function and parameter declarations add together; inherited Git cannot be removed.
-Defaults alone do not scope an ordinary case. Omission leaves Git disabled; unknown
-versions and non-string or dynamic marker values are rejected. `plan` is static and
-does not run Git. A requested view includes the supported committed source and Git
-history as well as separately declared inputs; untracked files need separate declarations.
-The [sandbox contract](bubblewrap.md#frozen-git-checkout-development-contract) defines
-the supported states, safety and refusal boundaries.
+[installed-package contract](scoped-execution.md#frozen-installed-python-tools).
 
 ## Select and control execution
 
@@ -404,13 +385,19 @@ repositories and other writable state in `/tmp` or `tmp_path`, copying declared 
 there when needed; project source stays read-only. Except for explicitly requested
 frozen tool/runtime files described above, host tools and system libraries are not part of the
 cache key, so mark a scoped test `cache=False` when its result depends on
-their version.
+their version. The same applies to a test that reads any of the three things that
+still name its checkout's location: the source directories in the mount table (field 4
+of `/proc/*/mountinfo`), the raw bytes of cached bytecode files (`__pycache__/*.pyc`)
+of an environment inside the project, or the real path of an environment inside the
+project that is a symbolic link to a directory outside it. See
+[what a scoped test can still see](bubblewrap.md#what-a-scoped-test-can-still-see).
 
 `subprocess.run([sys.executable, ...])` starts the same host interpreter with the same
 installed packages. When the project is installed into that environment in editable
 form, for example with `pip install -e .`, a child imports declared source through the
 install, including an isolated child started with `-I`. The install points at the
-project's host path, and the sandbox shows the frozen declared files there:
+project's host path; the sandbox shows the install's files rewritten to `/project`, where
+the frozen declared files are:
 
 ```python
 import subprocess
@@ -431,7 +418,9 @@ def test_isolated_child_imports_declared_source():
 ```
 
 The setuptools finder module and `.pth` path entries are both supported, because both
-name the project's host path. Without an editable install, a child started with `-I`
+name the project's host path literally and are shown rewritten. The child's
+`example_core.__file__` is below `/project`, like the test module's own. Without an
+editable install, a child started with `-I`
 ignores `PYTHONPATH` and the working directory, so it cannot import declared project
 source. Start it without `-I` and pass the source location explicitly:
 
@@ -457,13 +446,13 @@ def test_child_imports_declared_source():
 Either way the child sees the same view as its test: undeclared neighbouring modules stay
 absent, and the live checkout is never visible.
 
-## Required fixture guard and conditions (unreleased)
+## Fixture guard and conditions
 
-A future opt-in [fixture guard](batching.md#required-fixture-guard-unreleased) preserves
-possible shared user fixture lifetimes across selected exact-scope groups or refuses
-before their bodies; it does not broaden inputs. The optional Python-only condition
+The opt-in [fixture guard](batching.md#fixture-guard) preserves possible shared user
+fixture lifetimes across selected batches, which hold cases with exactly equal scope, or
+refuses before their bodies; it does not broaden inputs. The optional Python-only condition
 checks refer to actually selected case IDs and effective declared environment names.
 They compare the one invocation capture without exposing expected values. See the
-[API contract](bubblewrap-api.md#required-fixture-guard-api-unreleased) for exact shapes
-and the [schema](result-schema.md#required-guard-result-schema-5-unreleased) for the
-limits of the evidence. These interfaces are not available in the published release.
+[API contract](bubblewrap-api.md#fixture-guard-api) for exact shapes
+and the [schema](result-schema.md#guarded-result-schema-5) for the
+limits of the evidence.

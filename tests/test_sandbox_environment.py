@@ -1,5 +1,7 @@
 """The interpreter environment a scoped view binds and its cache identity; no sandbox."""
 
+import os
+import py_compile
 import subprocess
 import sys
 import sysconfig
@@ -93,11 +95,17 @@ def test_project_import_paths_are_not_bound_but_its_virtual_environment_is(tmp_p
     interpreter, site_packages = environment(project / ".venv")
     # Editable installs point the environment at project source, or at the project itself.
     (site_packages / "editable.pth").write_text(f"{project / 'src'}\n{project}\n{tmp_path}\n")
-    destinations = {destination for _, destination in sandbox.describe(project, interpreter).binds}
-    assert str(project / ".venv") in destinations
-    assert str(project / "src") not in destinations
-    assert str(project) not in destinations
-    assert str(tmp_path) not in destinations
+    view = sandbox.describe(project, interpreter)
+    destinations = {destination for _, destination in view.binds}
+    # The environment keeps its place in the project, which the sandbox shows at /project.
+    assert (str(project / ".venv"), "/project/.venv") in view.binds
+    assert view.executable == "/project/.venv/bin/python"
+    assert view.path.split(":")[0] == "/project/.venv/bin"
+    assert not any(
+        Path(destination) == project or project in Path(destination).parents
+        for destination in destinations
+    )
+    assert not {"/project", "/project/src", str(tmp_path)} & destinations
 
 
 def test_an_environment_containing_the_project_is_refused(tmp_path):
@@ -155,18 +163,181 @@ def test_identity_does_not_depend_on_the_checkout_path(tmp_path):
     assert sandbox.describe(second, interpreter).identity == reaching_first
 
 
-@pytest.mark.parametrize(
-    "root",
-    ["/", "/tmp", "/dev/shm", "/project/app", "/metadata/app", "/telescope/app", "/proc/app"],
-)
-def test_a_project_root_the_sandbox_cannot_show_at_its_host_path_is_refused(tmp_path, root):
+@pytest.mark.parametrize("root", ["/", "/usr/share/app", "/etc/app"])
+def test_a_project_root_whose_live_files_the_sandbox_would_show_is_refused(tmp_path, root):
     interpreter, _ = environment(tmp_path / "env")
     with pytest.raises(UnsupportedCapability) as refused:
         sandbox.describe(root, interpreter)
     assert refused.value.capability == "sandbox:environment"
 
 
-@pytest.mark.parametrize("root", ["/project", "/tmp/app", "/dev/shm/app"])
-def test_a_project_root_at_project_or_in_private_scratch_is_accepted(tmp_path, root):
+# Nothing is mounted at the project's own path, so that path may be anywhere outside the
+# shared system directories, including a path the sandbox mounts something else at.
+@pytest.mark.parametrize(
+    "root",
+    ["/project", "/project/app", "/tmp", "/tmp/app", "/dev/shm", "/dev/shm/app", "/metadata/app"],
+)
+def test_a_project_root_at_any_other_location_is_accepted(tmp_path, root):
     interpreter, _ = environment(tmp_path / "env")
     assert len(sandbox.describe(root, interpreter).identity) == 64
+
+
+def shown(view):
+    """The content the sandbox shows over each environment file, by file name."""
+    return {Path(name).name: content for name, content, _ in view.overlays}
+
+
+def entries(directory):
+    """Every entry below a directory: a file's bytes and times, or its kind."""
+    found = {}
+    for path in sorted(directory.rglob("*")):
+        status = path.lstat()
+        content = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+        found[str(path.relative_to(directory))] = (
+            status.st_mode,
+            status.st_mtime_ns,
+            status.st_ino,
+            content,
+        )
+    return found
+
+
+@pytest.mark.parametrize("ambient", [None, "1"])
+def test_describing_an_environment_writes_nothing_into_it(tmp_path, monkeypatch, ambient):
+    # Whatever the calling job sets. A plain start of this interpreter caches the
+    # bytecode of the module its .pth file imports.
+    if ambient is None:
+        monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    else:
+        monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", ambient)
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    editable_finder(site_packages, project / "src" / "toypkg")
+    before = entries(site_packages)
+    assert not (site_packages / "__pycache__").exists()
+    view = sandbox.describe(project, interpreter)
+    # The site directory is byte for byte what it was: no cache directory, no changed
+    # file. The startup hook did run, since its module is found and shown rewritten.
+    assert entries(site_packages) == before
+    assert sorted(shown(view)) == ["__editable___toypkg_0_1_finder.py"]
+
+
+def test_environment_files_that_name_the_project_are_shown_rewritten(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    editable_finder(site_packages, project / "src" / "toypkg")
+    (site_packages / "paths.pth").write_text(f"{project / 'src'}\n{project}\n")
+    record = install(site_packages, "toypkg", "0.1")
+    (record / "direct_url.json").write_text(f'{{"url": "{project.as_uri()}"}}')
+    (site_packages / "toypkg.egg-link").write_text(f"{project}\n.")
+    # Bytecode already cached from the original finder, at two optimization levels, as
+    # earlier starts of the environment's interpreter leave it. It names the project.
+    finder = site_packages / "__editable___toypkg_0_1_finder.py"
+    stale = [
+        Path(py_compile.compile(str(finder), doraise=True, optimize=level)) for level in (0, 1)
+    ]
+    assert all(os.fsencode(project) in path.read_bytes() for path in stale)
+    # Caches of other modules, including one whose name merely starts the same way.
+    others = [
+        stale[0].with_name(
+            "__editable___toypkg_0_1_finder_extra." + stale[0].name.split(".", 1)[1]
+        ),
+        stale[0].with_name("unrelated." + stale[0].name.split(".", 1)[1]),
+    ]
+    for path in others:
+        path.write_bytes(b"another module's bytecode")
+    before = entries(site_packages)
+    assert shown(sandbox.describe(project, interpreter)) == {
+        "__editable___toypkg_0_1_finder.py": (
+            b"MAPPING = {'toypkg': '/project/src/toypkg'}\n\n\ndef install():\n    pass\n"
+        ),
+        "paths.pth": b"/project/src\n/project\n",
+        "direct_url.json": b'{"url": "file:///project"}',
+        "toypkg.egg-link": b"/project\n.",
+        # The stale bytecode of the rewritten module is shown empty; nothing else is.
+        **{path.name: b"" for path in stale},
+    }
+    # The environment itself is never modified.
+    assert entries(site_packages) == before
+
+
+def test_only_the_whole_project_directory_is_rewritten(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    project.mkdir()
+    # A sibling whose name starts with the project's, a longer path that merely ends
+    # with it, and another checkout are different directories and stay as they are.
+    lines = [
+        f"{project}-two/src",
+        f"/mnt{project}/src",
+        f"{tmp_path / 'other'}/src",
+        f"{project}.bak",
+    ]
+    (site_packages / "others.pth").write_text("".join(line + "\n" for line in lines))
+    view = sandbox.describe(project, interpreter)
+    assert view.overlays == ()
+    (site_packages / "mixed.pth").write_text(f"{project}\n{project}/\n{project}-two\n")
+    assert shown(sandbox.describe(project, interpreter)) == {
+        "mixed.pth": f"/project\n/project/\n{project}-two\n".encode()
+    }
+
+
+def test_a_project_at_project_needs_no_rewritten_files(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    editable_finder(site_packages, Path("/project/src/toypkg"))
+    view = sandbox.describe("/project", interpreter)
+    assert view.overlays == ()
+    # The reference is still part of the identity.
+    (site_packages / "__editable__.toypkg-0.1.pth").unlink()
+    (site_packages / "__editable___toypkg_0_1_finder.py").unlink()
+    assert sandbox.describe("/project", interpreter).identity != view.identity
+
+
+def test_an_oversized_environment_file_naming_the_project_is_refused(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    project.mkdir()
+    (site_packages / "large.pth").write_text("# padding\n" * 120_000 + f"{project}\n")
+    with pytest.raises(UnsupportedCapability) as refused:
+        sandbox.describe(project, interpreter)
+    assert refused.value.capability == "sandbox:environment"
+    # A large file that does not name the project is no obstacle.
+    (site_packages / "large.pth").write_text("# padding\n" * 120_000)
+    assert sandbox.describe(project, interpreter).overlays == ()
+
+
+@pytest.mark.parametrize("text", ["absolute", "relative"])
+def test_a_symlinked_environment_is_mounted_once_and_shown_as_a_link(tmp_path, text):
+    environment(tmp_path / "store" / "real-env")
+    (tmp_path / "linked").symlink_to(
+        tmp_path / "store" if text == "absolute" else Path("store"), target_is_directory=True
+    )
+    (tmp_path / "store" / "env").symlink_to("real-env")
+    given = tmp_path / "linked" / "env"
+    project = tmp_path / "project"
+    project.mkdir()
+    view = sandbox.describe(project, given / "bin" / "python")
+    real = str(tmp_path / "store" / "real-env")
+    assert (real, real) in view.binds
+    assert not any(str(given) == destination for _, destination in view.binds)
+    linked = "store" if text == "relative" else str(tmp_path / "store")
+    assert set(view.links) == {
+        (linked, str(tmp_path / "linked")),
+        ("real-env", str(tmp_path / "store" / "env")),
+    }
+    assert view.executable == str(given / "bin" / "python")
+
+
+def test_a_link_inside_the_project_to_an_environment_outside_it_is_shown_below_project(tmp_path):
+    project = tmp_path / "checkout"
+    project.mkdir()
+    environment(tmp_path / "shared-venv")
+    (project / ".venv").symlink_to("../shared-venv")
+    view = sandbox.describe(project, project / ".venv" / "bin" / "python")
+    real = str(tmp_path / "shared-venv")
+    assert (real, real) in view.binds
+    # At /project the relative text would name /shared-venv, so the link shows its target.
+    assert (real, "/project/.venv") in view.links
+    assert view.executable == "/project/.venv/bin/python"

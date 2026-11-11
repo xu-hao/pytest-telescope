@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -305,3 +306,34 @@ def test_new(): assert Path('/etc/selected.txt').read_bytes() == b'worker config
         for directory in attempted:
             if directory.exists():
                 original(directory)
+
+
+def test_a_mapped_command_runs_through_its_command_link_to_the_original_path(worker):
+    # The command link names the /tools path of the pinned interpreter, which is a link
+    # to its original path, where it is mounted once.
+    actual = Path(sys.executable).resolve()
+    reference = worker.reference(actual)
+    worker.document["executables"][0]["commands"] = [reference]
+    worker.document["commands"] = [{"name": "pinned-python", "file": reference}]
+    worker.project.save("worker")
+    worker.project.module(
+        "test_command.py",
+        f"""import os
+import shutil
+import subprocess
+import pytest
+pytestmark = pytest.mark.telescope(tools=['worker'])
+def test_command():
+    found = shutil.which('pinned-python')
+    assert found is not None and found.startswith('/tools/.commands/')
+    assert os.readlink(found).startswith('/tools/worker/')
+    assert os.path.realpath(found) == {str(actual)!r}
+    result = subprocess.run(
+        ['pinned-python', '-I', '-c', 'print("MAPPED_COMMAND_OK")'],
+        capture_output=True,
+        timeout=20,
+    )
+    assert (result.returncode, result.stdout) == (0, b'MAPPED_COMMAND_OK\\n'), result.stderr
+""",
+    )
+    assert_counts(worker.project.run(timeout=60), executed=1)

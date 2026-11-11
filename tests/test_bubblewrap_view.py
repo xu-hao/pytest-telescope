@@ -47,6 +47,7 @@ def passed(root, **kwargs):
 
 
 def test_declared_inputs_are_visible_and_undeclared_project_files_are_absent(project):
+    live = os.stat(project / "data/declared.json").st_ino
     put(
         project,
         "tests/test_view.py",
@@ -58,18 +59,19 @@ def test_declared_inputs_are_visible_and_undeclared_project_files_are_absent(pro
         "@pytest.mark.telescope(inputs=['data/declared.json'])\n"
         "def test_view():\n"
         "    assert json.loads(Path('data/declared.json').read_text()) == {'visible': True}\n"
-        "    assert Path.cwd() == Path('/project')\n"
+        "    # The frozen declared files appear at /project, and only there.\n"
+        "    assert Path.cwd() == Path('/project') == Path(__file__).parents[1]\n"
         "    for name in ('data/undeclared.json', 'notes.txt'):\n"
         "        assert not os.path.lexists(name)\n"
         "        assert not os.path.lexists('/project/' + name)\n"
-        f"        assert not os.path.lexists({str(project)!r} + '/' + name)\n"
         "        with pytest.raises(FileNotFoundError):\n"
         "            os.stat(name)\n"
         "    assert sorted(os.listdir('/project')) == ['data', 'pyproject.toml', 'tests']\n"
-        "    # The checkout's own path shows the same frozen declared files.\n"
-        f"    assert sorted(os.listdir({str(project)!r})) == ['data', 'pyproject.toml', 'tests']\n"
-        f"    assert os.listdir({str(project)!r} + '/data') == ['declared.json']\n"
         "    assert os.listdir('/project/data') == ['declared.json']\n"
+        "    # Nothing is mounted at the checkout's own path, declared or not.\n"
+        f"    assert not os.path.lexists({str(project)!r})\n"
+        "    # A frozen copy, never the live checkout.\n"
+        f"    assert os.stat('/project/data/declared.json').st_ino != {live!r}\n"
         "    child = __import__('subprocess').run(\n"
         "        ['cat', 'notes.txt'], capture_output=True, timeout=10\n"
         "    )\n"
@@ -129,7 +131,8 @@ def test_writes_outside_private_scratch_are_refused(project):
         "@pytest.mark.telescope(inputs=['data/declared.json'])\n"
         "def test_writes(tmp_path):\n"
         "    for target in ('/project/data/declared.json', '/project/new.txt', '/new.txt',\n"
-        "                   '/usr/new.txt', '/etc/new.txt', '/dev/new.txt', '/proc/new.txt'):\n"
+        "                   '/usr/new.txt', '/etc/new.txt', '/dev/new.txt', '/proc/new.txt',\n"
+        f"                   {str(project / 'data/declared.json')!r}, {str(project / 'new.txt')!r}):\n"
         "        with pytest.raises(OSError) as refused:\n"
         "            Path(target).write_text('x')\n"
         "        assert refused.value.errno in (errno.EROFS, errno.EACCES, errno.ENOENT)\n"
@@ -207,7 +210,9 @@ def test_mixed_file_scoped_cases_never_run_on_the_host(project, monkeypatch):
         "\n"
         "@pytest.mark.telescope(inputs=[])\n"
         "def test_scoped(where):\n"
+        "    # The frozen view at /project, not the ordinary case's checkout directory.\n"
         "    assert where == Path('/project')\n"
+        f"    assert not Path({str(project)!r}).exists()\n"
         "    assert not Path('notes.txt').exists()\n",
     )
     # Ordinary sessions inherit this variable; sandboxes never receive TELESCOPE_* names.

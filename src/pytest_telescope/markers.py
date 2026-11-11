@@ -3,17 +3,36 @@
 import ast
 import hashlib
 import json
+from dataclasses import dataclass
 
 MAX_SOURCE = 4 * 1024 * 1024
-MAX_TOTAL_SOURCE = 64 * 1024 * 1024
+# The totals scale with the frozen project: the source total equals its 2 GiB byte bound,
+# and the node total allows one AST node per eight bytes of that source budget.
+MAX_TOTAL_SOURCE = 2 * 1024 * 1024 * 1024
 MAX_NODES = 200_000
-MAX_TOTAL_NODES = 2_000_000
+MAX_TOTAL_NODES = 2**28
 MAX_MARKERS = 100_000
 MAX_DEPTH = 128
 
 
 class MarkerError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class Scan:
+    """One bounded parse of a distinct regular file, shared by all of its import origins."""
+
+    file: str
+    sha256: str
+    rows: tuple
+
+
+def size_text(limit):
+    for unit, scale in (("GiB", 1024**3), ("MiB", 1024**2)):
+        if limit % scale == 0:
+            return f"{limit // scale} {unit}"
+    return f"{limit:,}-byte"
 
 
 def canonical(value):
@@ -60,20 +79,47 @@ def validate_kwargs(kwargs):
     return kwargs
 
 
+def oversize_message():
+    return f"Python source exceeds the {size_text(MAX_SOURCE)} per-file static discovery limit"
+
+
 def discover(content, filename):
+    rows, nodes = scan(content)
+    return label(rows, filename), nodes
+
+
+def label(rows, filename):
+    """Give one import origin its own records; equal to parsing the bytes under that name."""
+    registry = []
+    for row in rows:
+        record = {"file": filename, **row}
+        record["id"] = hashlib.sha256(canonical(record).encode()).hexdigest()
+        registry.append(record)
+    return registry
+
+
+def scan(content):
+    """Parse bounded source once into origin-independent literal marker rows."""
     if len(content) > MAX_SOURCE:
-        raise MarkerError("test source exceeds the 4 MiB static discovery limit")
+        raise MarkerError(oversize_message())
     try:
-        tree = ast.parse(content, filename=filename)
+        tree = ast.parse(content)
     except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
-        raise MarkerError("cannot parse bounded test source for literal declarations") from exc
+        raise MarkerError("cannot parse bounded Python source for literal declarations") from exc
     parents = {}
     nodes = []
     pending = [(tree, 0)]
     while pending:
         node, depth = pending.pop()
-        if len(nodes) >= MAX_NODES or depth > MAX_DEPTH:
-            raise MarkerError("test syntax exceeds static discovery node/depth limits")
+        if len(nodes) >= MAX_NODES:
+            raise MarkerError(
+                f"Python syntax exceeds the static discovery limit of {MAX_NODES:,} AST nodes"
+                " per file"
+            )
+        if depth > MAX_DEPTH:
+            raise MarkerError(
+                f"Python syntax exceeds the static discovery depth limit of {MAX_DEPTH}"
+            )
         nodes.append(node)
         for child in ast.iter_child_nodes(node):
             parents[child] = node
@@ -167,17 +213,19 @@ def discover(content, filename):
             kwargs[keyword.arg] = literal(keyword.value)
         validate_kwargs(kwargs)
         kind, names, parameter = placement(node)
-        record = {
-            "file": filename,
-            "position": [node.lineno, node.end_lineno, node.col_offset, node.end_col_offset],
-            "kwargs": kwargs,
-            "kind": kind,
-            "owner": names,
-            "parameter": parameter,
-        }
-        record["id"] = hashlib.sha256(canonical(record).encode()).hexdigest()
-        registry.append(record)
+        registry.append(
+            {
+                "position": [node.lineno, node.end_lineno, node.col_offset, node.end_col_offset],
+                "kwargs": kwargs,
+                "kind": kind,
+                "owner": names,
+                "parameter": parameter,
+            }
+        )
         if len(registry) > MAX_MARKERS:
-            raise MarkerError("too many literal telescope markers")
+            raise MarkerError(
+                f"Python source exceeds the static discovery limit of {MAX_MARKERS:,}"
+                " literal telescope marker calls"
+            )
     registry.sort(key=lambda row: row["position"])
-    return registry, len(nodes)
+    return tuple(registry), len(nodes)

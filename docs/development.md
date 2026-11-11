@@ -1,15 +1,28 @@
 # Local development
 
+This page is for contributors to pytest-telescope. It covers the development
+environment, the full check that every change must pass, and how tests are classified.
+You do not need it to use pytest-telescope in your own project.
+
+The *functional gate* is the behavioral test stage of the full check below. Checks that
+depend on a particular host installation, such as a real browser, Node runtime or
+installed package, are *compatibility benchmarks* instead: they run only when selected
+explicitly and are described in the [benchmark guide](benchmark.md).
+
 Use a dedicated Python 3.11+ virtual environment. From the repository root:
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install '.[dev]' 'pytest==9.2.0'
-mkdir -m 700 /tmp/telescope-check-scratch
-export TMPDIR=/tmp/telescope-check-scratch
+mkdir -m 700 /var/tmp/telescope-check-scratch
+export TMPDIR=/var/tmp/telescope-check-scratch
 python scripts/check.py --artifacts /tmp/telescope-check
 ```
+
+Choose a `TMPDIR` outside `/tmp` and `/dev/shm`: each sandbox mounts its own private
+scratch over both, which hides the stand-in system directories that some functional tests
+create below `TMPDIR`.
 
 The check command runs Ruff lint and formatting checks, builds the sdist and a wheel
 from it, validates package metadata, builds documentation with warnings as errors,
@@ -20,6 +33,39 @@ artifact directory must not already exist; use a new directory for another run. 
 dependencies may need network access. No package is uploaded by this command. Each stage
 has a five-minute deadline, except the behavioral suite, which has twenty minutes.
 A timeout fails the gate.
+
+## Functional test workers
+
+Most functional tests start real Bubblewrap sessions, interpreter probes or pytest
+subprocesses and wait for them, so one serial process leaves most of a multi-CPU job idle.
+`check.py --functional-workers N` runs the behavioral suite on `N` worker processes; the
+default is one, the serial run. A larger count is an explicit resource request: each worker
+starts its own sandboxes, so give the outer job at least `N` CPUs and memory for `N`
+concurrent sessions. The hosted workflows pass `--functional-workers 4` on their 4-vCPU
+runners. In local runs limited to 4 CPUs, the serial suite has taken 13 to 16 minutes,
+close to its deadline, and four workers have taken 4 to 5 minutes.
+
+With more than one worker, the gate first records the functional membership from one
+ordinary serial collection, with the same profile selection and refusals as a serial run,
+before any test body. [pytest-xdist](https://pytest-xdist.readthedocs.io/) then runs
+whole test files on the workers, each started isolated and without bytecode writes, like
+the gate process. Every worker repeats the profile selection on its own collection and
+must reproduce the recorded membership exactly. The gate refuses before scheduling any
+test when a worker reports a different collection, and a worker refuses before its first
+body when its collection changes after it was reported. A crashed worker is not
+replaced. A successful run also requires every worker's confirmation that it ran the
+recorded membership. The membership file is the same for every worker count.
+
+The gate verifies the installed candidate's import origin once, in its own process,
+and passes that origin to every worker. A worker compares its own `pytest_telescope`
+import with it at configuration, as the gate process does after its first import, and
+refuses before collecting when it has no verified origin or imports the package from
+anywhere else.
+
+The development extra pins the worker runner exactly, `pytest-xdist==3.8.0` with its
+transport `execnet==2.1.2`, as it pins the documentation toolchain. Every qualification
+therefore starts and binds its workers through the same runner version; change both
+pins together, with a full qualification on the new versions.
 
 ## Full qualification and core compatibility
 
@@ -46,13 +92,14 @@ Collection receipts, rather than a static function count, establish the exact pa
 
 Both `functional_gate.py` modes require the same explicit `--functional-profile`
 argument. The `tests` mode additionally requires `--membership` naming a new owned
-artifact file; `harness` mode does not accept that artifact argument. Before any test
-body, the actual pytest collection records a bounded, exclusively created schema 1
-membership object with exactly `schema`, `profile`, `pytest_version`, `selected` and
-`deselected`. The last two fields contain complete node-ID lists, not only counts.
-The `all` profile admits no deselections. The `core` profile admits exactly its marked
-positive cases as deselected; an ambient selector or other unexplained deselection
-refuses before execution rather than being credited to the profile.
+artifact file and accepts `--workers` with a positive count; `harness` mode accepts
+neither argument. Before any test body, the actual pytest collection records a bounded,
+exclusively created schema 1 membership object with exactly `schema`, `profile`,
+`pytest_version`, `selected` and `deselected`. The last two fields contain complete
+node-ID lists, not only counts. The `all` profile admits no deselections. The `core`
+profile admits exactly its marked positive cases as deselected; an ambient selector or
+other unexplained deselection refuses before execution rather than being credited to the
+profile.
 
 This boundary includes late collection callbacks and collection-hook wrapper teardown.
 All collection callbacks must return before final membership is verified and its receipt
@@ -81,7 +128,7 @@ of assigning a different location.
 
 ## Installed candidate and functional prerequisites
 
-This is the gate contract for the unreleased candidate. The default gate requires the
+The default gate requires the
 ordinary Python/pytest/Bubblewrap runner and build/documentation dependencies. It does
 not accept `--node`, select a program installation, prepare the `node` or `installed`
 profiles, or dispatch compatibility benchmarks. Those actual program-qualification
@@ -171,14 +218,22 @@ Bubblewrap. Ordinary routing, declarations, planning, the interpreter probe and 
 classification are tested without launching Bubblewrap and pass on any Linux host.
 
 Behavioral tests cover what a scoped test can observe: declared files present at
-`/project` and at the project's host path, undeclared project files absent at both, the
-host interpreter and installed packages usable but read-only, isolated child interpreters
-importing declared source through editable installs (including an environment inside the
-project, without modifying the frozen copy), writes outside private scratch refused,
-fresh scratch per sandbox, and descendants. They also cover ordinary routing staying fresh
+`/project` and nowhere else, undeclared project files absent, nothing mounted at the
+project's host path, test modules and editable installs naming the one `/project` root,
+the host interpreter and installed packages usable but read-only, isolated child
+interpreters importing declared source through rewritten editable installs (including an
+environment inside the project, without modifying the frozen copy or any environment
+file), stale bytecode of a rewritten module never loaded, writes outside private scratch
+refused, fresh scratch per sandbox, and descendants. Location-blindness tests search
+what a scoped session and its isolated children can read for the checkout's host path:
+environment variables, interpreter state, tracebacks, installed metadata and the process
+and mount tables. A channel that is still open is stated by a test of its own, never
+left out silently. They also cover ordinary routing staying fresh
 and unsandboxed, case and batch modes, parallel workers, exact cache invalidation
 (declared inputs, interpreter, installed distributions and the environment's references
-into the project), reuse across identical checkouts, new test inventory,
+into the project), reuse across identical checkouts at different paths (including
+fixture-guard identities and case identities built from the checkout's name), new test
+inventory,
 corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test owns and cleans up its projects. A test that
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
@@ -193,7 +248,7 @@ belongs to a separately selected
 Naming, copying or pinning that installation does not establish portability. Such
 qualification is not a functional prerequisite. Actual browser execution is always a
 separately invoked [benchmark](benchmark.md#browser-execution-benchmarks), including an
-owned page with explicit runtime inputs. It is not a functional readiness requirement.
+owned page with explicit runtime inputs. It is not required by the functional gate.
 Pinning whatever a developer happens to have installed does not make that installation
 a portable fixture.
 Host-dependent runtime compatibility checks run separately under
@@ -248,6 +303,14 @@ receipts when reclassifying work; do not relabel them as benchmark passes. A ben
 campaign requires its own explicit selection and is not started by the default gate.
 
 ## Controlled program qualification
+
+Program qualification uses explicit runtime prerequisites for separately selected Node
+and installed-plugin benchmarks. The
+[installed gate](#installed-candidate-and-functional-prerequisites) verifies the exact
+candidate wheel without preparing those program profiles. Full-browser execution is a
+separately invoked benchmark. Keeping actual browser execution in separately invoked
+[benchmarks](benchmark.md#browser-execution-benchmarks), outside the functional gate,
+does not change the filesystem contract or permit broader access.
 
 The explicitly selected Node and installed-plugin benchmarks use the actual invoking worker runtime
 alongside explicitly selected program files. Preparation records every selected
@@ -332,19 +395,16 @@ in the hidden MyST toctree at the end of `docs/index.md`; keep runnable examples
 
 The CI matrix covers core compatibility on pytest 8 and complete functional
 qualification on the pinned supported pytest 9 adapter, with Python 3.11/3.13 Linux
-runners and Bubblewrap installed. Core compatibility is labelled separately and cannot
-be reused as the full release or guarded-landing verdict. Keep build and documentation
-tools in development dependencies.
+runners and Bubblewrap installed. Every hosted gate runs four functional workers. Core
+compatibility is labelled separately and cannot be reused as the full release or
+guarded-landing verdict. Keep build and documentation tools in development dependencies.
 Use the [benchmark](benchmark.md) to compare fresh execution with plain pytest and
 Bubblewrap on the same workload.
 
-## Qualification status
-
-Version 0.1.0a6 passed the complete gate with 412 behavioral tests and nine benchmark
-harness checks on a host that permits Bubblewrap namespaces. The hosted Python 3.11/3.13
-and pytest 8/9 matrix passed on both the pull request and merged source. The published
-wheel and sdist matched the reviewed artifacts, a clean wheel installation passed seven
-focused CLI controls, and the matching Read the Docs build succeeded. See the
-[release](https://github.com/xu-hao/pytest-telescope/releases/tag/v0.1.0a6).
-
 Run the gate again for each candidate change.
+
+## Unimplemented designs
+
+The [frozen Git checkout design](design-frozen-git.md) records the rules for a feature
+that pytest-telescope does not implement. Keep it consistent with the rest of the
+documentation, and present it to users only as unsupported.

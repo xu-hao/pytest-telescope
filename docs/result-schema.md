@@ -1,10 +1,7 @@
 # Run results and explicit refusals
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
-
-This reference describes result schema 4. Start with the practical
+This reference describes result schema 4, the JSON that `run` prints and the Python API
+returns. Read it if you process results in CI or another tool. Start with the practical
 [quickstart](index.md). The [API and configuration reference](bubblewrap-api.md) lists the
 interfaces that produce these results, and
 [complete examples](bubblewrap-schema-examples.json) show whole reports.
@@ -27,7 +24,7 @@ A run result has `schema: 4` and `kind: "run"`. These fields distinguish it from
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
 | `execution` | Effective `mode` (`case` or `batch`), versioned scoped `profile` (`case-v2` or `batch-v2`), and `workers`. |
-| `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v2`), `required`, and `identity`. |
+| `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v3`: the frozen project view at `/project` only, with environment files that name the project directory shown rewritten), `required`, and `identity`. |
 | `grouping_complete` | All suite inventories and group-size preflight are validated; selected cases then belong to exactly one planned group. |
 | `groups` | Ordered ordinary sessions and scoped execution/cache groups with atomic member outcomes and wall-clock timing. |
 | `collection` | Collection outcome, counts, timings, bounded failure evidence and per-route suite inventories. |
@@ -340,7 +337,7 @@ reusable result. The runner does not widen the view or fall back to ordinary exe
 
 ### Retained observations after a late refusal
 
-The development contract preserves the typed refusal when a declaration or capability
+pytest-telescope preserves the typed refusal when a declaration or capability
 error occurs after a collection or execution session has started. The Python API still
 raises `DeclarationError` or its `UnsupportedCapability` subclass; the latter retains
 its capability. CLI conversion still produces `kind: "refusal"`, the existing refusal
@@ -403,7 +400,7 @@ interface. Retained observations are deeply immutable between attachment and ren
 arbitrary mutable dictionaries, guessed attributes and fallback keys are not accepted.
 `error_result` reads this explicit property and serializes the same strict variant.
 
-For the unreleased guarded schema 5 profile, available accounting is exactly
+For the guarded schema 5 profile, available accounting is exactly
 `{"version": 2, "state": "available", "observations": ...}`. Its observations have
 the same fields as version 1 plus exactly `fixture_guard`; execution mode is `batch` and
 profile is `batch-available-v1`. The outer refusal has the same `fixture_guard` object as
@@ -421,9 +418,8 @@ remain truthful. Invalid internal observations are rejected as an infrastructure
 failure, not coerced into the bounds case. No raw environment values are retained.
 
 For example, an ordinary body increments a counter once and a later scoped view raises
-`UnsupportedCapability("tool:layout", ...)`. Previously the bare refusal lost the
-available case accounting. The development result keeps that exception class, capability
-and CLI exit 4, and adds `accounting.version: 1`, `state: "available"` with
+`UnsupportedCapability("tool:layout", ...)`. The refusal keeps that exception class,
+capability and CLI exit 4, and adds `accounting.version: 1`, `state: "available"` with
 `observations.route_counts.ordinary.executed: 1` and the actual ordinary unit/group
 evidence. These named values are an excerpt, not a complete sample payload. The counter
 is not incremented again, known scoped work stays unrun, and no pending record is
@@ -443,10 +439,10 @@ Cancellation and bounded storage/parsing failures use the infrastructure refusal
 when a complete run result cannot be returned. Exception text is diagnostic, not a stable
 machine interface.
 
-## Required guard result schema 5 (unreleased)
+## Guarded result schema 5
 
-Schema 5 is the required opt-in development contract, not a shipped or qualified
-feature. Unguarded runs and refusals continue to use schema 4. A guarded run preserves
+Schema 5 is the result of a run with the opt-in [fixture guard](batching.md#fixture-guard).
+Unguarded runs and refusals continue to use schema 4. A guarded run preserves
 schema 4 fields and adds exactly:
 
 ```json

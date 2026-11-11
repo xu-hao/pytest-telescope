@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-telescope"
-version = "0.1.0"
+version = "0.1.1"
 description = "Declared inputs. Isolated tests. Focused reruns."
 readme = "README.md"
 license = "MIT"
@@ -29,7 +29,7 @@ pytest-telescope = "pytest_telescope.controller:main"
 telescope = "pytest_telescope.plugin"
 
 [project.optional-dependencies]
-dev = ["build>=1.2,<2", "ruff>=0.9,<1", "Sphinx==8.2.3", "furo==2025.12.19", "myst-parser==5.1.0", "twine>=6,<7"]
+dev = ["build>=1.2,<2", "ruff>=0.9,<1", "Sphinx==8.2.3", "furo==2025.12.19", "myst-parser==5.1.0", "twine>=6,<7", "pytest-xdist==3.8.0", "execnet==2.1.2"]
 
 [tool.hatch.build.targets.wheel]
 core-metadata-version = "2.4"

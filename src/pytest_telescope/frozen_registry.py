@@ -2,25 +2,49 @@
 
 import hashlib
 import os
-import posixpath
 import re
-from pathlib import PurePosixPath
 
 from . import markers
-from .model import DeclarationError, InfrastructureError, fingerprint, regular_bytes
+from .model import (
+    InfrastructureError,
+    canonical_path,
+    fingerprint,
+    follow_source,
+    parent_fd,
+    regular_bytes,
+)
+
+
+def identity(measured):
+    """What an unchanged frozen file keeps; linking it into a view changes none of it."""
+    return (
+        measured.st_dev,
+        measured.st_ino,
+        measured.st_mode,
+        measured.st_size,
+        measured.st_mtime_ns,
+    )
 
 
 class FrozenRegistry:
-    """Parse each frozen Python import origin once, selecting each view separately."""
+    """Label each frozen Python import origin from its static scan, per selected view.
 
-    def __init__(self, root, records, tool_links):
+    Static discovery already parsed and bounded every declared source of the pool; this
+    registry only verifies the frozen bytes against that scan and labels each origin.
+    Each distinct frozen file is read and hashed once per registry, which lives for one
+    invocation. Later views check only that the file kept its verified identity, so
+    repeated views and leaf-link aliases cost relabeling rather than another read.
+    """
+
+    def __init__(self, root, records, tool_links, scans):
         self.root = root
         self.records = {}
         self.tool_links = {
             name: (row["target"], fingerprint(row)) for name, row in tool_links.items()
         }
-        self.parsed = {}
-        self.source_bytes = self.nodes = self.markers = 0
+        self.scans = scans
+        self.labeled = {}
+        self.verified = {}
         fields = {
             "file": {"path", "kind", "sha256", "mode"},
             "directory": {"path", "kind", "mode"},
@@ -37,7 +61,7 @@ class FrozenRegistry:
             if set(record) != fields[record["kind"]]:
                 raise InfrastructureError("invalid frozen declaration source record fields")
             name = record["path"]
-            if not self.canonical_path(name) or name in self.records:
+            if not canonical_path(name) or name in self.records:
                 raise InfrastructureError("invalid frozen declaration source path")
             if record["kind"] == "file" and (
                 type(record["sha256"]) is not str
@@ -70,18 +94,39 @@ class FrozenRegistry:
         if actual != self.records[name]["target"]:
             raise InfrastructureError("frozen declaration source link changed")
 
-    @staticmethod
-    def canonical_path(name):
-        return (
-            type(name) is str
-            and bool(name)
-            and len(name) <= 4096
-            and not name.startswith("/")
-            and "\\" not in name
-            and "\x00" not in name
-            and len(PurePosixPath(name).parts) <= 64
-            and all(part not in ("", ".", "..") for part in name.split("/"))
-        )
+    def verify_file(self, name):
+        """Hash a frozen file against its record once, then require its unchanged identity."""
+        known = self.verified.get(name)
+        if known is not None:
+            try:
+                with parent_fd(self.root, name) as (directory, leaf):
+                    measured = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
+            except OSError as exc:
+                raise InfrastructureError("cannot read frozen declaration source") from exc
+            if identity(measured) != known:
+                raise InfrastructureError(
+                    "frozen declaration source changed after its verification"
+                )
+            return
+        try:
+            content, measured = regular_bytes(self.root, name, markers.MAX_SOURCE)
+        except OSError as exc:
+            raise InfrastructureError("cannot read frozen declaration source") from exc
+        record = self.records[name]
+        if (
+            hashlib.sha256(content).hexdigest() != record["sha256"]
+            or measured.st_mode & 0o777 != record["mode"]
+        ):
+            raise InfrastructureError("frozen declaration source disagrees with its record")
+        # Only a file that agreed is remembered; a refused one is read again and refuses.
+        self.verified[name] = identity(measured)
+
+    def entry(self, name):
+        record = self.records[name]
+        if record["kind"] == "symlink":
+            self.verify_link(name)
+            return "symlink", record["target"]
+        return record["kind"], None
 
     def for_view(self, unit):
         selected = set(unit.inputs)
@@ -98,56 +143,25 @@ class FrozenRegistry:
                 continue
             if not origin.endswith(".py"):
                 continue
-            name = origin
-            seen = set()
-            while self.records[name]["kind"] == "symlink":
-                if name in seen or len(seen) >= 64:
-                    raise InfrastructureError("cyclic frozen declaration source link")
-                if name in self.tool_links:
-                    raise InfrastructureError("a tool link is not a project declaration source")
-                seen.add(name)
-                record = self.records[name]
-                self.verify_link(name)
-                target = posixpath.normpath(
-                    posixpath.join(posixpath.dirname(name), record["target"])
-                )
-                if not self.canonical_path(target) or target not in selected:
-                    # A supported dangling leaf remains absent, never an authentication source.
-                    if target in unit.absent and self.canonical_path(target):
-                        name = None
-                        break
-                    raise InfrastructureError("frozen declaration source link escaped its view")
-                name = target
-            if name is not None and self.records[name]["kind"] == "file":
+            name = follow_source(origin, self.entry, selected, set(unit.absent), self.tool_links)
+            if name is not None:
                 sources[origin] = name
         registry = []
+        checked = set()
         for origin, name in sources.items():
-            try:
-                content, measured = regular_bytes(self.root, name, markers.MAX_SOURCE)
-            except OSError as exc:
-                raise InfrastructureError("cannot read frozen declaration source") from exc
+            if name not in checked:
+                # Aliases of one file share its single check in this view.
+                self.verify_file(name)
+                checked.add(name)
             record = self.records[name]
-            if (
-                hashlib.sha256(content).hexdigest() != record["sha256"]
-                or measured.st_mode & 0o777 != record["mode"]
-            ):
-                raise InfrastructureError("frozen declaration source disagrees with its record")
-            if origin not in self.parsed:
-                # Each readable import origin has its own call identities. Count aliases
-                # against parsing budgets too: they must not multiply records unboundedly.
-                self.source_bytes += len(content)
-                if self.source_bytes > markers.MAX_TOTAL_SOURCE:
-                    raise DeclarationError("frozen Python source exceeds the discovery budget")
-                try:
-                    found, nodes = markers.discover(content, origin)
-                except markers.MarkerError as exc:
-                    raise DeclarationError(str(exc)) from exc
-                self.nodes += nodes
-                self.markers += len(found)
-                if self.nodes > markers.MAX_TOTAL_NODES or self.markers > markers.MAX_MARKERS:
-                    raise DeclarationError(
-                        "frozen declaration syntax exceeds total node/marker limits"
-                    )
-                self.parsed[origin] = found
-            registry.extend(self.parsed[origin])
+            scan = self.scans.get(origin)
+            if scan is None or scan.file != name or scan.sha256 != record["sha256"]:
+                raise InfrastructureError(
+                    "frozen declaration source disagrees with its static scan"
+                )
+            if origin not in self.labeled:
+                # Each readable import origin has its own call identities, relabeled from
+                # the one bounded parse of its file rather than parsed again.
+                self.labeled[origin] = markers.label(scan.rows, origin)
+            registry.extend(self.labeled[origin])
         return registry

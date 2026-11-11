@@ -92,6 +92,38 @@ def test_right(per_case):
 
 
 @pytest.mark.requires_fixture_guard
+def test_identical_checkouts_at_different_paths_share_guarded_results(tmp_path):
+    # Scoped sessions see every checkout at /project, so a conftest fixture and its
+    # plugin name the same path wherever the checkout lives, and so do the guarded
+    # fixture identities.
+    cache = tmp_path / "shared-results"
+    outcomes = []
+    for name in ("first", "second"):
+        root = tmp_path / name
+        configure(root)
+        put(
+            root,
+            "tests/conftest.py",
+            "import pytest\n@pytest.fixture\ndef answer():\n    return 42\n",
+        )
+        put(
+            root,
+            "tests/test_answer.py",
+            "from pathlib import Path\n"
+            "import pytest\n"
+            "pytestmark = pytest.mark.telescope(inputs=['tests/conftest.py'])\n"
+            "def test_answer(answer, request):\n"
+            "    assert answer == 42\n"
+            "    assert request.config.rootpath == Path.cwd() == Path(__file__).parents[1]\n"
+            "    assert Path.cwd() == Path('/project')\n",
+        )
+        report = controller.run(root, fixture_guard="available-v1", cache_dir=cache)
+        admitted(report)
+        outcomes.append({key: value for key, value in report["counts"].items() if value})
+    assert outcomes == [{"executed": 1, "selected": 1}, {"reused": 1, "selected": 1}]
+
+
+@pytest.mark.requires_fixture_guard
 def test_shared_user_fixture_is_one_ordered_atomic_group(tmp_path):
     configure(tmp_path)
     put(

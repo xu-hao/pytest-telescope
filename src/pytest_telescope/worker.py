@@ -18,7 +18,9 @@ from _pytest.mark.structures import ParameterSet
 MAX_INVENTORY = 67_108_864
 REQUEST_PATH = "/telescope/request.json"
 SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
-PROJECT_ROOT = Path("/project")
+# Where the session sees the project: /project, the frozen view, in a scoped session,
+# and the checkout itself in an ordinary one. Every request names it.
+PROJECT_ROOT = None
 
 
 FRAMEWORK_SOURCE_IDENTITIES = {
@@ -123,7 +125,19 @@ def skip_reason(report):
     )
 
 
+# A session names the same few files hundreds of times. Both tables live for one
+# session: main() clears them when it sets the project root.
+PROJECT_FILES = {}
+CANONICAL_FILES = {}
+
+
 def project_file(filename):
+    """The project-relative name of a path, which must lie inside the project."""
+    key = os.fspath(filename)
+    try:
+        return PROJECT_FILES[key]
+    except KeyError:
+        pass
     path = Path(os.path.abspath(PROJECT_ROOT / filename)).relative_to(PROJECT_ROOT)
     text = path.as_posix()
     if (
@@ -134,6 +148,7 @@ def project_file(filename):
         or "\\" in text
     ):
         raise ValueError("invalid project path")
+    PROJECT_FILES[key] = text
     return text
 
 
@@ -685,14 +700,16 @@ def fixture_registry_commitment(session, items, identities, observer):
 def main(request=None, *, ordinary=False):
     global PROJECT_ROOT
     started = time.monotonic()
-    if ordinary:
-        PROJECT_ROOT = Path(request["project_root"])
-        if not PROJECT_ROOT.is_absolute():
-            raise ValueError("ordinary sessions require an absolute project root")
-    else:
+    if not ordinary:
         if os.environ.pop("TELESCOPE_REQUEST", None) != REQUEST_PATH:
             raise ValueError("invalid request location")
         request = read_request(REQUEST_PATH)
+    root = request.get("project_root")
+    if type(root) is not str or not os.path.isabs(root):
+        raise ValueError("sessions require an absolute project root")
+    PROJECT_ROOT = Path(root)
+    PROJECT_FILES.clear()
+    CANONICAL_FILES.clear()
     if request.get("metadata"):
         from importlib import metadata
 
@@ -722,8 +739,12 @@ def main(request=None, *, ordinary=False):
 
     def canonical_nodeid(value):
         filename, separator, suffix = value.partition("::")
-        path = (PROJECT_ROOT / suite_root / filename).resolve()
-        return project_file(path) + (separator + suffix if separator else "")
+        try:
+            name = CANONICAL_FILES[filename]
+        except KeyError:
+            path = (PROJECT_ROOT / suite_root / filename).resolve()
+            name = CANONICAL_FILES[filename] = project_file(path)
+        return name + (separator + suffix if separator else "")
 
     mode = request["mode"]
     guard_mode = mode in ("guard-capture", "guard-inspection", "guard-batch")

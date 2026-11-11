@@ -7,6 +7,7 @@ import json
 import pytest
 from test_helper_registry import consumer, no_new_records, project_at, put
 from test_helper_registry_contract import passed
+from test_static_parse_bounds import refuses_before_any_sandbox
 
 from pytest_telescope import controller, frozen_registry, markers, sandbox
 from pytest_telescope.model import DeclarationError, InfrastructureError, fingerprint
@@ -262,17 +263,17 @@ def test_helper_source_parser_and_alias_budgets_are_bounded(tmp_path, monkeypatc
     elif budget == "markers_total":
         monkeypatch.setattr(markers, "MAX_MARKERS", 1)
     elif budget == "aliases":
+        # An alias is parsed once but authenticates its own records: one test marker
+        # and one helper marker fit, three more alias origins of the helper do not.
         inputs = ["helpers/__init__.py", "helpers/support.py", "data/answer.txt"]
         for number in range(3):
             name = f"helpers/alias_{number}.py"
             (root / name).symlink_to("support.py")
             inputs.append(name)
         consumer(root, inputs=inputs)
-        test_source = (root / "tests/test_consumer.py").read_bytes()
-        monkeypatch.setattr(markers, "MAX_TOTAL_SOURCE", len(test_source) + 2 * len(helper_source))
+        monkeypatch.setattr(markers, "MAX_MARKERS", 2)
 
-    with pytest.raises(DeclarationError, match="limit|budget|node|marker|syntax"):
-        controller.run(root, workers=1)
+    refuses_before_any_sandbox(root, monkeypatch, "limit|budget|node|marker|syntax")
 
     no_new_records(root)
 

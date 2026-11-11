@@ -132,7 +132,7 @@ def profile_session(gates, tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     membership = tmp_path / "membership.json"
 
-    def run(profile, version="9.2.0"):
+    def run(profile, version="9.2.0", workers=None):
         actual_version = importlib.metadata.version
         monkeypatch.setattr(
             importlib.metadata,
@@ -156,6 +156,7 @@ def profile_session(gates, tmp_path, monkeypatch):
                 digest,
                 "--scratch",
                 str(scratch),
+                *([] if workers is None else ["--workers", str(workers)]),
             ],
         )
         return gates.functional.main()

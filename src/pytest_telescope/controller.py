@@ -400,18 +400,23 @@ def _row(item, suite, route, outcome, reason=""):
 
 
 def _session_arguments(suite, options, files):
-    """Arguments of one sandboxed pytest session, rooted at the frozen /project view."""
+    """Arguments of one sandboxed pytest session, rooted at the frozen /project view.
+
+    The sandbox shows the project there and nowhere else, so test files, configuration
+    and the root directory never name the checkout's own location.
+    """
+    root = sandbox.PROJECT
     return [
         "-c",
-        "/project/" + suite.config,
-        "--rootdir=/project/" + suite.root,
+        str(root / suite.config),
+        "--rootdir=" + str(root / suite.root),
         "-o",
         "addopts=",
         "-p",
         "no:cacheprovider",
         *[part for plugin in suite.plugins for part in ("-p", plugin)],
         *options,
-        *files,
+        *[str(root / name) for name in files],
     ]
 
 
@@ -926,7 +931,9 @@ def run(
                 ):
                     pool = pool_directory / "project"
                     records = snapshot(manifest, manifest.pool, pool)
-                    frozen_registry = FrozenRegistry(pool, records, manifest.pool.tool_links)
+                    frozen_registry = FrozenRegistry(
+                        pool, records, manifest.pool.tool_links, manifest.scans
+                    )
                     for suite, _ in configured:
                         suite_directories(pool, suite)
                     record_map = {record["path"]: record for record in records}
@@ -998,11 +1005,7 @@ def run(
                                     collected = sandbox.execute(
                                         box,
                                         frozen,
-                                        _session_arguments(
-                                            suite,
-                                            options,
-                                            ["/project/" + name for name in collection_unit.tests],
-                                        ),
+                                        _session_arguments(suite, options, collection_unit.tests),
                                         collection_environment,
                                         timeout,
                                         root=manifest.root,
@@ -1197,7 +1200,7 @@ def run(
                                             _session_arguments(
                                                 suite,
                                                 candidate["options"],
-                                                ["/project/" + candidate["item"]["file"]],
+                                                [candidate["item"]["file"]],
                                             ),
                                             candidate["environment"],
                                             timeout,
@@ -1338,9 +1341,7 @@ def run(
                                     result = sandbox.execute(
                                         box,
                                         frozen,
-                                        _session_arguments(
-                                            suite, job["options"], ["/project/" + item["file"]]
-                                        ),
+                                        _session_arguments(suite, job["options"], [item["file"]]),
                                         job["environment"],
                                         timeout,
                                         root=manifest.root,

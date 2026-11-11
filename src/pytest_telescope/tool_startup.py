@@ -13,7 +13,7 @@ from .tool_graph import layout
 
 
 def signature(box):
-    return digest([box.executable, box.binds, box.description, "-I"])
+    return digest([box.executable, box.binds, box.links, box.description, "-I"])
 
 
 def path(value):
@@ -215,4 +215,7 @@ def environment(box, closed):
         if any(target.is_relative_to(root) for root in closed):
             continue
         layout("native environment mount is outside the closed startup projections")
+    for _, location in box.links:
+        if not any(path(location).is_relative_to(root) for root in closed):
+            layout("native environment link is outside the closed startup projections")
     return ()
