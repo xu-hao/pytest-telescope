@@ -123,8 +123,9 @@ this, with the exceptions listed under
   after another path component and after a file-name character, including `~`, `+`, `@`
   and `%`. One rare false match remains: below a directory whose name ends in `=`, as
   in `/mnt/x=/home/dev/my_project`, the path after the `=` is rewritten.
-- As a result, identical checkouts whose paths contain no space, each with its own
-  environment inside the project, have the same sandbox identity and share results.
+- As a result, identical checkouts at different paths, each with its own environment
+  inside the project, have the same sandbox identity and share results, however the
+  environment's scripts quote the path.
 - The host files are never modified. The copies live in the invocation's private scratch
   and are bound over the originals for that sandbox only.
 - Cached bytecode of a rewritten module is shown as an empty file, and the rewritten
