@@ -72,8 +72,10 @@ def two_views(capture, sources):
     first = capture.view(("first",))
     second = capture.view(("second",))
     actual = owned_paths(capture.directory)
-    assert len(actual) == 48
-    assert len([row for row in actual.values() if stat.S_ISDIR(row[2])]) == 12
+    # Each view adds its directory, its closed bin projection, and the logical directory
+    # of each preserved files-mode root: two directories and nine links to originals.
+    assert len(actual) == 70
+    assert len([row for row in actual.values() if stat.S_ISDIR(row[2])]) == 16
     for name, source, view in zip(("first", "second"), sources, (first, second), strict=True):
         copy = capture.directory / name / "install/bin/value0"
         closed = dict((destination, path) for path, destination in view.bindings)[
@@ -96,7 +98,7 @@ def two_views(capture, sources):
 
 def test_two_views_fit_shared_bound_and_reuse_adds_no_paths(sparse_pair, monkeypatch):
     project, sources, stage = sparse_pair
-    monkeypatch.setattr(tool_context, "MAX_VISITS", 64)
+    monkeypatch.setattr(tool_context, "MAX_VISITS", 96)
     with tool_capture.Capture(model.load(project.root), stage, 10, None) as capture:
         previous = two_views(capture, sources)
         identity = capture.view(("first",)).identity
@@ -107,7 +109,7 @@ def test_two_views_fit_shared_bound_and_reuse_adds_no_paths(sparse_pair, monkeyp
 
 def test_union_reservation_refuses_before_creating_over_bound_paths(sparse_pair, monkeypatch):
     project, sources, stage = sparse_pair
-    monkeypatch.setattr(tool_context, "MAX_VISITS", 64)
+    monkeypatch.setattr(tool_context, "MAX_VISITS", 96)
     with tool_capture.Capture(model.load(project.root), stage, 10, None) as capture:
         previous = two_views(capture, sources)
         refusal = None
@@ -118,7 +120,7 @@ def test_union_reservation_refuses_before_creating_over_bound_paths(sparse_pair,
         actual = owned_paths(capture.directory)
         print(
             "OWNED_MATERIALIZATION",
-            {"before": len(previous), "after": len(actual), "limit": 64},
+            {"before": len(previous), "after": len(actual), "limit": 96},
             flush=True,
         )
         assert refusal is not None and refusal.capability == "tool:bounds"
@@ -126,14 +128,14 @@ def test_union_reservation_refuses_before_creating_over_bound_paths(sparse_pair,
     assert not (stage / "tools").exists()
 
 
-def test_cleanup_counts_each_of_69_admitted_paths_once(sparse_pair, monkeypatch):
+def test_cleanup_counts_each_of_113_admitted_paths_once(sparse_pair, monkeypatch):
     project, sources, stage = sparse_pair
-    monkeypatch.setattr(tool_context, "MAX_VISITS", 69)
+    monkeypatch.setattr(tool_context, "MAX_VISITS", 113)
     with tool_capture.Capture(model.load(project.root), stage, 10, None) as capture:
         two_views(capture, sources)
         capture.view(("first", "second"))
         actual = owned_paths(capture.directory)
-        assert len(actual) == 69
-        assert len([row for row in actual.values() if stat.S_ISDIR(row[2])]) == 15
-        print("OWNED_MATERIALIZATION", {"admitted": len(actual), "limit": 69}, flush=True)
+        assert len(actual) == 113
+        assert len([row for row in actual.values() if stat.S_ISDIR(row[2])]) == 23
+        print("OWNED_MATERIALIZATION", {"admitted": len(actual), "limit": 113}, flush=True)
     assert not (stage / "tools").exists()

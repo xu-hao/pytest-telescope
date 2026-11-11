@@ -335,6 +335,9 @@ class ToolView:
     native: bool = False
     closed: tuple = ()
     startup_identity: str | None = None
+    # Sandbox symlinks as (target, path): /tools paths of trees that keep their original
+    # paths, so each file is mounted once.
+    links: tuple = ()
 
 
 class Capture:
@@ -593,4 +596,11 @@ class Capture:
                 projection.native,
                 tuple(projection.closed),
                 None if projection.startup is None else projection.startup.signature,
+                tuple(
+                    (target, location)
+                    for location, target in sorted(
+                        projection.links.items(),
+                        key=lambda item: (len(Path(item[0]).parts), item[0]),
+                    )
+                ),
             )

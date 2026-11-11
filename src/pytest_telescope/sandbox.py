@@ -1379,6 +1379,12 @@ def execute(
     if tool_view is not None:
         for source, destination in tool_view.bindings:
             argv += ["--ro-bind", str(source), destination]
+        # A tool that keeps its original path is mounted there once; its /tools path
+        # is a link to it.
+        for target, location in tool_view.links:
+            if not _inside(Path(location), Path("/tools")):
+                raise InfrastructureError("tool link is outside the tool namespace")
+            argv += ["--symlink", target, location]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
     controlled = box

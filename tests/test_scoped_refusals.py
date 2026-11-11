@@ -101,16 +101,31 @@ def test_suite_directories_reject_symlink_ancestors(tmp_path, field):
         load(tmp_path)
 
 
-@pytest.mark.parametrize("declared", ["myenv", "myenv/pyvenv.cfg"])
+@pytest.mark.parametrize(
+    "marker,declared",
+    [
+        ("pyvenv.cfg", "myenv"),
+        ("pyvenv.cfg", "myenv/pyvenv.cfg"),
+        ("conda-meta", "myenv"),
+        ("conda-meta", "myenv/bin/python"),
+    ],
+)
 @pytest.mark.parametrize("form", ["directory", "link"])
 def test_a_declared_environment_is_named_as_not_a_project_input(
-    tmp_path, monkeypatch, capsys, declared, form
+    tmp_path, monkeypatch, capsys, marker, declared, form
 ):
     project = tmp_path / "checkout"
     project.mkdir()
     environment = tmp_path / "shared-venv" if form == "link" else project / "myenv"
     environment.mkdir()
-    (environment / "pyvenv.cfg").write_text("home = /synthetic/interpreter\n")
+    if marker == "pyvenv.cfg":
+        (environment / "pyvenv.cfg").write_text("home = /synthetic/interpreter\n")
+    else:
+        # A conda environment has no pyvenv.cfg; its install records mark it.
+        (environment / "conda-meta").mkdir()
+        (environment / "conda-meta" / "history").write_text("")
+        (environment / "bin").mkdir()
+        (environment / "bin" / "python").write_text("")
     if form == "link":
         (project / "myenv").symlink_to("../shared-venv")
     (project / "test_public.py").write_text(

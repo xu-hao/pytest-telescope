@@ -15,7 +15,7 @@ def test_partial_projection_keeps_reservation_until_cleanup_and_fresh_capture(
     sparse_pair, monkeypatch
 ):
     project, sources, stage = sparse_pair
-    monkeypatch.setattr(tool_context, "MAX_VISITS", 64)
+    monkeypatch.setattr(tool_context, "MAX_VISITS", 100)
     capture = tool_capture.Capture(model.load(project.root), stage, 10, None)
     original = tool_view.Projection.materialize
     failures = []
@@ -28,14 +28,14 @@ def test_partial_projection_keeps_reservation_until_cleanup_and_fresh_capture(
 
     with capture:
         capture.view(("first",))
-        assert len(owned_paths(capture.directory)) == 37
+        assert len(owned_paths(capture.directory)) == 48
         with monkeypatch.context() as fault:
             fault.setattr(tool_view.Projection, "materialize", partial)
             with pytest.raises(InfrastructureError):
                 capture.view(("first", "second"))
         assert len(failures) == 1 and failures[0].exists()
         physical = owned_paths(capture.directory)
-        assert 37 < len(physical) < 58
+        assert 48 < len(physical) < 91
         with pytest.raises(UnsupportedCapability) as caught:
             capture.view(("second",))
         assert caught.value.capability == "tool:bounds"
@@ -77,7 +77,7 @@ def test_interrupted_reservation_creates_no_members_and_consumes_no_capacity(
     assert not capture.directory.exists()
     with tool_capture.Capture(model.load(project.root), stage, 10, threading.Event()) as capture:
         capture.view(("first",))
-        assert len(owned_paths(capture.directory)) == 37
+        assert len(owned_paths(capture.directory)) == 48
 
 
 def test_cancellation_after_materialized_members_unwinds_without_source_changes(
@@ -108,7 +108,7 @@ def test_cleanup_deadline_is_terminal_then_abandoned_recovery_uses_same_bound(
     sparse_pair, monkeypatch, expiry_check
 ):
     project, sources, _ = sparse_pair
-    monkeypatch.setattr(tool_context, "MAX_VISITS", 69)
+    monkeypatch.setattr(tool_context, "MAX_VISITS", 113)
     manifest = model.load(project.root)
     calls = 0
 
@@ -136,7 +136,7 @@ def test_cleanup_deadline_is_terminal_then_abandoned_recovery_uses_same_bound(
                     capture.__enter__()
                     two_views(capture, sources)
                     capture.view(("first", "second"))
-                    assert len(owned_paths(capture.directory)) == 69
+                    assert len(owned_paths(capture.directory)) == 113
                     with monkeypatch.context() as fault:
                         fault.setattr(tool_capture, "time", SimpleNamespace(monotonic=clock))
                         with pytest.raises(sandbox.CleanupError) as caught:

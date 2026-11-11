@@ -27,6 +27,12 @@ class Projection:
         self.budget = capture._budget()
         self.names = names
         self.bindings = {}
+        # Sandbox symlinks by path: a tool tree that keeps its original path is mounted
+        # once, there, and its /tools path is a link to it.
+        self.links = {}
+        # Owned logical directories of files-mode roots that keep their original paths:
+        # each entry is a link to its original path instead of a second mount.
+        self.logical = {}
         self.commands = {}
         self.command_path = None
         self.entries = {}
@@ -40,11 +46,15 @@ class Projection:
             graph, runtime = capture.graphs[name], capture.runtimes[name]
             for root in graph.roots.values():
                 source = capture.directory / name / root["id"]
-                self.bindings[str(Path("/tools") / name / root["id"])] = source
+                logical = str(Path("/tools") / name / root["id"])
                 if not root["preserve_source"]:
+                    self.bindings[logical] = source
                     continue
                 if root["coverage"] == "tree":
                     trees.append(root["source"])
+                    self.links[logical] = root["source"]
+                else:
+                    self.logical[logical] = (graph, root)
                 for row in root["entries"]:
                     self.budget.tick()
                     key = (root["id"], row["path"])
@@ -148,6 +158,8 @@ class Projection:
         self.directory = capture.directory / ".views" / self.identity
         capture.reserve(self.planned_paths(originals), self.budget)
         self.directory.mkdir(mode=0o700)
+        for index, (logical, (graph, root)) in enumerate(sorted(self.logical.items())):
+            self.bindings[logical] = self.link_entries(graph, root, index)
         for index, destination in enumerate(self.closed):
             self.budget.tick()
             source = self.directory / ("closed-" + str(index))
@@ -222,11 +234,57 @@ class Projection:
                     yield path
             if self.native and destination == "/etc":
                 yield root / "ld.so.preload"
+        for index, (_, (graph, root)) in enumerate(sorted(self.logical.items())):
+            top = self.directory / ("logical-" + str(index))
+            yield top
+            for row in root["entries"]:
+                self.budget.tick()
+                path = top / row["path"]
+                yield path
+                while path != top:
+                    path = path.parent
+                    yield path
         if self.commands:
             directory = self.directory / "commands"
             yield directory
             for command in self.commands:
                 yield directory / command
+
+    def link_entries(self, graph, root, index):
+        """The logical directory of a files-mode root that keeps its original paths.
+
+        Directories and declared links are owned copies; each file is a link to its
+        original path, where it is mounted once.
+        """
+        top = self.directory / ("logical-" + str(index))
+        rows = sorted(root["entries"], key=lambda row: (len(Path(row["path"]).parts), row["path"]))
+        for row in rows:
+            self.budget.tick(visit=True)
+            destination = top / row["path"]
+            missing = []
+            parent = destination.parent
+            while parent != self.directory and not parent.exists():
+                missing.append(parent)
+                parent = parent.parent
+            for parent in reversed(missing):
+                parent.mkdir(mode=0o700)
+                self.directories.add(parent)
+            if row["kind"] == "directory":
+                destination.mkdir(mode=0o700, exist_ok=True)
+                self.directories.add(destination)
+                self.entries[destination] = ("directory", row["mode"])
+                continue
+            target = (
+                row["target"]
+                if row["kind"] == "symlink"
+                else graph.original((root["id"], row["path"]))
+            )
+            destination.symlink_to(target)
+            self.entries[destination] = ("symlink", target)
+        if not top.is_dir():
+            top.mkdir(mode=0o700)
+            self.directories.add(top)
+        return top
 
     def materialize(self, graph, key, destination):
         self.budget.tick(visit=True)

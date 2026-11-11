@@ -367,13 +367,23 @@ def excluded_namespace(root, name, excluded=()):
         directory = Path(*parts[:depth])
         config = directory / "pyvenv.cfg"
         linked = linked or (root / directory).is_symlink()
-        if linked and os.path.isfile(root / config):
+        if linked and (os.path.isfile(root / config) or conda_environment(root / directory)):
             # An environment reached through a link: never read through the link.
+            return True
+        if conda_environment(root / directory, follow=False):
             return True
         if os.path.lexists(root / config):
             regular_bytes(root, config.as_posix(), 65536)
             return True
     return False
+
+
+def conda_environment(directory, *, follow=True):
+    """A conda-style environment, which has no pyvenv.cfg, is marked by `conda-meta`."""
+    records = Path(directory) / "conda-meta"
+    if follow:
+        return records.is_dir()
+    return not records.is_symlink() and records.is_dir()
 
 
 def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), budget=None):
@@ -391,6 +401,8 @@ def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), 
                 name = path.relative_to(root).as_posix()
                 relative(name)
                 if excluded_path(name, excluded):
+                    continue
+                if entry.is_dir(follow_symlinks=False) and conda_environment(path, follow=False):
                     continue
                 if entry.is_dir(follow_symlinks=False) and os.path.lexists(path / "pyvenv.cfg"):
                     regular_bytes(root, name + "/pyvenv.cfg", 65536)
