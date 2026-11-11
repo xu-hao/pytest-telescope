@@ -303,7 +303,9 @@ environment. Any listed file, binary or text, that the sandbox does not show rew
 causes the refusal. Every conda environment that contains Python has one: Python's
 build configuration module. At most 4096 records, 64 MiB in total, are read. A
 `conda-meta` directory with more, or with a record that cannot be read, is refused the
-same way. An environment without `conda-meta` that has absolute paths compiled into its
+same way. A link inside the project, such as `.env -> ../shared-env`, to such an
+environment outside the project is refused too; start that environment's interpreter
+by its real path outside the project, or remove the link. An environment without `conda-meta` that has absolute paths compiled into its
 files cannot be detected; keep such an environment outside the project as well.
 
 `/project`, the environment, the rewritten files, system directories and the sandbox

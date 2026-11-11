@@ -318,7 +318,7 @@ key does not contain:
 
 - the source directories in the mount table (field 4 of `/proc/*/mountinfo`);
 - the raw bytes of cached bytecode files (`__pycache__/*.pyc`) of an environment inside
-  the project.
+  the project;
 - the real path of an environment inside the project that is a symbolic link to a
   directory outside it, such as `.venv -> ../shared-venv`.
 

@@ -193,7 +193,7 @@ Three things a scoped test can read still name its checkout's location. See
   as a link that leads there. The link's text, `os.path.realpath(sys.prefix)` and the
   environment's mount point name that path; `sys.prefix` names `/project/.venv`.
 
-In either case a result cached in one checkout could be reused in another checkout, where
+In each case a result cached in one checkout could be reused in another checkout, where
 the test would have seen a different value.
 
 ### Performance
