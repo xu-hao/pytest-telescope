@@ -69,6 +69,10 @@ from importlib import metadata
 
 LIMIT = int(sys.argv[2])
 NAME = rb"A-Za-z0-9._~+@%=\x80-\xff-"
+# What may end the name before a path that only ends with the directory. `=` is left
+# out: it separates a key from the path that is its value, as in `VIRTUAL_ENV=/path`.
+# `~` starts a path below a home directory, and names end with `+`, `@` and `%`.
+BEFORE = rb"A-Za-z0-9._~+@%\x80-\xff-"
 
 def normalize(name):
     return re.sub(r"[-_.]+", "-", str(name or "")).lower()
@@ -91,9 +95,9 @@ def spellings(root):
 
 def boundary(root):
     # The directory as a whole path: not the tail of a longer path, except after the
-    # two slashes of a URL, and not the head of a longer file name.
+    # two slashes of a URL or the `=` of a value, and not the head of a longer file name.
     return re.compile(
-        rb"(?<![" + NAME + rb"])(?<!(?<!:/)/)(?:"
+        rb"(?<![" + BEFORE + rb"])(?<!(?<!:/)/)(?:"
         + b"|".join(re.escape(value) for value in spellings(root))
         + rb")(?![" + NAME + rb"])"
     )
