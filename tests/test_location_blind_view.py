@@ -13,6 +13,7 @@ in-project environment's own cached bytecode.
 import json
 import os
 import py_compile
+import re
 import shutil
 import subprocess
 from dataclasses import replace
@@ -103,6 +104,7 @@ def test_a_test_that_expects_its_checkout_name_fails_at_every_checkout(tmp_path)
 BLIND_TESTS = """\
 import json
 import os
+import re
 import site
 import subprocess
 import sys
@@ -283,10 +285,32 @@ def test_environment_inside_the_project():
     scripts = sorted(os.listdir(prefix + "/bin"))
     assert [name for name in scripts if os.path.isfile(prefix + "/bin/" + name)
             and naming(read(prefix + "/bin/" + name))] == []
+    # The activation script names the environment by its path in the sandbox, in
+    # whatever quoting the interpreter that created the environment wrote.
+    assignment = r"^\\s*(?:export )?VIRTUAL_ENV=(['\\"]?)" + re.escape(prefix) + r"\\1$"
+    activate = read(prefix + "/bin/activate").decode()
+    assert re.search(assignment, activate, re.MULTILINE), activate
     # A console script starts the environment's interpreter by its path in the sandbox.
     completed = subprocess.run(["toy-script"], capture_output=True, text=True, timeout=60)
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == prefix + " /project/src/toypkg/__init__.py\\n"
+
+
+def test_no_file_below_the_project_names_the_checkout():
+    # Every regular file the sandbox shows below /project, the environment's included,
+    # except the environment's own cached bytecode, which the next test states.
+    files = [
+        os.path.join(directory, leaf)
+        for directory, _, leaves in os.walk("/project")
+        for leaf in leaves
+    ]
+    files = [
+        path for path in files
+        if os.path.isfile(path) and not os.path.islink(path) and not environment_bytecode(path)
+    ]
+    assert "/project/" + ENVIRONMENT + "/bin/activate" in files
+    assert named(files) == []
+    assert [path for path in files if naming(read(path))] == []
 
 
 def test_open_channel_bytecode_of_an_environment_inside_the_project():
@@ -398,8 +422,12 @@ def test_a_scoped_session_cannot_observe_its_checkout_location(tmp_path):
     assert_nothing_recorded_names(project, report, cache)
 
 
-def test_an_environment_inside_the_project_does_not_reveal_the_checkout_location(tmp_path):
-    root = tmp_path / "kestrel checkout"
+# An interpreter quotes the environment's path in its activation script only when the
+# path needs it. The name without a space is written bare after `VIRTUAL_ENV=`; the name
+# with one is quoted, and is percent-encoded in the installed origin record.
+@pytest.mark.parametrize("name", ["kestrel checkout", "kestrel-checkout"])
+def test_an_environment_inside_the_project_does_not_reveal_the_checkout_location(tmp_path, name):
+    root = tmp_path / name
     project, interpreter, site_packages = blind_project(root, root / ".venv")
     put(site_packages, "toyextra.py", "def where():\n    pass\n")
     script = project / ".venv" / "bin" / "toy-script"
@@ -419,9 +447,117 @@ def test_an_environment_inside_the_project_does_not_reveal_the_checkout_location
     cache = tmp_path / "results"
     code, report = run(interpreter, project, "--cache-dir", str(cache))
     assert code == 0, failed_lines(report)
-    assert report["route_counts"]["scoped"]["executed"] == 10, report
+    assert report["route_counts"]["scoped"]["executed"] == 11, report
     assert host_files(project / ".venv") == before
     assert_nothing_recorded_names(project, report, cache)
+
+
+def test_checkouts_with_their_own_environment_share_one_identity_and_results(tmp_path):
+    # Each checkout has its own environment inside it, at a path without a space. Every
+    # file of the environment that names the checkout reads /project in both, so the
+    # two environments are one sandbox identity and the second checkout reuses.
+    cache = tmp_path / "shared-results"
+    identities, reports = [], []
+    for name in ("checkout-a", "checkout-b"):
+        project = toy_project(tmp_path / name)
+        interpreter, _ = environment(project / ".venv")
+        put(project, "tests/test_where.py", WHERE_TESTS.format(expected="project"))
+        identities.append(sandbox.describe(project, interpreter).identity)
+        reports.append(run(interpreter, project, "--cache-dir", str(cache)))
+        assert_nothing_recorded_names(project, reports[-1][1], cache)
+    (first_code, first), (second_code, second) = reports
+    assert first_code == 0 and second_code == 0, reports
+    assert identities[0] == identities[1]
+    assert {key: value for key, value in first["counts"].items() if value} == {
+        "executed": 2,
+        "selected": 2,
+    }
+    assert {key: value for key, value in second["counts"].items() if value} == {
+        "reused": 2,
+        "selected": 2,
+    }
+
+
+SHOWN_TEST = """\
+import pytest
+
+pytestmark = pytest.mark.telescope(inputs=[])
+
+
+def test_shown_lines():
+    with open({path!r}, "rb") as stream:
+        shown = stream.read().decode().splitlines()
+    assert shown == {expected!r}
+"""
+
+
+def shown_lines(tmp_path, name, lines):
+    """Run a scoped test that compares an installed metadata file with `lines`.
+
+    Each line is a pair: what the host file says, with `{root}` for the checkout's path,
+    `{url}` for its file URL and `{lower}` for that URL with lowercase hexadecimal
+    escapes, and what the sandbox must show for it.
+    """
+    project = toy_project(tmp_path / name)
+    interpreter, site_packages = environment(tmp_path / "env")
+    install_editable(site_packages, project, "pth")
+    names = {"{root}": str(project), "{url}": project.as_uri()}
+    names["{lower}"] = re.sub("%[0-9A-F]{2}", lambda match: match[0].lower(), names["{url}"])
+
+    def spelled(line):
+        for placeholder, value in names.items():
+            line = line.replace(placeholder, value)
+        return line
+
+    record = site_packages / "toypkg-0.1.dist-info" / "locations.txt"
+    record.write_text("".join(spelled(line) + "\n" for line, _ in lines))
+    expected = [spelled(line) for _, line in lines]
+    put(project, "tests/test_shown.py", SHOWN_TEST.format(path=str(record), expected=expected))
+    before = host_files(site_packages)
+    code, report = run(interpreter, project)
+    assert code == 0, [failure for unit in report["units"] for failure in unit["failures"]]
+    assert report["route_counts"]["scoped"]["executed"] == 1, report
+    assert host_files(site_packages) == before
+
+
+def test_a_path_after_a_value_delimiter_is_rewritten(tmp_path):
+    shown_lines(
+        tmp_path,
+        "checkout",
+        [
+            ("export VIRTUAL_ENV={root}/.venv", "export VIRTUAL_ENV=/project/.venv"),
+            ("key={root}/data/answer.txt", "key=/project/data/answer.txt"),
+            ("key={root}", "key=/project"),
+            ("--prefix={root} --other", "--prefix=/project --other"),
+            ("first={root}:second={root}/bin", "first=/project:second=/project/bin"),
+            ("key={url}/src", "key=file:///project/src"),
+        ],
+    )
+
+
+def test_a_longer_path_that_ends_with_or_starts_with_the_checkout_is_not_rewritten(tmp_path):
+    # A path that only has the checkout's path as its tail or head is another directory.
+    # After `=`, the path is the checkout only when it starts there. A name may end with
+    # `+`, `@`, `%` or `~`, and `~` starts a path below a home directory, so a path after
+    # one of them is read as the rest of a longer path and is left as it is.
+    kept = [
+        "/mnt{root}",
+        "/x{root}/src",
+        "key=/x{root}/src",
+        "key=/mnt{root}",
+        "{root}=other/src",
+        "{root}-other/src",
+        "/opt/c++{root}/src",
+        "name@{root}/src",
+        "100%{root}/src",
+        "~{root}/src",
+        "~user{root}/src",
+    ]
+    shown_lines(
+        tmp_path,
+        "checkout",
+        [(line, line) for line in kept] + [("{root}/src", "/project/src")],
+    )
 
 
 BYTECODE_TEST = """\
@@ -614,3 +750,20 @@ def test_frozen_tool_views_do_not_name_the_checkout_and_are_shared_between_check
     assert_counts(reports[1], executed=1, reused=1)
     assert_nothing_recorded_names(first.root, reports[0], cache)
     assert_nothing_recorded_names(second, reports[1], cache)
+
+
+def test_a_file_url_with_lowercase_escapes_is_rewritten(tmp_path):
+    # A file URL may spell its percent-escapes with either case of hexadecimal digit.
+    # The comma in the directory's name is escaped as %2C or %2c.
+    name = "kestrel,checkout"
+    assert "%2C" in (tmp_path / name).as_uri()
+    shown_lines(
+        tmp_path,
+        name,
+        [
+            ("{url}/src", "file:///project/src"),
+            ("{lower}/src", "file:///project/src"),
+            ("origin={lower}", "origin=file:///project"),
+            ("{root}/src", "/project/src"),
+        ],
+    )

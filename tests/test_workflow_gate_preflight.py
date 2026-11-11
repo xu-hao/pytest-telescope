@@ -3,6 +3,8 @@
 import os
 import re
 import shlex
+import shutil
+import subprocess
 import sys
 from itertools import product
 from pathlib import Path
@@ -177,3 +179,102 @@ def test_removed_node_option_refuses_before_every_stage(entry, workflow):
         run(workflow, old_node_option=True)
     assert error.value.code == 2
     assert calls == []
+
+
+APT = """\
+#!/bin/sh
+printf '%s\\n' "$*" >> "$STUBS/apt.log"
+count=$(grep -c . "$STUBS/apt.log")
+if [ "$count" -le "$APT_FAILURES" ]; then exit 100; fi
+for word in "$@"; do
+    if [ "$word" = install ] && [ "$APT_INSTALLS" = yes ]; then
+        printf '#!/bin/sh\\n' > "$STUBS/bwrap" && chmod 755 "$STUBS/bwrap"
+    fi
+done
+"""
+
+
+def install_step(tmp_path, name, *, failures, installs):
+    """Run a workflow's Bubblewrap installation step against doubles of its commands.
+
+    `apt-get` fails its first `failures` calls and then succeeds; its `install` puts a
+    `bwrap` on the path only when `installs` is true. `sleep` records its argument.
+    """
+    document = yaml.safe_load((WORKFLOWS / name).read_text())
+    steps = [
+        step
+        for job in document["jobs"].values()
+        for step in job["steps"]
+        if step.get("name") == "Install Bubblewrap"
+    ]
+    assert len(steps) == 1
+    # Nothing lets the job continue after this step fails.
+    assert set(steps[0]) == {"name", "run"}
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    doubles = {
+        "sudo": '#!/bin/sh\nexec "$@"\n',
+        "apt-get": APT,
+        "sleep": '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$STUBS/sleep.log"\n',
+    }
+    for command, text in doubles.items():
+        (stubs / command).write_text(text)
+        (stubs / command).chmod(0o755)
+    for tool in ("grep", "chmod"):
+        (stubs / tool).symlink_to(shutil.which(tool))
+    # Hosted runners start a step's script with `bash -e`.
+    completed = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", steps[0]["run"]],
+        env={
+            "PATH": str(stubs),
+            "STUBS": str(stubs),
+            "APT_FAILURES": str(failures),
+            "APT_INSTALLS": "yes" if installs else "no",
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    def lines(log):
+        return (stubs / log).read_text().splitlines() if (stubs / log).exists() else []
+
+    return completed, lines("apt.log"), lines("sleep.log")
+
+
+UPDATE = "-o Acquire::Retries=3 update -q"
+INSTALL = "-o Acquire::Retries=3 install -y -q bubblewrap"
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "publish.yml"])
+def test_bubblewrap_installation_retries_a_bounded_number_of_times(tmp_path, name):
+    completed, apt, sleeps = install_step(tmp_path, name, failures=100, installs=True)
+    assert completed.returncode != 0
+    assert apt == [UPDATE] * 3 and sleeps == ["30", "30"]
+    assert "Bubblewrap could not be installed after 3 attempts" in completed.stdout
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "publish.yml"])
+@pytest.mark.parametrize(
+    ("failures", "calls", "pauses"),
+    [
+        (0, [UPDATE, INSTALL], 0),
+        (1, [UPDATE, UPDATE, INSTALL], 1),
+        (2, [UPDATE] * 3 + [INSTALL], 2),
+    ],
+)
+def test_bubblewrap_installation_succeeds_once_an_attempt_installs_it(
+    tmp_path, name, failures, calls, pauses
+):
+    completed, apt, sleeps = install_step(tmp_path, name, failures=failures, installs=True)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert apt == calls and sleeps == ["30"] * pauses
+
+
+@pytest.mark.parametrize("name", ["ci.yml", "publish.yml"])
+def test_bubblewrap_installation_never_succeeds_without_bwrap(tmp_path, name):
+    # Every package command succeeds, yet no bwrap is on the path afterwards.
+    completed, apt, sleeps = install_step(tmp_path, name, failures=0, installs=False)
+    assert completed.returncode != 0
+    assert apt == [UPDATE, INSTALL] * 3 and sleeps == ["30", "30"]
+    assert "Bubblewrap could not be installed after 3 attempts" in completed.stdout

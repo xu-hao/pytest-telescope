@@ -126,28 +126,87 @@ def test_tampering_found_by_the_first_verification_refuses_every_view(tmp_path, 
             registry.for_view(unit)
 
 
-@pytest.mark.parametrize("fault", ["bytes", "same_size_bytes", "mode", "missing", "replaced"])
+CHANGED = HELPER.replace(b"private", b"PRIVATE")
+
+
+def replace_keeping_the_original_open(module, content):
+    """Put a new file of `content` at the module's path, frozen like the original.
+
+    The original is held open, so its inode stays allocated and the new file gets
+    another one on every filesystem. Without that, a filesystem may give the new file
+    the inode the removed one just freed.
+    """
+    original = os.stat(module)
+    held = os.open(module, os.O_RDONLY)
+    module.unlink()
+    module.write_bytes(content)
+    module.chmod(0o444)
+    os.utime(module, ns=(0, 0))
+    assert os.stat(module).st_ino != original.st_ino
+    return held
+
+
+# After its verification a frozen file is not read again; later views compare its
+# inode, size, mode and modification time. Each fault but the last changes exactly one.
+@pytest.mark.parametrize("fault", ["inode", "size", "mode", "modification_time", "missing"])
 def test_a_frozen_file_changed_after_its_verification_refuses_later_views(tmp_path, fault):
     registry, unit, module = frozen_pool(tmp_path, aliases=2)
     verified = registry.for_view(unit)
     assert registry.for_view(unit) == verified
-    if fault == "bytes":
+    before = os.stat(module)
+    held = None
+    if fault == "inode":
+        # Replaced by another file of the same size, mode and modification time.
+        held = replace_keeping_the_original_open(module, CHANGED)
+    elif fault == "size":
         rewrite(module, HELPER + b"# changed frozen bytes\n")
-    elif fault == "same_size_bytes":
-        rewrite(module, HELPER.replace(b"private", b"PRIVATE"))
+        os.utime(module, ns=(0, 0))
     elif fault == "mode":
         module.chmod(0o544)
-    elif fault == "missing":
-        module.unlink()
+    elif fault == "modification_time":
+        # An ordinary rewrite in place: the same inode, size and mode, written now.
+        rewrite(module, CHANGED)
     else:
         module.unlink()
-        module.write_bytes(HELPER.replace(b"private", b"PRIVATE"))
-        module.chmod(0o444)
-        os.utime(module, ns=(0, 0))
+    try:
+        if fault != "missing":
+            after = os.stat(module)
+            changed = {
+                "inode": before.st_ino != after.st_ino,
+                "size": before.st_size != after.st_size,
+                "mode": before.st_mode != after.st_mode,
+                "modification_time": before.st_mtime_ns != after.st_mtime_ns,
+            }
+            assert changed == {name: name == fault for name in changed}
+        for _ in range(2):
+            with pytest.raises(InfrastructureError, match="frozen declaration source"):
+                registry.for_view(unit)
+    finally:
+        if held is not None:
+            os.close(held)
 
-    for _ in range(2):
-        with pytest.raises(InfrastructureError, match="frozen declaration source"):
-            registry.for_view(unit)
+
+def test_a_rewrite_that_restores_every_compared_property_is_not_detected(tmp_path, frozen_reads):
+    # STATED LIMIT. A rewrite in place that keeps the size and mode and sets the
+    # modification time back leaves nothing a later view compares. The file is read and
+    # hashed once per invocation, so this registry does not see the new bytes; a new
+    # registry, which reads the file, refuses them.
+    registry, unit, module = frozen_pool(tmp_path, aliases=2)
+    verified = registry.for_view(unit)
+    before = os.stat(module)
+    rewrite(module, CHANGED)
+    os.utime(module, ns=(0, 0))
+    after = os.stat(module)
+    assert frozen_registry.identity(after) == frozen_registry.identity(before)
+    assert module.read_bytes() != HELPER
+
+    assert registry.for_view(unit) == verified
+    assert frozen_reads == [(MODULE, len(HELPER))]
+    fresh = frozen_registry.FrozenRegistry(
+        registry.root, list(registry.records.values()), {}, registry.scans
+    )
+    with pytest.raises(InfrastructureError, match="disagrees with its record"):
+        fresh.for_view(unit)
 
 
 def test_link_text_is_still_verified_for_every_view(tmp_path, frozen_reads):
