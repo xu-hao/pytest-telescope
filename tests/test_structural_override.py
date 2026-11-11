@@ -24,9 +24,8 @@ def module_source(suite, *, count=2):
         "pytestmark=pytest.mark.telescope(inputs=[])\n"
         + "\n".join(
             f"def test_{number}(pytestconfig):\n"
-            "    root = Path(__file__).parents[2]\n"
-            "    assert Path.cwd() == root\n"
-            f'    assert pytestconfig.rootpath == root / "tests" / "{suite}"\n'
+            f'    assert Path.cwd() == Path("/project")\n'
+            f'    assert pytestconfig.rootpath == Path("/project/tests/{suite}")\n'
             '    assert not Path("private.txt").exists()\n'
             for number in range(count)
         )

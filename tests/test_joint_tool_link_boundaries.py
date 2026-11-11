@@ -8,6 +8,7 @@ from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes
 from test_helper_registry import consumer, project_at
 
 from pytest_telescope import controller, sandbox
+from pytest_telescope.model import UnsupportedCapability
 
 PAYLOAD = "owned data [not valid Python source\n"
 
@@ -33,9 +34,8 @@ import pytest
 pytestmark = pytest.mark.telescope(tools=[])
 @pytest.mark.telescope(tools=['frontend'])
 def test_consumer():
-    base = Path({str(project.root)!r})
-    assert not Path('/project').exists()
-    link = base / 'dependency.py'
+    assert not os.path.lexists({str(project.root)!r})
+    link = Path('/project/dependency.py')
     assert link.is_symlink()
     assert os.readlink(link) == {target_text!r}
     data = link if {kind == "file"!r} else link / 'payload.py'
@@ -44,7 +44,8 @@ def test_consumer():
 def test_nonconsumer():
     assert not Path('/tools/frontend').exists()
     assert not Path({str(source)!r}).exists()
-    link = Path({str(project.root)!r}) / 'dependency.py'
+    assert not os.path.lexists({str(project.root)!r})
+    link = Path('/project/dependency.py')
     assert not link.is_symlink()
     assert not link.exists()
 """,
@@ -112,14 +113,16 @@ def test_changed_captured_tool_link_text_refuses_before_launch_or_reuse(tmp_path
     assert os.readlink(project.root / "dependency.py") == str(source)
 
 
-def test_a_relative_project_link_resolves_from_the_project_host_path(tmp_path):
+def relative_link_project(tmp_path, text):
+    """A project whose tool link has relative text, computed from the pinned source."""
     project = ToolProject(tmp_path / "project", tmp_path / "owned-tools")
     source = project.add_tree("frontend", preserve=True, files={"payload.py": PAYLOAD})
     project.bind_link("frontend", path="dependency.py")
-    relative = os.path.relpath(source, project.root)
+    relative = text(source, project.root)
     alias = project.root / "dependency.py"
     alias.unlink()
     alias.symlink_to(relative)
+    assert alias.resolve() == source.resolve()
     project.documents["frontend"]["links"][0].update(target=relative)
     project.save("frontend")
     project.module(
@@ -129,14 +132,33 @@ import os
 import pytest
 pytestmark = pytest.mark.telescope(tools=['frontend'])
 def test_consumer():
-    link = Path({str(project.root)!r}) / 'dependency.py'
+    link = Path('/project/dependency.py')
     assert os.readlink(link) == {relative!r}
     assert (link / 'payload.py').read_text() == {PAYLOAD!r}
-    assert not Path('/project').exists()
+    assert not os.path.lexists({str(project.root)!r})
 """,
+    )
+    return project
+
+
+def test_a_relative_project_link_that_reaches_its_target_from_the_frozen_view_is_kept(tmp_path):
+    # Enough parent steps to reach the filesystem root from the checkout also reach it
+    # from /project, so the unchanged link text names the pinned target in both places.
+    project = relative_link_project(
+        tmp_path,
+        lambda source, root: "../" * (len(root.parts) - 1) + str(source).lstrip("/"),
     )
     assert_counts(project.run(), executed=1)
     assert_counts(project.run(), reused=1)
+
+
+def test_a_relative_project_link_that_depends_on_the_checkout_location_refuses(tmp_path):
+    # The shortest relative text reaches the target only from the checkout's own path.
+    # At /project it would name another directory, and the link is never rewritten.
+    project = relative_link_project(tmp_path, os.path.relpath)
+    with pytest.raises(UnsupportedCapability) as refused:
+        controller.run(project.root, explain=True, timeout=20)
+    assert refused.value.capability == "tool:layout"
 
 
 def test_relative_helper_alias_preserves_exact_raw_link_text(tmp_path):

@@ -46,7 +46,7 @@ def test_boundaries_cover_collection_native_subprocess_fixtures_and_teardown(pro
         "import ctypes, os, subprocess, sys\nfrom pathlib import Path\nimport pytest\n"
         "def verify():\n"
         '    assert not Path("undeclared.txt").exists()\n'
-        f"    assert ctypes.CDLL(None).open({str(project / 'undeclared.txt').encode()!r}, 0) == -1\n"
+        '    assert ctypes.CDLL(None).open(b"/project/undeclared.txt", 0) == -1\n'
         "    assert os.getuid() != 0\n"
         '    with pytest.raises(OSError): Path("data.json").write_text("blocked")\n'
         '    with pytest.raises(OSError): Path("/etc/blocked").write_text("blocked")\n'

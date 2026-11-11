@@ -194,9 +194,9 @@ pytestmark = pytest.mark.telescope(inputs=["tests/{name}/conftest.py"])
 @pytest.mark.selected
 def test_local(local_value, pytestconfig):
     assert local_value == "{name}"
-    assert Path.cwd() == Path("{root / "tests" / name}")
-    assert pytestconfig.rootpath == Path("{root / "tests" / name}")
-    assert pytestconfig.inipath == Path("{root / "tests" / name / configuration}")
+    assert Path.cwd() == Path("/project/tests/{name}")
+    assert pytestconfig.rootpath == Path("/project/tests/{name}")
+    assert pytestconfig.inipath == Path("/project/tests/{name}/{configuration}")
 ''',
         )
     put(
@@ -416,10 +416,8 @@ def test_suite_preserves_ordinary_nodeid_root_and_working_directory(project, cwd
             else f'    assert Path.cwd() == Path(__file__).resolve().parents[3] / "{cwd}"\n'
         )
         + (
-            # Only the frozen view, where the worker is PID 1, has structural directories.
-            "    if __import__('os').getpid() == 1:\n"
-            "        root = Path(__file__).resolve().parents[3]\n"
-            "        assert all(path.stat().st_mtime_ns == 0 for path in (Path.cwd(), Path.cwd().parent, root))\n"
+            '    if Path.cwd().is_relative_to("/project"):\n'
+            '        assert all(path.stat().st_mtime_ns == 0 for path in (Path.cwd(), Path.cwd().parent, Path("/project")))\n'
             if cwd == "empty/work"
             else ""
         ),

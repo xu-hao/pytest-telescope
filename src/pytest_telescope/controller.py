@@ -399,12 +399,13 @@ def _row(item, suite, route, outcome, reason=""):
     )
 
 
-def _session_arguments(root, suite, options, files):
-    """Arguments of one sandboxed pytest session, rooted at the project's host path.
+def _session_arguments(suite, options, files):
+    """Arguments of one sandboxed pytest session, rooted at the frozen /project view.
 
-    The sandbox shows the frozen view there, so test files, configuration and the root
-    directory have the same paths as an editable install of the project names.
+    The sandbox shows the project there and nowhere else, so test files, configuration
+    and the root directory never name the checkout's own location.
     """
+    root = sandbox.PROJECT
     return [
         "-c",
         str(root / suite.config),
@@ -1004,9 +1005,7 @@ def run(
                                     collected = sandbox.execute(
                                         box,
                                         frozen,
-                                        _session_arguments(
-                                            manifest.root, suite, options, collection_unit.tests
-                                        ),
+                                        _session_arguments(suite, options, collection_unit.tests),
                                         collection_environment,
                                         timeout,
                                         root=manifest.root,
@@ -1199,7 +1198,6 @@ def run(
                                             box,
                                             frozen,
                                             _session_arguments(
-                                                manifest.root,
                                                 suite,
                                                 candidate["options"],
                                                 [candidate["item"]["file"]],
@@ -1343,9 +1341,7 @@ def run(
                                     result = sandbox.execute(
                                         box,
                                         frozen,
-                                        _session_arguments(
-                                            manifest.root, suite, job["options"], [item["file"]]
-                                        ),
+                                        _session_arguments(suite, job["options"], [item["file"]]),
                                         job["environment"],
                                         timeout,
                                         root=manifest.root,

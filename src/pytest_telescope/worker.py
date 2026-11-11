@@ -18,8 +18,8 @@ from _pytest.mark.structures import ParameterSet
 MAX_INVENTORY = 67_108_864
 REQUEST_PATH = "/telescope/request.json"
 SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
-# The project's own host path: scoped sessions see the frozen view there, ordinary
-# sessions the checkout itself. Every request names it.
+# Where the session sees the project: /project, the frozen view, in a scoped session,
+# and the checkout itself in an ordinary one. Every request names it.
 PROJECT_ROOT = None
 
 
@@ -137,21 +137,6 @@ def project_file(filename):
     ):
         raise ValueError("invalid project path")
     return text
-
-
-def portable(value):
-    """A source path or plugin name with a leading project directory replaced.
-
-    Scoped sessions see the project at its own host path, so a conftest's plugin name
-    and every source file inside the project name the checkout's location. Fixture
-    identities record them relative to the project instead, so identical checkouts at
-    different paths keep one identity. A path cannot contain NUL, so the placeholder
-    never collides with a real path or name.
-    """
-    root = str(PROJECT_ROOT)
-    if value == root or value.startswith(root + "/"):
-        return "\0project\0" + value[len(root) :]
-    return value
 
 
 def read_request(path):
@@ -525,7 +510,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
                 canonical(
                     {
                         "module": function.__module__,
-                        "path": portable(str(path)),
+                        "path": str(path),
                         "source": source_hashes[path],
                         "line": code.co_firstlineno,
                         "qualname": function.__qualname__,
@@ -628,7 +613,7 @@ def fixture_registry_commitment(session, items, identities, observer):
             {
                 "name": definition.argname,
                 "module": function.__module__,
-                "path": portable(str(path)),
+                "path": str(path),
                 "source": source_hashes[path],
                 "line": function.__code__.co_firstlineno,
                 "qualname": function.__qualname__,
@@ -649,7 +634,7 @@ def fixture_registry_commitment(session, items, identities, observer):
             raise ValueError("unsupported plugin registry identity")
         if plugin is None:
             # Pluggy retains explicitly blocked plugin names in its registry.
-            plugins.append({"name": portable(name), "kind": "blocked"})
+            plugins.append({"name": name, "kind": "blocked"})
             if len(plugins) > 4096:
                 raise ValueError("plugin registry limit exceeded")
             continue
@@ -680,10 +665,10 @@ def fixture_registry_commitment(session, items, identities, observer):
             raise ValueError("unsupported plugin identity")
         plugins.append(
             {
-                "name": portable(name),
+                "name": name,
                 "module": module.__name__,
                 "kind": kind,
-                "path": portable(str(path)),
+                "path": str(path),
                 "source": source_hashes[path],
             }
         )
