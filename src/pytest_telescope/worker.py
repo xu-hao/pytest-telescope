@@ -18,8 +18,8 @@ from _pytest.mark.structures import ParameterSet
 MAX_INVENTORY = 67_108_864
 REQUEST_PATH = "/telescope/request.json"
 SCOPE_FIELDS = frozenset({"inputs", "bundles", "distributions", "env", "tools"})
-# The project's own host path: scoped sessions see the frozen view there, ordinary
-# sessions the checkout itself. Every request names it.
+# Where the session sees the project: /project, the frozen view, in a scoped session,
+# and the checkout itself in an ordinary one. Every request names it.
 PROJECT_ROOT = None
 
 
@@ -125,7 +125,19 @@ def skip_reason(report):
     )
 
 
+# A session names the same few files hundreds of times. Both tables live for one
+# session: main() clears them when it sets the project root.
+PROJECT_FILES = {}
+CANONICAL_FILES = {}
+
+
 def project_file(filename):
+    """The project-relative name of a path, which must lie inside the project."""
+    key = os.fspath(filename)
+    try:
+        return PROJECT_FILES[key]
+    except KeyError:
+        pass
     path = Path(os.path.abspath(PROJECT_ROOT / filename)).relative_to(PROJECT_ROOT)
     text = path.as_posix()
     if (
@@ -136,22 +148,8 @@ def project_file(filename):
         or "\\" in text
     ):
         raise ValueError("invalid project path")
+    PROJECT_FILES[key] = text
     return text
-
-
-def portable(value):
-    """A source path or plugin name with a leading project directory replaced.
-
-    Scoped sessions see the project at its own host path, so a conftest's plugin name
-    and every source file inside the project name the checkout's location. Fixture
-    identities record them relative to the project instead, so identical checkouts at
-    different paths keep one identity. A path cannot contain NUL, so the placeholder
-    never collides with a real path or name.
-    """
-    root = str(PROJECT_ROOT)
-    if value == root or value.startswith(root + "/"):
-        return "\0project\0" + value[len(root) :]
-    return value
 
 
 def read_request(path):
@@ -525,7 +523,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
                 canonical(
                     {
                         "module": function.__module__,
-                        "path": portable(str(path)),
+                        "path": str(path),
                         "source": source_hashes[path],
                         "line": code.co_firstlineno,
                         "qualname": function.__qualname__,
@@ -628,7 +626,7 @@ def fixture_registry_commitment(session, items, identities, observer):
             {
                 "name": definition.argname,
                 "module": function.__module__,
-                "path": portable(str(path)),
+                "path": str(path),
                 "source": source_hashes[path],
                 "line": function.__code__.co_firstlineno,
                 "qualname": function.__qualname__,
@@ -649,7 +647,7 @@ def fixture_registry_commitment(session, items, identities, observer):
             raise ValueError("unsupported plugin registry identity")
         if plugin is None:
             # Pluggy retains explicitly blocked plugin names in its registry.
-            plugins.append({"name": portable(name), "kind": "blocked"})
+            plugins.append({"name": name, "kind": "blocked"})
             if len(plugins) > 4096:
                 raise ValueError("plugin registry limit exceeded")
             continue
@@ -680,10 +678,10 @@ def fixture_registry_commitment(session, items, identities, observer):
             raise ValueError("unsupported plugin identity")
         plugins.append(
             {
-                "name": portable(name),
+                "name": name,
                 "module": module.__name__,
                 "kind": kind,
-                "path": portable(str(path)),
+                "path": str(path),
                 "source": source_hashes[path],
             }
         )
@@ -710,6 +708,8 @@ def main(request=None, *, ordinary=False):
     if type(root) is not str or not os.path.isabs(root):
         raise ValueError("sessions require an absolute project root")
     PROJECT_ROOT = Path(root)
+    PROJECT_FILES.clear()
+    CANONICAL_FILES.clear()
     if request.get("metadata"):
         from importlib import metadata
 
@@ -739,8 +739,12 @@ def main(request=None, *, ordinary=False):
 
     def canonical_nodeid(value):
         filename, separator, suffix = value.partition("::")
-        path = (PROJECT_ROOT / suite_root / filename).resolve()
-        return project_file(path) + (separator + suffix if separator else "")
+        try:
+            name = CANONICAL_FILES[filename]
+        except KeyError:
+            path = (PROJECT_ROOT / suite_root / filename).resolve()
+            name = CANONICAL_FILES[filename] = project_file(path)
+        return name + (separator + suffix if separator else "")
 
     mode = request["mode"]
     guard_mode = mode in ("guard-capture", "guard-inspection", "guard-batch")

@@ -93,11 +93,17 @@ def test_project_import_paths_are_not_bound_but_its_virtual_environment_is(tmp_p
     interpreter, site_packages = environment(project / ".venv")
     # Editable installs point the environment at project source, or at the project itself.
     (site_packages / "editable.pth").write_text(f"{project / 'src'}\n{project}\n{tmp_path}\n")
-    destinations = {destination for _, destination in sandbox.describe(project, interpreter).binds}
-    assert str(project / ".venv") in destinations
-    assert str(project / "src") not in destinations
-    assert str(project) not in destinations
-    assert str(tmp_path) not in destinations
+    view = sandbox.describe(project, interpreter)
+    destinations = {destination for _, destination in view.binds}
+    # The environment keeps its place in the project, which the sandbox shows at /project.
+    assert (str(project / ".venv"), "/project/.venv") in view.binds
+    assert view.executable == "/project/.venv/bin/python"
+    assert view.path.split(":")[0] == "/project/.venv/bin"
+    assert not any(
+        Path(destination) == project or project in Path(destination).parents
+        for destination in destinations
+    )
+    assert not {"/project", "/project/src", str(tmp_path)} & destinations
 
 
 def test_an_environment_containing_the_project_is_refused(tmp_path):
@@ -155,18 +161,98 @@ def test_identity_does_not_depend_on_the_checkout_path(tmp_path):
     assert sandbox.describe(second, interpreter).identity == reaching_first
 
 
-@pytest.mark.parametrize(
-    "root", ["/", "/tmp", "/dev/shm", "/metadata/app", "/telescope/app", "/proc/app"]
-)
-def test_a_project_root_the_sandbox_cannot_show_at_its_host_path_is_refused(tmp_path, root):
+@pytest.mark.parametrize("root", ["/", "/usr/share/app", "/etc/app"])
+def test_a_project_root_whose_live_files_the_sandbox_would_show_is_refused(tmp_path, root):
     interpreter, _ = environment(tmp_path / "env")
     with pytest.raises(UnsupportedCapability) as refused:
         sandbox.describe(root, interpreter)
     assert refused.value.capability == "sandbox:environment"
 
 
-# The view has one name, the project's own path, so /project is an ordinary location.
-@pytest.mark.parametrize("root", ["/project", "/project/app", "/tmp/app", "/dev/shm/app"])
-def test_a_project_root_at_any_other_location_or_in_private_scratch_is_accepted(tmp_path, root):
+# Nothing is mounted at the project's own path, so that path may be anywhere outside the
+# shared system directories, including a path the sandbox mounts something else at.
+@pytest.mark.parametrize(
+    "root",
+    ["/project", "/project/app", "/tmp", "/tmp/app", "/dev/shm", "/dev/shm/app", "/metadata/app"],
+)
+def test_a_project_root_at_any_other_location_is_accepted(tmp_path, root):
     interpreter, _ = environment(tmp_path / "env")
     assert len(sandbox.describe(root, interpreter).identity) == 64
+
+
+def shown(view):
+    """The content the sandbox shows over each environment file, by file name."""
+    return {Path(name).name: content for name, content, _ in view.overlays}
+
+
+def test_environment_files_that_name_the_project_are_shown_rewritten(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    (project / "src").mkdir(parents=True)
+    editable_finder(site_packages, project / "src" / "toypkg")
+    (site_packages / "paths.pth").write_text(f"{project / 'src'}\n{project}\n")
+    record = install(site_packages, "toypkg", "0.1")
+    (record / "direct_url.json").write_text(f'{{"url": "{project.as_uri()}"}}')
+    (site_packages / "toypkg.egg-link").write_text(f"{project}\n.")
+    before = {path: path.read_bytes() for path in site_packages.rglob("*") if path.is_file()}
+    assert shown(sandbox.describe(project, interpreter)) == {
+        "__editable___toypkg_0_1_finder.py": (
+            b"MAPPING = {'toypkg': '/project/src/toypkg'}\n\n\ndef install():\n    pass\n"
+        ),
+        "paths.pth": b"/project/src\n/project\n",
+        "direct_url.json": b'{"url": "file:///project"}',
+        "toypkg.egg-link": b"/project\n.",
+        # Bytecode the probe's own start cached from the original finder: shown empty.
+        "__editable___toypkg_0_1_finder." + sys.implementation.cache_tag + ".pyc": b"",
+    }
+    # The environment itself is never modified.
+    assert {
+        path: path.read_bytes()
+        for path in site_packages.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    } == {path: content for path, content in before.items()}
+
+
+def test_only_the_whole_project_directory_is_rewritten(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    project.mkdir()
+    # A sibling whose name starts with the project's, a longer path that merely ends
+    # with it, and another checkout are different directories and stay as they are.
+    lines = [
+        f"{project}-two/src",
+        f"/mnt{project}/src",
+        f"{tmp_path / 'other'}/src",
+        f"{project}.bak",
+    ]
+    (site_packages / "others.pth").write_text("".join(line + "\n" for line in lines))
+    view = sandbox.describe(project, interpreter)
+    assert view.overlays == ()
+    (site_packages / "mixed.pth").write_text(f"{project}\n{project}/\n{project}-two\n")
+    assert shown(sandbox.describe(project, interpreter)) == {
+        "mixed.pth": f"/project\n/project/\n{project}-two\n".encode()
+    }
+
+
+def test_a_project_at_project_needs_no_rewritten_files(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    editable_finder(site_packages, Path("/project/src/toypkg"))
+    view = sandbox.describe("/project", interpreter)
+    assert view.overlays == ()
+    # The reference is still part of the identity.
+    (site_packages / "__editable__.toypkg-0.1.pth").unlink()
+    (site_packages / "__editable___toypkg_0_1_finder.py").unlink()
+    assert sandbox.describe("/project", interpreter).identity != view.identity
+
+
+def test_an_oversized_environment_file_naming_the_project_is_refused(tmp_path):
+    interpreter, site_packages = environment(tmp_path / "env")
+    project = tmp_path / "project"
+    project.mkdir()
+    (site_packages / "large.pth").write_text("# padding\n" * 120_000 + f"{project}\n")
+    with pytest.raises(UnsupportedCapability) as refused:
+        sandbox.describe(project, interpreter)
+    assert refused.value.capability == "sandbox:environment"
+    # A large file that does not name the project is no obstacle.
+    (site_packages / "large.pth").write_text("# padding\n" * 120_000)
+    assert sandbox.describe(project, interpreter).overlays == ()

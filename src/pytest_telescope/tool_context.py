@@ -501,14 +501,19 @@ def validate_project_link(project, row):
         target = Path(row["source"]) / row["subpath"]
         # Literal normalization is sufficient here: actual target links are verified
         # against pinned records during capture, never followed as an ambient input. The
-        # sandbox shows the link at the project's host path only.
-        resolved = (
-            os.path.normpath(Path(project) / row["path"] / ".." / row["target"])
-            if not Path(row["target"]).is_absolute()
-            else os.path.normpath(row["target"])
-        )
-        if resolved != os.path.normpath(target):
-            unsupported("layout", "the project link does not resolve to its pinned target")
+        # link is captured at the project's own path and shown at /project, so relative
+        # text must reach the pinned target from both.
+        for location in (Path(project), Path("/project")):
+            resolved = (
+                os.path.normpath(location / row["path"] / ".." / row["target"])
+                if not Path(row["target"]).is_absolute()
+                else os.path.normpath(row["target"])
+            )
+            if resolved != os.path.normpath(target):
+                unsupported(
+                    "layout",
+                    "the project link does not resolve to its pinned target in the frozen view",
+                )
     except OSError as exc:
         raise DeclarationError("cannot verify the declared frozen-tool project link") from exc
 

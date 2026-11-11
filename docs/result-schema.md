@@ -27,7 +27,7 @@ A run result has `schema: 4` and `kind: "run"`. These fields distinguish it from
 | `inventory_digest` | Digest of current suite/case/file membership when complete; otherwise `null`. |
 | `suites` | Configured suite names included in this invocation. |
 | `execution` | Effective `mode` (`case` or `batch`), versioned scoped `profile` (`case-v2` or `batch-v2`), and `workers`. |
-| `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v3`: the frozen project view at the project's host path only), `required`, and `identity`. |
+| `sandbox` | Exactly `backend` (`bubblewrap`), `policy` (`bubblewrap-view-v3`: the frozen project view at `/project` only, with environment files that name the project directory shown rewritten), `required`, and `identity`. |
 | `grouping_complete` | All suite inventories and group-size preflight are validated; selected cases then belong to exactly one planned group. |
 | `groups` | Ordered ordinary sessions and scoped execution/cache groups with atomic member outcomes and wall-clock timing. |
 | `collection` | Collection outcome, counts, timings, bounded failure evidence and per-route suite inventories. |

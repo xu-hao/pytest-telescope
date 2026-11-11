@@ -268,7 +268,7 @@ Before this opt-in, a project link such as `node_modules -> /opt/frontend-instal
 cannot be declared as an external directory input. With `tools=["frontend"]`, a manifest
 may pin that exact link text, a complete installation tree at `/opt/frontend-install`
 and its lock-file correspondence. The scoped view then retains the actual `node_modules`
-symlink at the project's host path, exposes only its pinned target read-only, and also
+symlink at its place below `/project`, exposes only its pinned target read-only, and also
 shows the tree at `/tools/frontend/install` for a root named `install`. The link is
 automatically included; an input at or below it requires the selected binding. Omitting
 the tool retains the existing refusal. This does not make other external links readable.
@@ -411,7 +411,8 @@ their version.
 installed packages. When the project is installed into that environment in editable
 form, for example with `pip install -e .`, a child imports declared source through the
 install, including an isolated child started with `-I`. The install points at the
-project's host path, and the sandbox shows the frozen declared files there:
+project's host path; the sandbox shows the install's files rewritten to `/project`, where
+the frozen declared files are:
 
 ```python
 import subprocess
@@ -432,7 +433,9 @@ def test_isolated_child_imports_declared_source():
 ```
 
 The setuptools finder module and `.pth` path entries are both supported, because both
-name the project's host path. Without an editable install, a child started with `-I`
+name the project's host path literally and are shown rewritten. The child's
+`example_core.__file__` is below `/project`, like the test module's own. Without an
+editable install, a child started with `-I`
 ignores `PYTHONPATH` and the working directory, so it cannot import declared project
 source. Start it without `-I` and pass the source location explicitly:
 

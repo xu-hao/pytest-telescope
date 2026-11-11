@@ -2,9 +2,10 @@
 
 A project installed into the invoking environment in editable form points that
 environment at the checkout's own path. The sandbox shows the frozen declared snapshot
-there, and only there, so test modules, the editable install and a `python -I` child all
-resolve the project to one path and to declared files only. These tests launch bwrap and
-are never skipped.
+at /project and nothing at that path, and shows the environment's files that name the
+path rewritten to /project. Test modules, the editable install and a `python -I` child
+therefore all resolve the project to /project and to declared files only. These tests
+launch bwrap and are never skipped.
 """
 
 import json
@@ -64,7 +65,8 @@ import pytest
 
 import toypkg
 
-ROOT = {root!r}
+ROOT = "/project"
+HOST = {root!r}
 ENVIRONMENT = {environment!r}
 LIVE_INODE = {inode!r}
 pytestmark = pytest.mark.telescope(inputs={declared})
@@ -96,9 +98,10 @@ def test_view():
     assert toypkg.__file__ == ROOT + "/src/toypkg/__init__.py"
     assert __file__ == ROOT + "/tests/test_child.py"
     assert Path.cwd() == Path(ROOT)
-    # One frozen snapshot, shown at the checkout's own path and nowhere else; only an
-    # environment that lives inside the checkout is added at its own host path.
-    assert not os.path.lexists("/project")
+    # One frozen snapshot, shown at /project and nowhere else: nothing appears at the
+    # checkout's own path. An environment that lives inside the checkout keeps its
+    # place below /project.
+    assert not os.path.lexists(HOST)
     shown = sorted(os.listdir(ROOT))
     if ENVIRONMENT:
         shown.remove(ENVIRONMENT)
@@ -107,7 +110,7 @@ def test_view():
     assert sorted(os.listdir(ROOT + "/src/toypkg")) == ["__init__.py", "worker.py"]
     for name in ("src/toypkg/sibling.py", "notes.txt"):
         assert not os.path.lexists(ROOT + "/" + name)
-    # The checkout path shows the frozen copy, never the live checkout.
+    # The frozen copy, never the live checkout.
     declared = os.stat(ROOT + "/src/toypkg/__init__.py")
     assert declared.st_ino != LIVE_INODE
     assert stat.S_IMODE(declared.st_mode) == 0o444
@@ -256,10 +259,10 @@ pytestmark = pytest.mark.telescope(inputs={declared})
 
 def test_package_and_test_module_share_one_root():
     # As under ordinary pytest: the editable install and the test module name one
-    # checkout, which is also the working directory.
+    # project root, which is also the working directory. In the sandbox it is /project.
     root = Path(__file__).parents[1]
     assert Path(toypkg.__file__).is_relative_to(root), (toypkg.__file__, __file__)
-    assert Path.cwd() == root
+    assert Path.cwd() == root == Path("/project")
     assert sorted(os.listdir(root / "src" / "toypkg")) == ["__init__.py", "worker.py"]
 """
 
@@ -302,7 +305,7 @@ def test_a_failure_in_an_editable_project_module_names_its_project_file(tmp_path
     }
 
 
-def test_an_environment_inside_the_project_root_keeps_its_host_path(tmp_path):
+def test_an_environment_inside_the_project_root_keeps_its_place_below_project(tmp_path):
     project = toy_project(tmp_path / "checkout")
     interpreter, site_packages = environment(project / ".venv")
     install_editable(site_packages, project, "finder")
@@ -316,13 +319,13 @@ SUBJECT = """\
 import os
 import sys
 
-ROOT = {root!r}
+ROOT = "/project"
 LOCATION = {location!r}
 
 # Runs at collection, inside the sandbox: the view and the environment are in place.
 assert sys.prefix == ROOT + "/" + LOCATION, sys.prefix
 assert os.getcwd() == ROOT and __file__ == ROOT + "/test_subject.py"
-assert not os.path.lexists("/project")
+assert not os.path.lexists({root!r})
 assert open(ROOT + "/tools/helper.txt").read() == "declared\\n"
 expected = ["test_subject.py", "tools"] + ([LOCATION] if "/" not in LOCATION else [])
 assert sorted(os.listdir(ROOT)) == sorted(expected)
