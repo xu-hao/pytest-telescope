@@ -268,7 +268,7 @@ Before this opt-in, a project link such as `node_modules -> /opt/frontend-instal
 cannot be declared as an external directory input. With `tools=["frontend"]`, a manifest
 may pin that exact link text, a complete installation tree at `/opt/frontend-install`
 and its lock-file correspondence. The scoped view then retains the actual `node_modules`
-symlink at both project aliases, exposes only its pinned target read-only, and also
+symlink at the project's host path, exposes only its pinned target read-only, and also
 shows the tree at `/tools/frontend/install` for a root named `install`. The link is
 automatically included; an input at or below it requires the selected binding. Omitting
 the tool retains the existing refusal. This does not make other external links readable.

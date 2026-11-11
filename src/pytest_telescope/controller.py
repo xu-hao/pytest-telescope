@@ -399,19 +399,23 @@ def _row(item, suite, route, outcome, reason=""):
     )
 
 
-def _session_arguments(suite, options, files):
-    """Arguments of one sandboxed pytest session, rooted at the frozen /project view."""
+def _session_arguments(root, suite, options, files):
+    """Arguments of one sandboxed pytest session, rooted at the project's host path.
+
+    The sandbox shows the frozen view there, so test files, configuration and the root
+    directory have the same paths as an editable install of the project names.
+    """
     return [
         "-c",
-        "/project/" + suite.config,
-        "--rootdir=/project/" + suite.root,
+        str(root / suite.config),
+        "--rootdir=" + str(root / suite.root),
         "-o",
         "addopts=",
         "-p",
         "no:cacheprovider",
         *[part for plugin in suite.plugins for part in ("-p", plugin)],
         *options,
-        *files,
+        *[str(root / name) for name in files],
     ]
 
 
@@ -1001,9 +1005,7 @@ def run(
                                         box,
                                         frozen,
                                         _session_arguments(
-                                            suite,
-                                            options,
-                                            ["/project/" + name for name in collection_unit.tests],
+                                            manifest.root, suite, options, collection_unit.tests
                                         ),
                                         collection_environment,
                                         timeout,
@@ -1197,9 +1199,10 @@ def run(
                                             box,
                                             frozen,
                                             _session_arguments(
+                                                manifest.root,
                                                 suite,
                                                 candidate["options"],
-                                                ["/project/" + candidate["item"]["file"]],
+                                                [candidate["item"]["file"]],
                                             ),
                                             candidate["environment"],
                                             timeout,
@@ -1341,7 +1344,7 @@ def run(
                                         box,
                                         frozen,
                                         _session_arguments(
-                                            suite, job["options"], ["/project/" + item["file"]]
+                                            manifest.root, suite, job["options"], [item["file"]]
                                         ),
                                         job["environment"],
                                         timeout,

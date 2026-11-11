@@ -33,20 +33,20 @@ import pytest
 pytestmark = pytest.mark.telescope(tools=[])
 @pytest.mark.telescope(tools=['frontend'])
 def test_consumer():
-    for base in (Path('/project'), Path({str(project.root)!r})):
-        link = base / 'dependency.py'
-        assert link.is_symlink()
-        assert os.readlink(link) == {target_text!r}
-        data = link if {kind == "file"!r} else link / 'payload.py'
-        assert data.read_text() == {PAYLOAD!r}
+    base = Path({str(project.root)!r})
+    assert not Path('/project').exists()
+    link = base / 'dependency.py'
+    assert link.is_symlink()
+    assert os.readlink(link) == {target_text!r}
+    data = link if {kind == "file"!r} else link / 'payload.py'
+    assert data.read_text() == {PAYLOAD!r}
     assert Path('/tools/frontend/install/payload.py').read_text() == {PAYLOAD!r}
 def test_nonconsumer():
     assert not Path('/tools/frontend').exists()
     assert not Path({str(source)!r}).exists()
-    for base in (Path('/project'), Path({str(project.root)!r})):
-        link = base / 'dependency.py'
-        assert not link.is_symlink()
-        assert not link.exists()
+    link = Path({str(project.root)!r}) / 'dependency.py'
+    assert not link.is_symlink()
+    assert not link.exists()
 """,
     )
     return project, source
@@ -110,6 +110,33 @@ def test_changed_captured_tool_link_text_refuses_before_launch_or_reuse(tmp_path
     assert not list((project.root / ".pytest-telescope/cache").rglob("*.pending"))
     assert pools and all(not pool.exists() for pool in pools)
     assert os.readlink(project.root / "dependency.py") == str(source)
+
+
+def test_a_relative_project_link_resolves_from_the_project_host_path(tmp_path):
+    project = ToolProject(tmp_path / "project", tmp_path / "owned-tools")
+    source = project.add_tree("frontend", preserve=True, files={"payload.py": PAYLOAD})
+    project.bind_link("frontend", path="dependency.py")
+    relative = os.path.relpath(source, project.root)
+    alias = project.root / "dependency.py"
+    alias.unlink()
+    alias.symlink_to(relative)
+    project.documents["frontend"]["links"][0].update(target=relative)
+    project.save("frontend")
+    project.module(
+        "test_relative.py",
+        f"""from pathlib import Path
+import os
+import pytest
+pytestmark = pytest.mark.telescope(tools=['frontend'])
+def test_consumer():
+    link = Path({str(project.root)!r}) / 'dependency.py'
+    assert os.readlink(link) == {relative!r}
+    assert (link / 'payload.py').read_text() == {PAYLOAD!r}
+    assert not Path('/project').exists()
+""",
+    )
+    assert_counts(project.run(), executed=1)
+    assert_counts(project.run(), reused=1)
 
 
 def test_relative_helper_alias_preserves_exact_raw_link_text(tmp_path):

@@ -144,7 +144,7 @@ from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(env=[])
 def test_worker(tmp_path):
-    assert os.getcwd() == "/project"
+    assert os.getcwd() == {str(tmp_path)!r}
     assert os.environ["PATH"] == {expected_path!r}
     assert {{name: os.environ[name] for name in ("HOME", "TMPDIR", "PYTHONDONTWRITEBYTECODE", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")}} == {{"HOME": "/tmp", "TMPDIR": "/tmp", "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}}
     source = tmp_path / "plain_module.py"

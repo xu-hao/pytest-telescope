@@ -192,12 +192,13 @@ from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['frontend'], inputs=['node_modules/nested/data.txt'])
 def test_link():
-    for base in (Path('/project'), Path({str(project.root)!r})):
-        link = base / 'node_modules'
-        assert stat.S_ISLNK(link.lstat().st_mode)
-        assert os.readlink(link) == {str(source)!r}
-        assert (link / 'nested/data.txt').read_text() == 'nested'
-        assert (base / 'package-lock.json').read_text() == 'fixture-lock\\n'
+    base = Path({str(project.root)!r})
+    assert Path.cwd() == base and not Path('/project').exists()
+    link = base / 'node_modules'
+    assert stat.S_ISLNK(link.lstat().st_mode)
+    assert os.readlink(link) == {str(source)!r}
+    assert (link / 'nested/data.txt').read_text() == 'nested'
+    assert (base / 'package-lock.json').read_text() == 'fixture-lock\\n'
     logical = Path('/tools/frontend/install')
     original = Path({str(source)!r})
     for root in (logical, original):
@@ -477,11 +478,11 @@ def test_tool_cache_false_stays_scoped_and_fresh(project):
     project.add_tree("first")
     project.module(
         "test_uncached.py",
-        """from pathlib import Path
+        f"""from pathlib import Path
 import pytest
 pytestmark = pytest.mark.telescope(tools=['first'], cache=False)
 def test_value():
-    assert Path.cwd() == Path('/project')
+    assert Path.cwd() == Path({str(project.root)!r})
     assert Path('/tools/first/install/value.txt').read_text() == 'first'
 """,
     )

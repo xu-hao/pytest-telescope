@@ -36,7 +36,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BACKEND = "bubblewrap"
-POLICY = "bubblewrap-view-v2"
+POLICY = "bubblewrap-view-v3"
 MAX_OUTPUT = 1_048_576
 MAX_COLLECTION = 67_108_864
 MAX_PROBE = 4 * 1_048_576
@@ -47,8 +47,9 @@ WORKER_PATH = "/telescope/worker.py"
 READY = "TELESCOPE_SANDBOX_READY"
 SYSTEM_DIRECTORIES = ("/usr", "/etc")
 SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
-# Paths the sandbox mounts itself; an environment directory may not overlap them.
-MOUNT_POINTS = ("/project", "/metadata", "/telescope", "/proc", "/dev")
+# Paths the sandbox mounts itself; an environment directory may not overlap them. The
+# project appears only at its own host path, so it is not one of them.
+MOUNT_POINTS = ("/metadata", "/telescope", "/proc", "/dev")
 # Private scratch; the project directory may lie inside it, but not contain it.
 SCRATCH = ("/tmp", "/dev/shm")
 # User, mount and PID namespaces only. A PID namespace with its own /proc keeps other
@@ -401,17 +402,15 @@ def _refuse(message):
 
 
 def _check_project(project):
-    """Refuse a project directory the sandbox cannot also show at its own host path.
+    """Refuse a project directory the sandbox cannot show at its own host path.
 
-    The frozen view appears at /project and at the project's host path. That path must
-    not be or contain a directory the sandbox mounts, and must not lie inside one of the
-    sandbox's own mount points other than private scratch. /project itself is the view.
+    The frozen view appears only at the project's host path. That path must not be or
+    contain a directory the sandbox mounts, and must not lie inside one of the sandbox's
+    own mount points other than private scratch.
     """
     system = [Path(os.path.realpath(name)) for name in SYSTEM_DIRECTORIES]
     if any(_inside(project, directory) for directory in system):
         _refuse("the project cannot live inside a system directory shared with the sandbox")
-    if project == Path("/project"):
-        return
     mounted = [*SYSTEM_DIRECTORIES, *SYSTEM_LINKS, *MOUNT_POINTS, *SCRATCH]
     if any(_inside(Path(name), project) for name in mounted):
         _refuse("the project directory cannot be or contain a directory the sandbox mounts")
@@ -594,25 +593,22 @@ def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False, clos
 
 
 def _project_arguments(box, view, project):
-    """Show the frozen view read-only at /project and at the project's own host path.
+    """Show the frozen view read-only at the project's own host path, and nowhere else.
 
-    An editable install refers to the project by its host path, so it resolves to the
-    declared files and nothing else. An environment bound inside the project still needs
-    a mount point there, and bwrap must never create one inside the frozen copy on the
-    host. The host path is then a private tmpfs: it binds the view's entries one by one,
-    makes directories only on the way to each environment, binds the environment and is
-    made read-only.
+    Test modules, editable installs and every other reference to the project then name
+    one path, which resolves to the declared files and nothing else. An environment bound
+    inside the project still needs a mount point there, and bwrap must never create one
+    inside the frozen copy on the host. The host path is then a private tmpfs: it binds
+    the view's entries one by one, makes directories only on the way to each environment,
+    binds the environment and is made read-only.
     """
-    arguments = ["--ro-bind", str(view), "/project"]
-    if project == Path("/project"):
-        return arguments
     inside = [
         (source, Path(destination))
         for source, destination in box.binds
         if _inside(Path(destination), project)
     ]
     if not inside:
-        return arguments + ["--ro-bind", str(view), str(project)]
+        return ["--ro-bind", str(view), str(project)]
     destinations = {destination for _, destination in inside}
     ancestors = {
         parent
@@ -620,7 +616,7 @@ def _project_arguments(box, view, project):
         for parent in destination.parents
         if _inside(parent, project) and not any(_inside(parent, other) for other in destinations)
     }
-    arguments += ["--tmpfs", str(project)]
+    arguments = ["--tmpfs", str(project)]
     pending = [project]
     while pending:
         directory = pending.pop(0)
@@ -885,6 +881,7 @@ def execute(
     control = directory / "control"
     control.mkdir(exist_ok=True)
     request_path = control / "request.json"
+    project = Path(root).resolve()
     budget = 0
     with request_path.open("wb") as stream:
         for chunk in json.JSONEncoder(separators=(",", ":"), allow_nan=False).iterencode(
@@ -892,6 +889,7 @@ def execute(
                 **request,
                 "args": args,
                 "nonce": nonce,
+                "project_root": str(project),
                 "suite_root": suite_root,
                 "suite": suite,
                 "metadata": metadata_directory is not None,
@@ -906,7 +904,6 @@ def execute(
                 raise InfrastructureError("worker request exceeded 64 MiB")
             stream.write(encoded)
     request_path.chmod(0o444)
-    project = Path(root).resolve()
     prefixes = ()
     native = False
     if tool_view is not None:
@@ -984,7 +981,7 @@ def execute(
         "--remount-ro",
         "/",
         "--chdir",
-        "/project/" + suite_cwd,
+        str(project / suite_cwd),
         *_environment(controlled, {**environment, "TELESCOPE_REQUEST": REQUEST}),
         "--",
         *startup,

@@ -156,8 +156,7 @@ def test_identity_does_not_depend_on_the_checkout_path(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "root",
-    ["/", "/tmp", "/dev/shm", "/project/app", "/metadata/app", "/telescope/app", "/proc/app"],
+    "root", ["/", "/tmp", "/dev/shm", "/metadata/app", "/telescope/app", "/proc/app"]
 )
 def test_a_project_root_the_sandbox_cannot_show_at_its_host_path_is_refused(tmp_path, root):
     interpreter, _ = environment(tmp_path / "env")
@@ -166,7 +165,8 @@ def test_a_project_root_the_sandbox_cannot_show_at_its_host_path_is_refused(tmp_
     assert refused.value.capability == "sandbox:environment"
 
 
-@pytest.mark.parametrize("root", ["/project", "/tmp/app", "/dev/shm/app"])
-def test_a_project_root_at_project_or_in_private_scratch_is_accepted(tmp_path, root):
+# The view has one name, the project's own path, so /project is an ordinary location.
+@pytest.mark.parametrize("root", ["/project", "/project/app", "/tmp/app", "/dev/shm/app"])
+def test_a_project_root_at_any_other_location_or_in_private_scratch_is_accepted(tmp_path, root):
     interpreter, _ = environment(tmp_path / "env")
     assert len(sandbox.describe(root, interpreter).identity) == 64
