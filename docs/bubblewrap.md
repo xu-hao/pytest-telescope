@@ -1,100 +1,18 @@
 # Ordinary pytest and Bubblewrap filesystem views
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
+This page explains how pytest-telescope runs each test and what a scoped test can see.
+Read it when a scoped test cannot find a file, when you want to know which paths are
+read-only, or when you need to know what makes a cached result reusable.
 
-Tests without a scope declaration run as ordinary pytest every time. Tests with a
-declaration run in a Bubblewrap sandbox and can reuse a previous successful result.
-The sandbox restricts which project files a test can read. It uses your installed
-Python environment and leaves resource limits and network policy to the job running
-pytest.
+A test is *ordinary* unless it declares what it reads. Ordinary tests run as plain
+pytest every time. A *scoped* test declares its inputs. It runs in a Bubblewrap sandbox
+that shows only those project files, and pytest-telescope can reuse its earlier
+successful result. The sandbox restricts which project files a test can read. It uses
+your installed Python environment and leaves resource limits and network policy to the
+job running pytest.
 
-This page defines the development execution contract following the published 0.1.0a6
-baseline. See the
-[API reference](bubblewrap-api.md) for interfaces and configuration, and the
+See the [API reference](bubblewrap-api.md) for interfaces and configuration, and the
 [result reference](result-schema.md) for schema 4 fields.
-
-## Frozen Git checkout (development contract)
-
-This section preserves a deferred design contract. The current four-component candidate
-and published 0.1.0a6 do not implement the selector or frozen-checkout/history capture.
-Under the future contract, `git="frozen-checkout-v1"` would scope a case and grant an
-owned, integrity-verified read-only Git checkout at `/project`, where scoped sessions
-see the project. The supported committed source tree, normalized index, HEAD and
-reachable local branch and tag history are visible. Untracked files require separate
-input declarations. The default without this declaration retains the existing no-Git
-view. Actual Git commands such as `rev-parse`, `log`, `show`, `ls-tree`, `diff` and
-`status` and `ls-files --stage`, including calls from subprocesses and Python children,
-operate on the frozen checkout; writes to it fail. Status reflects the normalized clean
-tracked checkout and any separately declared untracked files. External helpers, remotes,
-network operations and configuration-dependent behavior are unsupported. A separately created repository in private scratch remains writable.
-
-Version 1 supports clean, nonbare SHA-1 checkouts with committed symbolic local-branch
-or detached HEAD, regular tracked files and executable bits, local branches and tags,
-and complete reachable objects. Ordinary `.git` directories and validated conventional
-linked-worktree indirections are supported. Staged, dirty, deleted, sparse or
-filter-transformed tracked state, submodules, excluded tracked namespaces, bare, unborn,
-shallow, promisor, alternate, replacement, grafted or unverifiable repositories refuse.
-The visible index is normalized from the verified committed tree. Host remotes,
-remote-tracking refs, reflogs, unreachable objects, configuration, credentials, helpers,
-hooks and live metadata paths are not copied or executed.
-
-Tracked mode `120000` relative leaf symlinks are preserved as links with their exact
-link text when their lexical target remains inside the tracked tree and is a regular
-tracked file. Parent components are allowed when they remain inside. Link text is at
-most 4,096 bytes and existing path depth, length and entry bounds apply. Absolute or
-escaping targets, directory or dangling links, link ancestors, chains, cycles and other
-indirections refuse. Capture uses bounded no-follow validation of committed blob, live
-link and final frozen link with consistent before/after evidence; it never resolves a
-link through mutable host paths. Link text, mode and target content bind identity.
-
-Git execution uses the actual system Git resolved from a controlled system PATH. Version
-1 supports regular Linux x86_64 ELF64 little-endian glibc Git executables. Its loader and
-complete direct and transitive library closure are resolved within fixed system library
-directories, captured as owned immutable bytes and modes, and overlaid only in requesting
-views. Resolution rejects RPATH, RUNPATH, audit, filter, preload and unsafe dependency
-layouts; it does not resolve libraries from the project or invoking environment. The
-runtime closure is bounded to 128 files, 64 MiB per file, 256 MiB total and depth 32.
-Git, loader, libraries, their original system paths and symlink aliases are bound into
-identity and revalidated along with source, paths and links before hits and execution.
-Capture commands use the same verified frozen Git implementation and dependencies.
-For Git consumers, forwarding `GIT_*`, `SSH_*`, `LD_*`, `DYLD_*`, `HOME`, `PATH`,
-`XDG_CONFIG_HOME`, `LANG`, `LANGUAGE`, `LC_*` or `TZ` conflicts with controlled
-execution and is invalid; Git uses the C locale and UTC. Non-Git forwarding is unchanged.
-This is not a general tool snapshot facility.
-
-Capture bounds are 100,000 visible tracked paths and 500,000 reachable objects,
-200,000 walked filesystem and metadata entries, 4,096 selected refs, 64 MiB per
-individual source file, Git object or metadata file, and 2 GiB of simultaneously retained
-Git capture material. The material limit counts file contents in staging, intermediate
-copies, reachable-pack generation and the final snapshot and source, link-target bytes,
-and bounded reservations for native-generated index output. Separate retained copies
-count separately; hardlinked aliases of the same content count once. Historical objects
-streamed without retention are not summed by their uncompressed sizes. This is not a
-filesystem allocation quota and does not count directory, inode or slab overhead, all
-concurrent case views, other declared-input pools or total job scratch. The separately
-bounded runtime closure is described above. Caller jobs remain responsible for actual
-CPU, memory, process and scratch limits and accounting.
-
-Reachable history is retained in an owned reachable-only compact pack. Compound pack
-files are streamed and bounded by the 2 GiB capture-material aggregate rather than the
-64 MiB individual object limit. Copying, hashing and current-tree object bodies are
-streamed; each body remains bounded by 64 MiB, and no pack or body stream may exceed
-its applicable capture-material aggregate or per-object bound. The SHA-1 object listing is bounded to 20.5 MiB
-(500,000 records of at most 41 bytes). All other command output is bounded at 64 MiB.
-Complete object and connectivity verification remain required. Paths and link targets
-are limited to 4,096 UTF-8 bytes and paths to 64 components. Each command has the lesser
-of the invocation timeout and 30 seconds; each complete capture attempt has the lesser
-of the invocation timeout and 120 seconds. Limits refuse rather than truncating history.
-The exact owned pack representation is deterministic or included in the identity.
-
-Capture and revalidation refuse unavailable, changing, corrupt, partial or unsupported
-contexts with bounded evidence and at most two fresh capture attempts. Diagnostics do
-not expose raw Git stderr, host configuration, contents or host paths. No mutable host repository is mounted, no
-ordinary fallback follows a scoped attempt, and failed cleanup prevents publishing new
-pending cache records. Caller resource limits and shared host network policy are
-unchanged. The snapshot does not claim full host-system, locale, NSS or network reproducibility.
 
 ## Which route a case takes
 
@@ -114,8 +32,10 @@ counts. Every other case is *ordinary*.
 | `@pytest.mark.telescope(inputs=[], cache=False)` | scoped | never |
 | module `pytestmark = pytest.mark.telescope(bundles=["shared"])` | scoped (every case in the module) | yes |
 
-Project `defaults` add files and environment names to scoped cases but never make a case scoped. An `absent`
-declaration is still checked against the project for every case that carries it. A
+Project `defaults` add files and environment names to scoped cases but never make a case
+scoped. An `absent` declaration, also called a *declared absence*, lists paths that must
+not exist in the project. It is still checked against the project for every case that
+carries it. A
 malformed, unsupported or mutated declaration refuses the run; it never turns a case
 ordinary.
 
@@ -138,6 +58,10 @@ the suite's ordinary cases and share nothing with scoped cases.
 
 ## Scoped cases: the filesystem view
 
+Before scoped tests run, pytest-telescope copies the declared project files once per
+invocation into a read-only *frozen copy*. A scoped test sees that copy, and only that
+copy, at `/project`; this is its *frozen view* of the project.
+
 Every scoped collection and execution runs `bwrap` as an ordinary child process of the
 invocation. Inside, the filesystem looks like this:
 
@@ -155,7 +79,7 @@ invocation. Inside, the filesystem looks like this:
 
 Explicit frozen tool declarations add only their documented views. A selected
 native tool replaces `/etc` and may also replace library-search directories with the
-narrower frozen view [below](#frozen-tools-and-runtime-files-development-contract);
+narrower frozen view [below](#frozen-tools-and-runtime-files);
 without it the table is unchanged.
 
 An undeclared project file does not exist in the sandbox.
@@ -334,14 +258,12 @@ is PID 1 of its namespace, so it adopts and reaps orphaned descendants; any desc
 still alive after teardown makes the result unusable, and every remaining process ends
 with the worker. No other namespace is created.
 
-## Frozen tools and runtime files (development contract)
+## Frozen tools and runtime files
 
-Contributor qualification keeps actual browser execution in separately invoked
-[benchmarks](benchmark.md#browser-execution-benchmarks), outside functional readiness.
-That classification does not change the filesystem contract or permit broader access.
-
+A *frozen tool* is an existing installation outside the project, such as a Node
+runtime or an installed package, whose exact files a scoped test selects by name.
 `tools=["frontend"]` opts a case into an explicitly registered `frozen-tool-v1` closure.
-The [manifest reference](bubblewrap-api.md#frozen-tool-manifest-development-contract)
+The [manifest reference](bubblewrap-api.md#frozen-tool-manifest)
 defines the exact records. The controller captures and verifies the declared existing
 files into owned immutable material. It never binds the live installation, hard-links
 source files, installs a runtime or infers arbitrary program dependencies.
@@ -442,6 +364,10 @@ to their scope declarations.
 The view prevents accidental reads of undeclared files and accidental writes. It does
 not protect against code that deliberately attacks the kernel or shared network.
 
+Frozen Git history is not supported. A scoped test that needs a Git repository can create
+one in private scratch and run the host's `git` there; see
+[host tools](specification.md#host-tools-and-child-interpreters).
+
 If Bubblewrap is missing or cannot create namespaces, the run refuses. Scoped cases
 never fall back to ordinary execution, and nothing is replayed in ordinary mode after
 a scoped runner starts.
@@ -452,7 +378,8 @@ Scoped discovery for files whose module-level declaration scopes every case runs
 sandboxed pytest collection per suite. Its view is the union of those files'
 declarations, project defaults, configuration and the files themselves. That union is a collection
 view only: no case body ever runs with it. Scoped cases in mixed files are identified by
-the ordinary session's collection. Every scoped execution collects its containing file
+the ordinary session's collection. A file's *case inventory* is the complete list of
+cases pytest collects from it. Every scoped execution collects its containing file
 again inside its own narrow view and refuses when that file's case inventory or the
 selected membership differs.
 

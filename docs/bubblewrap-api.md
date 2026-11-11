@@ -1,12 +1,11 @@
 # API, CLI and configuration
 
-> Per-scope environment inputs, frozen tools, helper ownership and the opt-in fixture
-> guard are delivered in version 0.1.0. Frozen-checkout/history support is deferred
-> and is not implemented by this version.
-
-This reference lists the interfaces of the [ordinary and Bubblewrap execution
-contract](bubblewrap.md). The [result reference](result-schema.md) defines every schema 4
-field, and [complete examples](bubblewrap-schema-examples.json) show whole reports.
+This reference lists the Python API, command line, configuration tables, frozen-tool
+manifest format, host requirements and capability codes. Use it when you call
+pytest-telescope from code, register frozen tools, or handle a refusal. The behavior
+behind these interfaces is described in [ordinary and Bubblewrap
+execution](bubblewrap.md). The [result reference](result-schema.md) defines every schema
+4 field, and [complete examples](bubblewrap-schema-examples.json) show whole reports.
 
 ## Python API
 
@@ -76,15 +75,19 @@ The [marker and project reference](specification.md#project-configuration) defin
 A suite's `capabilities` list accepts `python` and `project:readonly`;
 `network:none` and `scratch:noexec` refuse with that capability code.
 
-The separate [frozen Git design](bubblewrap.md#frozen-git-checkout-development-contract)
-is deferred. The current candidate has no `git=` selector or frozen-checkout/history
-capture. It is distinct from selecting a Git executable as a frozen tool for an owned
-scratch repository. `plan` remains a static preview of implemented declarations.
+Frozen Git history is not supported: there is no `git=` marker field. Selecting a Git
+executable as a frozen tool for an owned scratch repository is a different, supported
+use. `plan` is a static preview of implemented declarations.
 
-## Frozen tool manifest (development contract)
+## Frozen tool manifest
 
-The literal marker `tools=["frontend"]` selects a registered frozen closure. Registration
-has exactly two string fields:
+A *frozen tool* is an existing installation outside the project, such as a Node runtime,
+a browser or an installed Python package, that scoped tests may use. Its *manifest* is a
+JSON file in the project that pins the exact files of that installation: their bytes,
+modes, links and runtime relations. A test selects the tool by name, and
+pytest-telescope shows only those pinned files, read-only. The literal marker
+`tools=["frontend"]` selects a registered frozen closure. Registration has exactly two
+string fields:
 
 ```toml
 [tool.pytest_telescope.tools.frontend]
@@ -102,7 +105,26 @@ exactly `{"format":"frozen-tool-v1","manifest":"tool-locks/frontend.json"}` reco
 Each `declarations` row adds `tools`, the sorted names contributed by that declaration
 and its referenced bundles; this is a static preview, not collected-case enumeration.
 See [composition and reuse](execution-contract.md#frozen-tool-capture-and-reuse)
-and the [filesystem view](bubblewrap.md#frozen-tools-and-runtime-files-development-contract).
+and the [filesystem view](bubblewrap.md#frozen-tools-and-runtime-files).
+
+### Native tools at a glance
+
+A *native* selection is a tool whose pinned closure contains any supported ELF file (an
+executable, library or extension module), or whose `loader` is not `null`. Selecting a
+native closure also closes system configuration: `/etc/resolv.conf` is absent unless the
+selected manifest pins it and preserves its path. Required certificate or fixture
+configuration likewise appears only as declared frozen bytes, alongside the required
+loader controls. A data-only tool without ELF files or a loader profile keeps the
+existing system view, as do nonconsumers. See [declared native
+configuration](#declared-native-system-configuration) for the exact trigger and
+examples; dependencies remain the caller's responsibility. Native worker startup also
+requires the [supported CPython prefix closure](#invoking-python-startup-closure). When
+`/usr` is its base prefix, unselected files throughout `/usr` are absent; pin the actual
+worker, stdlib, pytest dependencies and any commands the test needs. For native
+libraries, the [verified ordering subset](#verified-native-library-ordering) keeps
+executable process contexts and their declared native resources explicit. It supports
+proven search ordering and refuses ambiguous ancestry or loaded-name conflicts; it does
+not discover arbitrary program dependencies or promise ABI compatibility.
 
 ### Exact root and entry records
 
@@ -277,7 +299,7 @@ bytes/paths and colliding search entries must agree.
 
 ### Verified native library ordering
 
-This development profile proves a bounded sufficient condition for the declared
+This profile proves a bounded sufficient condition for the declared
 processes. It does not emulate arbitrary linker behavior or infer ABI compatibility.
 `DT_NEEDED` order, `DT_SONAME`, `DT_RPATH` and `DT_RUNPATH` remain distinct pinned ELF
 metadata. At most one of each of the latter three tags is supported; duplicate tags,
@@ -353,7 +375,6 @@ entry is absent, including host resolver and certificate configuration. Declared
 directories retain their source mode with write bits removed; required empty synthetic
 ancestors use `0555` and grant no host contents. The controller
 does not inventory ambient `/etc`, preserve its live entries or consult it for a fallback.
-This replaces the earlier, unlanded ambient-configuration preservation design.
 
 Configuration uses the existing root and entry records, with no additional manifest
 field or arbitrary destination remapping. To expose `/etc/resolv.conf`, declare its
@@ -532,7 +553,7 @@ refuse. RECORD parent-path normalization is confined to metadata parsing and mus
 at explicitly selected installed-distribution roots; manifest paths still forbid `..`.
 Unsupported editable/finder/namespace/import-hook layouts refuse. The package must
 already be installed: no wheel installation, runtime build or `PYTHONPATH` override is
-performed. See [isolated children](scoped-execution.md#frozen-installed-python-tools-development-contract).
+performed. See [isolated children](scoped-execution.md#frozen-installed-python-tools).
 
 ### Runtime files outside the installed-distribution profile
 
@@ -591,7 +612,7 @@ only consuming tool identities, subject to normal project-configuration invalida
 
 ### A complete data-only example
 
-With a candidate implementing this development contract, this creates a small external
+This creates a small external
 data tree and its complete manifest. Run it once from your project's root; an existing
 example installation causes an error rather than being overwritten:
 
@@ -694,9 +715,7 @@ below `/project`. A frozen-tool source or original-path alias may not lie inside
 | `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
 | `project:links` | A project input contains an unsupported directory symlink. |
 
-The deferred Git design separately specifies `git:frozen-checkout-v1`, `git:executable`
-and `git:limits`, plus controlled Git/SSH/loader/locale declarations and bounded capture
-recovery. These are not capabilities or declaration fields implemented by this candidate.
+Frozen Git history is not supported, so there are no `git:` capability codes.
 
 For frozen tools, missing declared inputs and malformed declarations raise
 `DeclarationError`; observed source mutation, I/O outage or corrupt owned capture is
@@ -725,17 +744,16 @@ all fields and accounting rules.
 - `collection.suites` has one row per suite and route, each with `route` and `files`.
 - Timings report wall-clock durations. CPU and resource accounting belong to the caller.
 
-## Required fixture guard API (unreleased)
+## Fixture guard API
 
-This section specifies a required development interface; it is not a claim that the
-current published package implements or qualifies it. In the Python signature above,
-`fixture_guard` is
-exactly `None` or `"available-v1"`; the guard requires batch mode and refuses ordinary
-or mixed structural routes. The CLI opts in with `run --fixture-guard available-v1`;
-it accepts no condition expectation values. Existing calls and CLI behavior with the
-guard omitted retain schema 4 and use cache envelope 8. The
-[joint protocol table](result-schema.md#internal-protocol-and-cache-versions) applies
-to both guarded and unguarded records.
+The [fixture guard](batching.md#fixture-guard) is an opt-in check for batch mode. In the
+Python signature above, `fixture_guard` is exactly `None` or `"available-v1"`; the guard
+requires batch mode and refuses ordinary or mixed structural routes. The CLI opts in
+with `run --fixture-guard available-v1`; it accepts no condition expectation values.
+Existing calls and CLI behavior with the guard omitted retain schema 4 and use cache
+envelope 8. The [joint protocol
+table](result-schema.md#internal-protocol-and-cache-versions) applies to both guarded
+and unguarded records.
 
 With the guard, `condition_checks` is an actual tuple or list of at most 4,096 exact
 dictionaries, in output order. Each has exactly `case_id`, `name`, and `op`; `equals`
@@ -778,5 +796,5 @@ Guard capability refusals use `execution:fixture-profile`, `execution:fixture-ve
 and `execution:condition-mismatch`. Unsupported fixtures and uncertain sharing refuse
 rather than changing the view. Dependency errors and malformed worker records follow
 bounded infrastructure retry and incident handling. See the
-[fixture guard contract](batching.md#required-fixture-guard-unreleased) for scope,
+[fixture guard contract](batching.md#fixture-guard) for scope,
 version and lifecycle limits.
