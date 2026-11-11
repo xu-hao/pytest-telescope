@@ -3,10 +3,13 @@
 import importlib.metadata
 import json
 import sys
+import tomllib
 import types
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from test_functional_gate import candidate as candidate
 from test_functional_gate import gates as gates
 from test_functional_gate import invocation as invocation
@@ -15,6 +18,7 @@ from test_workflow_gate_preflight import workflow_roles
 
 import pytest_telescope
 
+PROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 ACTUAL = importlib.metadata.version("pytest")
 VERIFIED = str(Path(pytest_telescope.__file__))
 CORE = "tests/test_profile.py::test_core"
@@ -281,3 +285,22 @@ def test_worker_importing_the_verified_origin_registers_its_membership_check(gat
     config, registered = worker_configuration(gates, VERIFIED)
     gates.functional.pytest_configure(config)
     assert [name for _, name in registered] == ["telescope-functional-selection"]
+
+
+@pytest.mark.parametrize(
+    ("name", "pinned", "others"),
+    [
+        ("pytest-xdist", "3.8.0", ("3.7.0", "3.8.1", "3.9.0", "4.0.0")),
+        ("execnet", "2.1.2", ("2.1.1", "2.1.3", "2.2.0", "3.0.0")),
+    ],
+)
+def test_development_extra_admits_exactly_one_parallel_runner_version(name, pinned, others):
+    declared = tomllib.loads(PROJECT.read_text())["project"]["optional-dependencies"]["dev"]
+    (requirement,) = [
+        requirement
+        for requirement in map(Requirement, declared)
+        if canonicalize_name(requirement.name) == name
+    ]
+    assert requirement.marker is None
+    assert requirement.specifier.contains(pinned)
+    assert not [version for version in others if requirement.specifier.contains(version)]

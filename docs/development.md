@@ -53,6 +53,11 @@ import with it at configuration, as the gate process does after its first import
 refuses before collecting when it has no verified origin or imports the package from
 anywhere else.
 
+The development extra pins the worker runner exactly, `pytest-xdist==3.8.0` with its
+transport `execnet==2.1.2`, as it pins the documentation toolchain. Every qualification
+therefore starts and binds its workers through the same runner version; change both
+pins together, with a full qualification on the new versions.
+
 ## Full qualification and core compatibility
 
 `check.py --functional-profile all` is the default and the only full qualification,
