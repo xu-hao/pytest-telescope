@@ -1,5 +1,8 @@
 # Publishing
 
+This page is for maintainers. It describes how the documentation and the package are
+published.
+
 ## Read the Docs
 
 Read the Docs builds the documentation using `.readthedocs.yaml`, Sphinx, Furo and MyST
@@ -32,7 +35,6 @@ sandbox tests and benchmarks. For the release introducing the explicitly declare
 has waived a new performance campaign. Real sandbox functional tests and
 benchmark-harness correctness checks remain required. Historical timings remain historical; fresh performance
 is unmeasured. Future releases retain the benchmark requirement unless separately waived.
-Version `0.1.0a6` uses ordinary pytest and Bubblewrap filesystem views.
 
 Before each release:
 

@@ -1,5 +1,20 @@
 # Benchmark
 
+This page is for anyone who wants to measure what the sandbox costs, and for
+contributors who qualify pytest-telescope against host-specific installations. The first
+section compares plain pytest with ordinary and scoped execution on a fixed workload.
+The later sections describe compatibility benchmarks, which run only when selected
+explicitly.
+
+Contributors qualify host-specific tool installations with the separately invoked
+[installed-runtime benchmarks](#installed-runtime-compatibility-benchmarks).
+All [actual browser execution](#browser-execution-benchmarks) is benchmark
+work outside the [functional gate](development.md), as are the 14 actual Node and
+installed-distribution qualification nodes in the
+[migration ledger](#program-and-installed-distribution-migration-ledger).
+Ordinary Python/pytest/Bubblewrap correctness and portable integration tests remain
+functional.
+
 ## Plain pytest versus Bubblewrap scoped execution
 
 This benchmark measures the cost of starting a sandbox for each test. It runs the same
@@ -88,7 +103,7 @@ how often their inputs change.
 
 ## Installed-runtime compatibility benchmarks
 
-The unreleased frozen-tool profile also has explicit host-compatibility controls in
+The frozen-tool profile also has explicit host-compatibility controls in
 `benchmarks/frozen_runtime`. They exercise a real native library, unchanged env/Node
 commands, full Chromium navigation and clicking through an isolated CLI child, and a
 normally installed Python distribution in an isolated child. The small C sources, wheel
@@ -268,5 +283,5 @@ Shared driver and runtime-declaration helpers remain in `tests/` for portable he
 controls and explicit benchmarks. Storing or pinning browser-driver bytes does not execute
 a browser. All program-profile preparation is explicitly selected; the default functional
 gate prepares neither Node nor installed-plugin profiles. Private historical check wrappers
-and receipts retain their original paths and verdicts; they are not current functional
-readiness requirements or executable migration instructions.
+and receipts retain their original paths and verdicts; they are not current requirements
+of the functional gate or executable migration instructions.
