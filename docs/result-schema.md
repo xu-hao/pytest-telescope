@@ -236,7 +236,7 @@ one shape. Each entry has exactly these fields:
 
 | Field | Meaning |
 | --- | --- |
-| `file` | The canonical project-relative path of the file where the failure was observed, or `<runtime>` for a location outside the project. For a phase failure this is the file of the innermost traceback frame, which can be a helper rather than the test module. |
+| `file` | The canonical project-relative path of the file where the failure was observed, or `<runtime>` for a location outside the project. For a phase failure with an exception this is the file of the innermost traceback frame, which can be a helper rather than the test module; without an exception it is the test's module. For a collection failure it is the module or directory that failed to collect. |
 | `line` | The line number of that location, counted from 1, or 0 when no line is known. Collection failures may have line 0. |
 | `phase` | `collect`, `setup`, `call`, or `teardown`. |
 | `exception_type` | The exception class name, or `TestError` when that name is not 1 to 128 ASCII letters, digits or underscores. A collection failure is `CollectionError`, and a failed report without an exception, such as a strict unexpected pass, is `UnexpectedPass`. |

@@ -10,7 +10,7 @@ project.
   `subproject/tests/test_example.py` as `tests/test_example.py`, which could name an
   unrelated file at the top of the project. This applied to `collection.failures` on both
   the ordinary and scoped routes and to the collection failures in the `failures` of a
-  group and of its case row.
+  group and, in the case profile, of its case row.
 - The same correction covers a test that another plugin marks failed without an
   exception.
 - Suites rooted at the project directory were not affected, and their results do not
