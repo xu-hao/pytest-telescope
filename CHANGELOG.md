@@ -9,11 +9,14 @@ project.
   collection failure in a suite with `root = "subproject"` reported the module
   `subproject/tests/test_example.py` as `tests/test_example.py`, which could name an
   unrelated file at the top of the project. This applied to `collection.failures` on both
-  the ordinary and scoped routes and to the collection failures in a group's `failures`.
+  the ordinary and scoped routes and to the collection failures in the `failures` of a
+  group and of its case row.
 - The same correction covers a test that another plugin marks failed without an
   exception.
 - Suites rooted at the project directory were not affected, and their results do not
-  change. Cached results stay valid.
+  change. The result schema, worker protocols and cache record format are unchanged.
+- Results cached by 0.1.1 are not reused, because the package version is part of every
+  scoped cache key. The first run after the upgrade executes every scoped test again.
 - The [result reference](https://pytest-telescope.readthedocs.io/en/latest/result-schema/#failure-entries) now lists the fields of
   a failure entry.
 

@@ -1015,9 +1015,10 @@ def main(request=None, *, ordinary=False):
     pytest.mark.telescope = guarded_marker
 
     def evidence(nodeid, phase, filename, line, kind, *, suite_relative=False):
-        """Record one failure. `filename` is absolute unless `suite_relative` says that
-        it is the file part of a node ID or report location, which pytest gives relative
-        to the suite root; either way the entry names the file relative to the project."""
+        """Record one failure. `filename` is a traceback or item path unless
+        `suite_relative` says that it is the file part of a node ID or report location,
+        which pytest gives relative to the suite root; either way the entry names a
+        project file relative to the project."""
         if len(failures) >= 64:
             return
         try:

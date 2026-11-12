@@ -89,6 +89,7 @@ def test_ordinary_session_with_a_scoped_case_names_each_project_relative_file(pr
     report = controller.run(project, workers=1)
 
     assert report["status"] == "failed", report
+    assert [row["route"] for row in report["collection"]["suites"]] == ["ordinary"]
     assert collection_files(report) == [
         "subproject/tests/test_example.py",
         "subproject/tests/test_other.py",
@@ -130,6 +131,7 @@ def test_execution_side_collection_failure_names_the_project_relative_file(proje
 
 @pytest.mark.parametrize("route", ["ordinary", "scoped"])
 def test_phase_failure_names_the_project_relative_file(project, route):
+    # A control: a failure with a traceback takes its file from the traceback's own path.
     put(project, "subproject/tests/helper.py", "def check():\n    raise LookupError\n")
     put(
         project,
@@ -187,6 +189,6 @@ def test_failure_decided_by_another_plugin_names_the_project_relative_file(proje
     assert report["status"] == "failed", report
     assert {group["route"] for group in report["groups"]} == {route}
     rows = [row for group in report["groups"] for row in group["failures"]]
-    assert [(row["file"], row["phase"]) for row in rows] == [
-        ("subproject/tests/test_example.py", "call")
+    assert [(row["file"], row["phase"], row["exception_type"]) for row in rows] == [
+        ("subproject/tests/test_example.py", "call", "UnexpectedPass")
     ]
