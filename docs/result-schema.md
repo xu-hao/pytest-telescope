@@ -215,6 +215,28 @@ than fabricating evidence or falling back to ordinary execution. A digest is com
 to a known expected reason, but is not proof of a skip, current context or final teardown.
 Avoid sensitive reasons: a predictable reason can be guessed from its digest.
 
+### Failure entries
+
+`collection.failures`, a group's `failures` and a case row's `failures` hold entries of
+one shape. Each entry has exactly these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `file` | The canonical project-relative path of the file where the failure was observed, or `<runtime>` for a location outside the project. |
+| `line` | The line number of that location, counted from 1, or 0 when no line is known. Collection failures may have line 0. |
+| `phase` | `collect`, `setup`, `call`, or `teardown`. |
+| `exception_type` | The exception class name. A collection failure is `CollectionError`, and a failed report without an exception, such as a strict unexpected pass, is `UnexpectedPass`. |
+| `case_id` | The opaque identity of the case, or of the collection node for a collection failure. A collection node need not be a requested member. |
+
+`file` is relative to the project directory, never to the suite root. In a suite with
+`root = "subproject"`, pytest names a module `tests/test_example.py`, and its failure
+entry names `subproject/tests/test_example.py`. This is the same name the module has in
+`collection.suites[].files`, in skip evidence and in declared inputs, so a `file` always
+identifies one project file even when another suite or directory has a file with the
+same suite-relative name. Each collection, case, batch or ordinary session reports at
+most 64 entries. Entries never contain exception messages, source text or parameter
+values.
+
 `collection.skips` contains objects with exactly `suite`, `route` (`ordinary` or
 `scoped`), `file` (canonical project-relative path), `phase: "collect"`, and `reason`. Each `collection.suites` row has `skips` with `file`, `phase`
 and `reason`; groups have `collection_skips` in that same shape for execution-side
