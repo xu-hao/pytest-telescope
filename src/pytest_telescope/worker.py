@@ -1014,11 +1014,14 @@ def main(request=None, *, ordinary=False):
 
     pytest.mark.telescope = guarded_marker
 
-    def evidence(nodeid, phase, filename, line, kind):
+    def evidence(nodeid, phase, filename, line, kind, *, suite_relative=False):
+        """Record one failure. `filename` is absolute unless `suite_relative` says that
+        it is the file part of a node ID or report location, which pytest gives relative
+        to the suite root; either way the entry names the file relative to the project."""
         if len(failures) >= 64:
             return
         try:
-            path = project_file(filename)
+            path = canonical_nodeid(filename) if suite_relative else project_file(filename)
         except (ValueError, OSError):
             path = "<runtime>"
         failures.append(
@@ -1416,7 +1419,12 @@ def main(request=None, *, ordinary=False):
             if report.failed:
                 collection_failed = True
                 evidence(
-                    report.nodeid, "collect", report.nodeid.split("::")[0], 0, "CollectionError"
+                    report.nodeid,
+                    "collect",
+                    report.nodeid.split("::")[0],
+                    0,
+                    "CollectionError",
+                    suite_relative=True,
                 )
             if report.skipped:
                 try:
@@ -1469,8 +1477,17 @@ def main(request=None, *, ordinary=False):
             if report.failed:
                 failure = failure_reports.get((case, report.when))
                 if failure is None:
-                    failure = (report.location[0], report.location[1] + 1, "UnexpectedPass")
-                evidence(report.nodeid, report.when, *failure)
+                    # Another plugin failed the report after it was observed passing.
+                    evidence(
+                        report.nodeid,
+                        report.when,
+                        report.location[0],
+                        report.location[1] + 1,
+                        "UnexpectedPass",
+                        suite_relative=True,
+                    )
+                else:
+                    evidence(report.nodeid, report.when, *failure)
                 cases[case] = "failed"
             elif previous != "failed":
                 if report.skipped:
