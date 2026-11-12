@@ -229,6 +229,28 @@ membership and context, unit outcome/status and actual phase/reason, unit and gr
 completeness, final group/run verdict and fresh or reused status. Unknown profiles,
 partial evidence or a failed lifecycle cannot establish a skip or authorize a replay.
 
+### Failure entries
+
+`collection.failures`, a group's `failures` and a case row's `failures` hold entries of
+one shape. Each entry has exactly these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `file` | The canonical project-relative path of the file where the failure was observed, or `<runtime>` for a location outside the project. For a phase failure with an exception this is the file of the innermost traceback frame, which can be a helper rather than the test module; without an exception it is the test's module. For a collection failure it is the module or directory that failed to collect. |
+| `line` | The line number of that location, counted from 1, or 0 when no line is known. Collection failures may have line 0. |
+| `phase` | `collect`, `setup`, `call`, or `teardown`. |
+| `exception_type` | The exception class name, or `TestError` when that name is not 1 to 128 ASCII letters, digits or underscores. A collection failure is `CollectionError`, and a failed report without an exception, such as a strict unexpected pass, is `UnexpectedPass`. |
+| `case_id` | The opaque identity of the case, or of the collection node for a collection failure. A collection node need not be a requested member. |
+
+`file` is relative to the project directory, never to the suite root. In a suite with
+`root = "subproject"`, pytest names a module `tests/test_example.py`, and its failure
+entry names `subproject/tests/test_example.py`. This is the same name the module has in
+`collection.suites[].files`, in skip evidence and in declared inputs, so a `file` always
+identifies one project file even when another suite or directory has a file with the
+same suite-relative name. Each collection, case, batch or ordinary session reports at
+most 64 entries. Entries never contain exception messages, source text or parameter
+values.
+
 ## Internal protocol and cache versions
 
 Persistent cache envelopes use schema 8. Collection, singleton execution, batch execution
