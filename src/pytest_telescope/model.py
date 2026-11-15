@@ -338,6 +338,7 @@ class StaticDiscovery:
 
 
 MAX_VISITS = 200_000
+MAX_CONFIGURED_VISITS = 100_000_000
 
 EXCLUDED = {
     ".git",
@@ -407,7 +408,16 @@ def conda_environment(directory, *, follow=True):
     return not os.path.islink(records) and os.path.isdir(records)
 
 
-def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), budget=None):
+def walk_bounded(
+    root,
+    start,
+    *,
+    prune=True,
+    include_hidden=False,
+    excluded=(),
+    budget=None,
+    max_visits=MAX_VISITS,
+):
     pending = [start]
     if budget is None:
         budget = [0]
@@ -416,8 +426,8 @@ def walk_bounded(root, start, *, prune=True, include_hidden=False, excluded=(), 
         with os.scandir(directory) as entries:
             for entry in entries:
                 budget[0] += 1
-                if budget[0] > MAX_VISITS:
-                    raise DeclarationError("filesystem discovery exceeds 200000 entries")
+                if budget[0] > max_visits:
+                    raise DeclarationError(f"filesystem discovery exceeds {max_visits} entries")
                 path = Path(entry.path)
                 name = path.relative_to(root).as_posix()
                 relative(name)
@@ -447,10 +457,72 @@ def glob_match(name, pattern):
     return match(0, 0)
 
 
-def expand(root, names, label, *, missing=False, excluded=(), budget=None, tool_links=None):
+def _glob_anchor(root, name, excluded, budget, max_visits):
+    """Validate the literal directory prefix without following directory symlinks."""
+    anchor = root
+    for part in Path(name).parts:
+        if glob.has_magic(part):
+            break
+        anchor = anchor / part
+        budget[0] += 1
+        if budget[0] > max_visits:
+            raise DeclarationError(f"filesystem discovery exceeds {max_visits} entries")
+        rel = anchor.relative_to(root).as_posix()
+        if excluded_path(rel, excluded):
+            return None
+        try:
+            if not stat.S_ISDIR(anchor.lstat().st_mode):
+                return None
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        if conda_environment(anchor, follow=False):
+            return None
+        if os.path.lexists(anchor / "pyvenv.cfg"):
+            regular_bytes(root, rel + "/pyvenv.cfg", 65536)
+            return None
+    return anchor
+
+
+def expand(
+    root,
+    names,
+    label,
+    *,
+    missing=False,
+    excluded=(),
+    budget=None,
+    tool_links=None,
+    max_visits=MAX_VISITS,
+    scan_cache=None,
+):
     found = set()
     if budget is None:
         budget = [0]
+    if scan_cache is None:
+        scan_cache = {}
+
+    def scanned(start, *, include_hidden=False):
+        key = (start.relative_to(root).as_posix(), include_hidden)
+        if key not in scan_cache:
+            scan_cache[key] = tuple(
+                walk_bounded(
+                    root,
+                    start,
+                    include_hidden=include_hidden,
+                    excluded=excluded,
+                    budget=budget,
+                    max_visits=max_visits,
+                )
+            )
+            yield from scan_cache[key]
+        else:
+            for path in scan_cache[key]:
+                # Reusing directory reads does not make another pattern's work free.
+                budget[0] += 1
+                if budget[0] > max_visits:
+                    raise DeclarationError(f"filesystem discovery exceeds {max_visits} entries")
+                yield path
+
     memo = {}
     for name in sequence(names, label):
         name = relative(name)
@@ -475,16 +547,12 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None, tool_
             found.add(name)
             continue
         if glob.has_magic(name):
+            anchor = _glob_anchor(root, name, excluded, budget, max_visits)
+            walked = () if anchor is None else scanned(anchor, include_hidden=True)
+            if anchor is not None and anchor != root:
+                walked = _with_first(anchor, walked)
             candidates = (
-                path
-                for path in walk_bounded(
-                    root,
-                    root,
-                    include_hidden=True,
-                    excluded=excluded,
-                    budget=budget,
-                )
-                if glob_match(path.relative_to(root).as_posix(), name)
+                path for path in walked if glob_match(path.relative_to(root).as_posix(), name)
             )
         else:
             path = root / name
@@ -492,11 +560,7 @@ def expand(root, names, label, *, missing=False, excluded=(), budget=None, tool_
                 raise DeclarationError(f"missing {label}; declare expected absence explicitly")
             candidates = [path]
         for candidate in candidates:
-            paths = (
-                walk_bounded(root, candidate, prune=False, excluded=excluded, budget=budget)
-                if candidate.is_dir() and not candidate.is_symlink()
-                else ()
-            )
+            paths = scanned(candidate) if candidate.is_dir() and not candidate.is_symlink() else ()
             for selected in _with_first(candidate, paths):
                 rel = selected.relative_to(root).as_posix()
                 if excluded_path(rel, excluded):
@@ -581,8 +645,12 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             "distributions",
             "execution",
             "tools",
+            "max_visits",
         },
     )
+    max_visits = spec.get("max_visits", MAX_VISITS)
+    if type(max_visits) is not int or not 1 <= max_visits <= MAX_CONFIGURED_VISITS:
+        raise DeclarationError("max_visits must be an integer from 1 to 100000000")
     tool_definitions = tool_context.registrations(spec.get("tools", {}))
     tool_links = {}
     bundles = mapping(spec.get("bundles", {}), "bundles")
@@ -590,21 +658,30 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         raise DeclarationError("declare at most 256 bundles with names of 1 to 128 characters")
     resolved, active, depths = {}, set(), {}
     expansions = {}
+    scan_cache = {}
 
     def expanded(names, label, *, missing=False):
         names = sequence(names, label)
-        key = (tuple(names), missing)
-        if key not in expansions:
-            expansions[key] = expand(
-                root,
-                names,
-                label,
-                missing=missing,
-                excluded=excluded,
-                budget=budget,
-                tool_links=tool_links,
-            )
-        return expansions[key]
+        found = set()
+        for name in names:
+            key = (name, missing)
+            if key not in expansions:
+                # Cache successes only, so missing literals retain this caller's label.
+                expansions[key] = expand(
+                    root,
+                    [name],
+                    label,
+                    missing=missing,
+                    excluded=excluded,
+                    budget=budget,
+                    tool_links=tool_links,
+                    max_visits=max_visits,
+                    scan_cache=scan_cache,
+                )
+            found.update(expansions[key])
+            if len(found) > MAX_INPUT_PATHS:
+                raise DeclarationError("expanded declarations exceed 100000 paths")
+        return sorted(found)
 
     from .execution import suites as parse_suites
     from .execution import worker_count
@@ -727,7 +804,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             if not path.exists() or not path.resolve().is_relative_to(root) or path.is_symlink():
                 raise DeclarationError("test_roots require existing project files or directories")
             candidates = (
-                walk_bounded(root, path, excluded=excluded, budget=budget)
+                walk_bounded(root, path, excluded=excluded, budget=budget, max_visits=max_visits)
                 if path.is_dir()
                 else [path]
             )

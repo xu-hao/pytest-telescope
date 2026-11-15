@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.3
+
+Glob discovery starts at a pattern's literal directory prefix, so declarations such as
+`pkg/sub/**/*.py` skip unrelated project trees.
+
+- Each distinct input pattern or path is expanded once per invocation, even when it
+  appears in different declarations. Distinct globs sharing a directory prefix reuse
+  its scanned entries. Each pattern's candidate evaluations still count toward the
+  discovery limit.
+- Directory self-matches such as `pkg/sub/**`, hidden entries, empty matches for missing
+  prefixes, and metadata, cache, environment and symlink boundaries are preserved.
+- The visited-entry default remains 200,000. Set `max_visits` in
+  `[tool.pytest_telescope]` to an integer from 1 to 100,000,000 to tighten or raise it.
+- Results cached by 0.1.2 are not reused, because the package version is part of every
+  scoped cache key. The first run after the upgrade executes every scoped test again.
+
 ## 0.1.2
 
 Failure evidence now names the right file when a suite's `root` is a subdirectory of the

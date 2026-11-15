@@ -351,6 +351,21 @@ normal phase/lifecycle validation and output/session/cardinality limits remain i
 
 ## Bounds and performance
 
+Directory and glob discovery share a default budget of 200,000 visited entries,
+including test-root discovery. Set optional `max_visits` in `[tool.pytest_telescope]`
+to an integer from 1 to 100,000,000 to tighten or raise this limit. Booleans and other
+non-integer values are invalid. Discovery refuses when it exceeds the configured
+budget.
+
+Glob expansion starts at the longest leading directory prefix without glob syntax.
+For example, `pkg/sub/**/*.py` walks only `pkg/sub`, after checking each literal prefix
+component against the same metadata, cache, environment and symlink boundaries as a
+directory walk. A missing or non-directory prefix gives an empty match. `pkg/sub/**`
+also matches `pkg/sub` itself. Hidden components keep their existing matching behavior.
+Each distinct pattern or path is expanded once per invocation across declarations.
+Distinct globs sharing an anchor reuse its scanned subtree, but each pattern still
+charges its candidate evaluations to the discovery budget.
+
 Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited entries while expanding declared directories and globs; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB, 200,000 AST nodes and depth 128 per Python source file, and in total 2 GiB of Python source, 268,435,456 (2^28) AST nodes and 100,000 literal marker calls, as described [below](#static-parse-budget). Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
 
 Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
@@ -459,6 +474,7 @@ pythonpath = ["."]
 [tool.pytest_telescope]
 test_roots = ["tests"]
 env = ["FEATURE_VARIANT"]
+max_visits = 200000
 
 [tool.pytest_telescope.defaults]
 inputs = ["tests/conftest.py"]
@@ -473,6 +489,8 @@ workers = 2
 ```
 
 Paths are project-relative. Inputs accept explicit files, directories and globs.
+The optional `max_visits` setting controls the shared directory and glob discovery
+budget; it defaults to 200,000 and accepts integers from 1 to 100,000,000.
 Missing declared inputs, unknown fields/bundles, cyclic bundle references, malformed
 values and paths escaping the project are errors. Expected-absent paths must be
 absent in the source project and participate in identity. Relative leaf symlinks
