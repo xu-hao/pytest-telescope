@@ -1,10 +1,12 @@
 """Filesystem and collection contracts exercised without importing test code."""
 
+import json
 import os
+from pathlib import Path
 
 import pytest
 
-from pytest_telescope.model import DeclarationError, load, regular_bytes
+from pytest_telescope.model import DeclarationError, expand, load, regular_bytes
 
 
 def declaration(root, tests):
@@ -118,8 +120,6 @@ def test_explicit_hidden_directory_glob_declares_actual_resources(tmp_path):
 
 
 def test_total_discovery_budget_bounds_repeated_nonmatching_globs(tmp_path):
-    import json
-
     (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
     for number in range(100):
         (tmp_path / f"data-{number}.txt").write_text("x")
@@ -130,3 +130,163 @@ def test_total_discovery_budget_bounds_repeated_nonmatching_globs(tmp_path):
     )
     with pytest.raises(DeclarationError, match="discovery"):
         load(tmp_path)
+
+
+def test_anchored_glob_skips_unrelated_sibling_trees(tmp_path, monkeypatch):
+    declaration(tmp_path, ["test_subject.py"])
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest_telescope]\nmax_visits = 50\ntest_roots = ["test_subject.py"]\n'
+        '[tool.pytest_telescope.defaults]\ninputs = ["pkg/sub/**/*.py"]\n'
+    )
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    for number in range(600):
+        (unrelated / f"data-{number}.txt").write_text("x")
+    module = tmp_path / "pkg" / "sub" / "mod.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("VALUE = 1\n")
+    scanned = []
+    original = os.scandir
+
+    def scandir(path):
+        scanned.append(Path(path))
+        return original(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    assert expand(tmp_path, ["pkg/sub/**/*.py"], "inputs") == ["pkg/sub/mod.py"]
+    assert tmp_path not in scanned
+    assert unrelated not in scanned
+    assert "pkg/sub/mod.py" in load(tmp_path).units[0].inputs
+
+
+def test_glob_directory_self_match_and_missing_literal_prefix(tmp_path):
+    directory = tmp_path / "pkg" / "sub"
+    directory.mkdir(parents=True)
+    (directory / "mod.py").write_text("VALUE = 1\n")
+    assert expand(tmp_path, ["pkg/sub/**"], "inputs") == ["pkg/sub", "pkg/sub/mod.py"]
+    assert expand(tmp_path, ["absent_dir/*.py"], "inputs") == []
+    with pytest.raises(DeclarationError, match="metadata, cache and host environments"):
+        expand(tmp_path, [".git/*.py"], "inputs")
+
+
+def test_shared_pattern_is_expanded_once_across_distinct_declarations(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest_telescope]\nmax_visits = 65\ntest_roots = ["test_subject.py"]\n'
+    )
+    (tmp_path / "test_subject.py").write_text(
+        "import pytest\n"
+        '@pytest.mark.telescope(inputs=["shared/*.txt", "a.txt"])\n'
+        "def test_a(): pass\n"
+        '@pytest.mark.telescope(inputs=["shared/*.txt", "b.txt"])\n'
+        "def test_b(): pass\n"
+    )
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    expected = {f"shared/data-{number}.txt" for number in range(40)}
+    for name in expected | {"a.txt", "b.txt"}:
+        (tmp_path / name).write_text("x")
+    manifest = load(tmp_path)
+    assert {frozenset(unit.inputs) for unit in manifest.declarations.values()} == {
+        frozenset(expected | {"a.txt"}),
+        frozenset(expected | {"b.txt"}),
+    }
+
+
+def test_distinct_globs_reuse_anchor_scan_but_charge_each_pattern(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest_telescope]\ntest_roots = ["test_subject.py"]\n'
+        '[tool.pytest_telescope.defaults]\ninputs = ["shared/*.txt", "shared/*.json"]\n'
+    )
+    declaration_source = "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\n"
+    (tmp_path / "test_subject.py").write_text(declaration_source)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    for number in range(20):
+        for suffix in ("txt", "json"):
+            (shared / f"data-{number}.{suffix}").write_text("{}")
+    scanned = []
+    original = os.scandir
+
+    def scandir(path):
+        scanned.append(Path(path))
+        return original(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    inputs = load(tmp_path).units[0].inputs
+    assert len([name for name in inputs if name.startswith("shared/")]) == 40
+    assert scanned.count(shared) == 1
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        config.read_text().replace(
+            "[tool.pytest_telescope]\n", "[tool.pytest_telescope]\nmax_visits = 65\n"
+        )
+    )
+    with pytest.raises(DeclarationError, match="exceeds 65 entries"):
+        load(tmp_path)
+
+
+@pytest.mark.parametrize("test_roots", [["."], ["test_subject.py"]])
+def test_max_visits_can_tighten_directory_discovery(tmp_path, test_roots):
+    declaration(tmp_path, ["test_subject.py"])
+    for number in range(40):
+        (tmp_path / f"data-{number}.txt").write_text("x")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest_telescope]\nmax_visits = 25\n"
+        f"test_roots = {json.dumps(test_roots)}\n"
+        '[tool.pytest_telescope.defaults]\ninputs = ["*.txt"]\n'
+    )
+    with pytest.raises(DeclarationError, match="exceeds 25 entries"):
+        load(tmp_path)
+
+
+def test_max_visits_can_raise_repeated_glob_discovery_limit(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.pytest_telescope]\nmax_visits = 300000\n")
+    for number in range(100):
+        (tmp_path / f"data-{number}.txt").write_text("x")
+    patterns = [f"missing-{number}*" for number in range(2000)]
+    (tmp_path / "test_subject.py").write_text(
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=" + json.dumps(patterns) + ")\n"
+        "def test_subject(): pass\n"
+    )
+    assert load(tmp_path).declarations.popitem()[1].inputs == []
+
+
+@pytest.mark.parametrize("value", ["true", "0", "-1", "100_000_001", '"200000"', "1.5"])
+def test_max_visits_rejects_invalid_values(tmp_path, value):
+    (tmp_path / "pyproject.toml").write_text(f"[tool.pytest_telescope]\nmax_visits = {value}\n")
+    with pytest.raises(DeclarationError, match="max_visits must be an integer from 1 to 100000000"):
+        load(tmp_path)
+
+
+@pytest.mark.parametrize("value", [1, 100_000_000])
+def test_max_visits_accepts_inclusive_bounds(tmp_path, value):
+    declaration(tmp_path, ["test_subject.py"])
+    (tmp_path / "pyproject.toml").write_text(
+        f'[tool.pytest_telescope]\nmax_visits = {value}\ntest_roots = ["test_subject.py"]\n'
+    )
+    assert load(tmp_path).inventory == ["test_subject.py"]
+
+
+@pytest.mark.parametrize("kind", ["file", "symlink", "missing"])
+def test_literal_glob_prefix_requires_real_directories(tmp_path, kind):
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "mod.py").write_text("VALUE = 1\n")
+    if kind == "file":
+        (tmp_path / "prefix").write_text("x")
+    elif kind == "symlink":
+        (tmp_path / "prefix").symlink_to(target, target_is_directory=True)
+    assert expand(tmp_path, ["prefix/*.py"], "inputs") == []
+
+
+@pytest.mark.parametrize("marker", ["pyvenv.cfg", "conda-meta"])
+def test_literal_glob_prefix_refuses_environment_namespaces(tmp_path, marker):
+    environment = tmp_path / "env"
+    environment.mkdir()
+    if marker == "pyvenv.cfg":
+        (environment / marker).write_text("home = /usr/bin\n")
+    else:
+        (environment / marker).mkdir()
+    (environment / "mod.py").write_text("VALUE = 1\n")
+    with pytest.raises(DeclarationError, match="metadata, cache and host environments"):
+        expand(tmp_path, ["env/*.py"], "inputs")
