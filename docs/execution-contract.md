@@ -501,7 +501,16 @@ The default suite keeps pytest configuration in this pyproject's `[tool.pytest.i
 [Independent suite declarations](scoped-execution.md) also support explicit
 pytest.ini, .pytest.ini, tox.ini and setup.cfg files. Discovery honors configured `python_files`
 and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
-truncates matching files. Only effective `env` names are forwarded into each scoped execution and keyed. Global
+truncates matching files. For scoped collection, a synthesized minimal configuration
+at `/project/<suite.config>` carries all pytest ini options and marker registrations.
+For scoped execution, the synthesized file carries all non-marker options and only
+registrations observed on collected items in the containing test file. Its path keeps
+pytest's relative ini path resolution intact. The exact raw configuration enters a
+scope only when declared via `inputs` or `distributions`; unrelated project metadata,
+comments and unused markers otherwise leave case results reusable. Collection keys
+include the full synthesized configuration digest and exact structural membership,
+while case and batch keys include their per-file digest without structural membership.
+Only effective `env` names are forwarded into each scoped execution and keyed. Global
 names apply to all scoped cases; literal module, class, function and parameter names add
 to defaults and bundles for their consumers. `env=[]` scopes a case; defaults alone do
 not. Capture declared names once before sessions, distinguishing absent, present-empty
@@ -528,6 +537,14 @@ unselected. Fresh/cached passed and skipped counts remain distinct. A cached cas
 not described as a newly executed test. Exit statuses remain 0 for success, 1 for test
 failure, 3 for infrastructure failure, 4 for invalid declarations/arguments, and 5
 when no cases are selected.
+
+`run --collect-only` and `controller.run(..., collect_only=True)` run static validation,
+frozen capture, sandboxed collection, ordinary pytest with `--collect-only`, selector
+validation, and enabled fixture guard admission. They run no test bodies and publish
+successful scoped collection cache records. Selected rows have `outcome: "not-run"`,
+`groups` is empty, and the status is `passed` for any nonempty complete inventory or
+`no_tests` for an empty one. Collection failure and infrastructure/refusal statuses
+retain their usual exit codes. See [collection-only accounting](result-schema.md#collection-only-accounting).
 
 Use discovered test-file paths with optional `::node` selectors, `-k EXPRESSION`, or `-m
 EXPRESSION` to select cases. The accepted pytest options are:

@@ -185,10 +185,11 @@ Optional `cwd` sets the sessions' working directory independently and defaults t
 relative to the outer project. For example, `root = "packages/core"` with `cwd = "."`
 preserves an invocation from the workspace directory with a nested pytest root.
 Configuration supports pytest.ini, .pytest.ini, pyproject.toml,
-tox.ini and setup.cfg; unsupported configuration syntax refuses. Suite configuration
-and applicable conftest files remain inputs. Scoped cases must declare conftest files
-and common collection support; their test source and both project and suite configuration
-are automatic. With no suites, existing root-suite behavior remains the default.
+tox.ini and setup.cfg; unsupported configuration syntax refuses. Scoped cases must
+declare applicable conftest files and common collection support. A case's test source
+is automatic. Project and suite configuration files enter a scope as raw files only
+through explicit `inputs` or selected `distributions`. With no suites, the root suite
+remains the default.
 Explicit suites cannot be combined with top-level `test_roots`.
 
 All configured paths, declarations, selectors, include/exclude patterns and summary files
@@ -209,16 +210,29 @@ matching selected paths accounts its cases as unselected. Nonexistent selectors 
 across the complete configured inventory. A suite selector restricts the set of
 invocations explicitly; the summary names those configured invocation boundaries.
 
+When a suite configuration file is not a declared raw input, the controller shows a
+minimal synthesized file at `/project/<suite.config>`. Pyproject files contain only
+`[tool.pytest.ini_options]`; `setup.cfg` contains `[tool:pytest]`, while pytest.ini,
+.pytest.ini and tox.ini contain `[pytest]`. The
+file keeps pytest's `config.inipath` and resolves `pythonpath`, `testpaths` and other
+relative path options from the suite configuration's parent directory. Collection
+receives every pytest ini option and every registered marker. Execution receives the
+same non-marker options and only marker registrations observed on collected items in
+the containing test file. Unused marker registrations and unrelated TOML sections do
+not invalidate that file's execution cache. Declaring the configuration path as an
+input instead shows and keys its exact raw frozen bytes.
+
 The worker hashes a project-relative representation of pytest's root-relative node IDs,
 retaining class/function/parameter suffixes without mutating pytest item node IDs.
 Fixtures observing `request.node.nodeid` retain ordinary suite-local pytest semantics.
 Collection and execution use identical normalization;
 marker origin paths and containing-file inventory digests stay project-relative. The
-suite identity, root, working directory, configuration bytes, arguments, plugins, structural membership,
-collection inputs and sandbox identity all key scoped inventory reuse. Case keys cover
-the same suite contract and their own actual scopes. Additions/removals refresh the
-affected suite's inventory; unrelated suite resource changes do not invalidate scoped
-case results.
+suite identity, root, working directory, synthesized collection configuration digest
+(or declared raw file record), arguments, plugins, structural membership, collection
+inputs and sandbox identity key scoped inventory reuse. Case keys include the
+containing file's synthesized execution configuration digest (or declared raw input)
+and actual scope. Additions/removals refresh the affected suite's inventory while
+unchanged files keep their case and batch results.
 
 ### Invocation-only structural file narrowing
 
@@ -248,12 +262,12 @@ not put the helper's tests back into the inventory or grant its own declarations
 validation and effective file preview without importing tests or starting a sandbox.
 It cannot establish the real parametrized inventory.
 
-Suite identity includes the normalized explicit override (including an empty list),
-conservatively distinct from an omitted override even if effective files happen to match.
-The effective current file list also keys inventory. Expanding a subset or including a
-new file refreshes the affected suite/context; files outside a supplied exact list stay
-outside that invocation's inventory. Case/group keys retain their existing scope and
-context rules. Other suites retain their own unchanged identities.
+The collection inventory key includes the normalized explicit override (including an
+empty list), distinct from an omitted override even when effective files match. The
+effective current file list also keys inventory. Expanding a subset or including a new
+file refreshes collection for the affected suite; unchanged files reuse their existing
+case or batch results. Files outside a supplied exact list stay outside that invocation's
+inventory. Other suites retain their own unchanged identities.
 
 `collection.suites.files` exposes each effective file list before collection starts.
 `inventory_complete` means complete within these effective structural boundaries; it
@@ -261,6 +275,17 @@ never claims coverage of files omitted by the override. Omitted files produce ne
 cases nor unselected rows. Callers remain responsible for any broader coverage
 requirement. Newly added files are discovered automatically only in suites without an
 explicit exact-file override, or when the caller adds them to that override.
+
+### Collection-only preflight
+
+`controller.run(root, collect_only=True)` and `pytest-telescope run --collect-only`
+validate declarations and selectors, capture frozen tools, collect scoped and ordinary
+items, and run fixture guard capture and inspection when enabled. Ordinary pytest runs
+with `--collect-only`; no ordinary or scoped test body runs. A successful scoped
+collection record is published for immediate reuse by a later full run. Ordinary
+results are never cached. The report has one row for every collected case, selected
+rows have `outcome: "not-run"`, and `groups` is empty. See the
+[collection-only accounting](result-schema.md#collection-only-accounting).
 
 Scoped sessions use the third-party packages installed in the invoking environment,
 read-only, with plugin autoload disabled; suite plugins are explicit import names that

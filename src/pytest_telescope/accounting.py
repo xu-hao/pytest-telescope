@@ -26,7 +26,7 @@ FIELDS = frozenset(
         "setup_seconds",
     }
 )
-OUTCOMES = ("executed", "reused", "failed", "infrastructure_error", "not-selected")
+OUTCOMES = ("executed", "reused", "failed", "infrastructure_error", "not-selected", "not-run")
 COUNTS = {*OUTCOMES, "unsupported", "selected"}
 
 
@@ -205,10 +205,20 @@ def validate_observations(value, *, guarded=False):
         if not row["selected"]:
             require(row["group_id"] is None)
         if row["group_id"] is None:
-            require(row["attempts"] == 0 and status is None and row["collected"] == 0)
-            require(
-                row["outcome"] == ("infrastructure_error" if row["selected"] else "not-selected")
-            )
+            if row["outcome"] == "not-run":
+                require(
+                    row["selected"]
+                    and row["attempts"] == 0
+                    and row["collected"] == 1
+                    and status == "not-run"
+                    and not row["complete"]
+                )
+            else:
+                require(row["attempts"] == 0 and status is None and row["collected"] == 0)
+                require(
+                    row["outcome"]
+                    == ("infrastructure_error" if row["selected"] else "not-selected")
+                )
         if row["outcome"] == "reused":
             require(
                 row["route"] == "scoped"

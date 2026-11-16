@@ -158,14 +158,22 @@ def test_exact_lists_are_normalized_keyed_and_confined_to_the_affected_suite(pro
     assert run(project, structural_files={}, **options)["counts"]["reused"] == 6
     complete = {"core": ["tests/core/test_alpha.py", "tests/core/test_beta.py"]}
     explicit = run(project, structural_files=complete, **options)
-    assert explicit["counts"]["executed"] == 4 and explicit["counts"]["reused"] == 2
+    assert explicit["counts"]["reused"] == 6
+    assert (
+        next(row for row in explicit["collection"]["suites"] if row["name"] == "core")["outcome"]
+        == "executed"
+    )
     normalized = run(
         project, structural_files={"core": list(reversed(complete["core"]))}, **options
     )
     assert normalized["counts"]["reused"] == 6
     subset = {"core": ["tests/core/test_alpha.py"]}
     narrowed = run(project, structural_files=subset, **options)
-    assert narrowed["counts"]["executed"] == narrowed["counts"]["reused"] == 2
+    assert narrowed["counts"]["executed"] == 0 and narrowed["counts"]["reused"] == 4
+    assert (
+        next(row for row in narrowed["collection"]["suites"] if row["name"] == "core")["outcome"]
+        == "executed"
+    )
     assert narrowed["counts"]["not-selected"] == 0
     assert suite_files(narrowed) == {
         "core": ["tests/core/test_alpha.py"],
@@ -183,7 +191,11 @@ def test_exact_lists_are_normalized_keyed_and_confined_to_the_affected_suite(pro
         structural_files={"core": ["tests/core/test_alpha.py", "tests/core/test_new.py"]},
         **options,
     )
-    assert expanded["counts"]["executed"] == 4 and expanded["counts"]["reused"] == 2
+    assert expanded["counts"]["executed"] == 2 and expanded["counts"]["reused"] == 4
+    assert (
+        next(row for row in expanded["collection"]["suites"] if row["name"] == "core")["outcome"]
+        == "executed"
+    )
     assert suite_files(expanded)["core"] == ["tests/core/test_alpha.py", "tests/core/test_new.py"]
     assert (
         next(row for row in expanded["collection"]["suites"] if row["name"] == "addon")["outcome"]
@@ -191,6 +203,7 @@ def test_exact_lists_are_normalized_keyed_and_confined_to_the_affected_suite(pro
     )
     automatic = run(project, **options)
     assert automatic["collection"]["collected"] == 8
+    assert automatic["counts"]["reused"] == 8
     assert "tests/core/test_new.py" in suite_files(automatic)["core"]
     assert (project / "pyproject.toml").read_bytes() == original
 

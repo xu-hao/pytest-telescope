@@ -107,9 +107,9 @@ def test_changed_helper_after_parsing_is_reverified_before_each_fresh_worker(
     calls = []
     changed = False
 
-    def changed_materialize(pool, unit, destination, records):
+    def changed_materialize(pool, unit, destination, records, **kwargs):
         nonlocal changed
-        materialize(pool, unit, destination, records)
+        materialize(pool, unit, destination, records, **kwargs)
         calls.append(destination)
         if not changed and len(calls) == (1 if phase == "collection" else 2):
             helper = pool / "helpers/support.py"

@@ -149,8 +149,8 @@ def test_guard_reverifies_frozen_helper_before_inspection_or_cache_reuse(
         built = True
         return candidates
 
-    def changed_materialize(pool, unit, destination, records):
-        materialize(pool, unit, destination, records)
+    def changed_materialize(pool, unit, destination, records, **kwargs):
+        materialize(pool, unit, destination, records, **kwargs)
         if built and not mutations:
             helper = pool / "helper.py"
             assert helper.stat().st_mode & 0o777 == 0o444

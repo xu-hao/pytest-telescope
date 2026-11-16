@@ -15,7 +15,7 @@ from pytest_telescope.plan import make_plan
 
 run(root, *, force=False, no_cache=False, explain=False, cache_dir=None, timeout=60,
     arguments=(), workers=None, suites=None, execution_mode=None, structural_files=None,
-    fixture_guard=None, condition_checks=())
+    fixture_guard=None, condition_checks=(), collect_only=False)
 make_plan(root, *, suites=None, structural_files=None)
 error_result(error, *, fixture_guard=None)
 ```
@@ -37,6 +37,9 @@ error_result(error, *, fixture_guard=None)
 - `force=True` executes scoped cases again even when a reusable success exists.
   `no_cache=True` bypasses result reading and recording. `explain=True` includes reuse and
   execution reasons in the result.
+- `collect_only=True` validates and collects both routes without running test bodies.
+  It also runs enabled fixture guard admission and publishes successful scoped
+  collection cache records. The value must be a literal boolean.
 - `cache_dir` selects the cache directory; `None` uses `.pytest-telescope/cache` under
   `root`.
 - `run` raises `DeclarationError` for invalid declarations and `UnsupportedCapability`
@@ -52,7 +55,8 @@ error_result(error, *, fixture_guard=None)
 ```sh
 python -m pytest_telescope plan
 python -m pytest_telescope run [--workers N] [--execution-mode case|batch] [--suite NAME]...
-    [--force] [--no-cache] [--explain] [--cache-dir PATH] [--timeout SECONDS] [-- PYTEST-ARGS]
+    [--force] [--no-cache] [--explain] [--collect-only] [--cache-dir PATH]
+    [--timeout SECONDS] [-- PYTEST-ARGS]
 pytest --telescope [PYTEST-ARGS]
 pytest --telescope-plan
 ```

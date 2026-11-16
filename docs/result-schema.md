@@ -66,8 +66,8 @@ Each `units` row has `suite`, `file`, opaque `case_id`, `route`, `selected`, `ou
 `attempts`, counts, `worker_seconds` and bounded failure evidence. `name` is the same
 opaque case identity. `route` is `ordinary` or `scoped`. An ordinary case is never
 `reused`; its `worker_seconds` is null because it shares its session.
-Outcomes are `executed`, `reused`, `failed`, `infrastructure_error`, or `not-selected`;
-`counts` also reserves `unsupported`. `counts.selected` includes every selected known
+Outcomes are `executed`, `reused`, `failed`, `infrastructure_error`, `not-run`, or
+`not-selected`; `counts` also reserves `unsupported`. `counts.selected` includes every selected known
 case, including cases left unrun after a terminal failure. A scoped case left unexecuted because
 a collection stopped the run keeps outcome `infrastructure_error`, reason `execution not
 started` and a null `group_id`, but the run status follows the collection outcome: a
@@ -91,6 +91,28 @@ project structure and should not themselves contain private values.
 membership, not test success. Consumers must also inspect
 `inventory_complete`, selection and outcomes. A reused pass is previous evidence accepted
 under the current identity, not a newly executed case.
+
+## Collection-only accounting
+
+With `collect_only=True` (or `run --collect-only`), successful collection reports every
+collected item in `units` and `collection.collected`. Selected items have
+`outcome: "not-run"`, `selected: true`, `attempts: 0`, `collected: 1`, zero passed,
+failed and skipped counts, `result_status: "not-run"`, no group ID and no reports.
+Unselected items retain `outcome: "not-selected"` and `collected: 0`. Thus
+`counts.not-run` is the number of selected items, `counts.selected` is the same number,
+`counts.not-selected` counts the others, and `cases.collected` counts selected items.
+`groups` is empty, `grouping_complete` is false, and all fresh/cached case outcome
+counts are zero. The ordinary route never runs bodies or writes execution cache
+records. Successful scoped collection records can be published and reused by the
+next full run, shown as `collection.suites[].outcome: "reused"`.
+
+Collection-only status is `passed` when a complete inventory contains at least one
+case, including when selectors choose none; it is `no_tests` when no case is collected.
+A collection failure is `failed`, an infrastructure outage is
+`infrastructure_error`, and a declaration refusal remains `unsupported`. The CLI
+returns 0, 5, 1, 3, or 4 respectively. Fixture guard capture, inspection,
+conservation and condition checks run before a successful collection-only report;
+test bodies remain unrun.
 
 ## Atomic groups and member outcomes
 
@@ -311,6 +333,12 @@ requested public member remains not-run, incomplete and failed under the case-pr
 collection verdict. Collection protocol 11 carries inventory items and collection skips,
 never executed reports or passes. The existing nonce and exact request identity bind the
 worker response to its invocation.
+
+Each validated internal inventory item also carries sorted unique pytest marker names
+from `item.iter_markers()`. The names select per-file marker registrations and enter
+the containing-file inventory digest; parameter values and raw node labels do not.
+Cached collection envelopes use a distinct cache schema when this field is present,
+and malformed or older inventory records cannot be reused.
 
 Each internal inventory item also carries sorted opaque `owners` digests and bounded
 `parameters` choices, each exactly a dimension digest and an alternative index. The
