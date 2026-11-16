@@ -163,8 +163,8 @@ def config_options(root, name):
             if not entry.strip():
                 continue
             marker = entry.split(":", 1)[0].strip()
-            if not marker or marker in registrations:
-                raise DeclarationError("pytest markers require distinct names")
+            if not marker:
+                raise DeclarationError("pytest markers require names")
             registrations[marker] = entry
         addopts = options.get("addopts", [])
         if isinstance(addopts, str):
