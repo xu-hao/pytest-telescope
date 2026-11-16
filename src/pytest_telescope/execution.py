@@ -105,7 +105,7 @@ class Suite:
             lines = ["[tool.pytest.ini_options]"]
             for key, value in sorted(options.items()):
                 lines.append(
-                    f"{key} = {json.dumps(value) if type(value) in (str, list) else str(value).lower() if type(value) is bool else value}"
+                    f"{json.dumps(key)} = {json.dumps(value) if type(value) in (str, list) else str(value).lower() if type(value) is bool else value}"
                 )
         else:
             lines = ["[tool:pytest]" if self.config.endswith("setup.cfg") else "[pytest]"]
@@ -114,7 +114,9 @@ class Suite:
                     lines.append(f"{key} =")
                     lines.extend(f"    {entry}" for entry in value)
                 else:
-                    lines.append(f"{key} = {value}")
+                    first, *continuation = value.splitlines() or [""]
+                    lines.append(f"{key} = {first}")
+                    lines.extend(f"    {entry}" for entry in continuation)
         return ("\n".join(lines) + "\n").encode()
 
     def config_digest(self, marker_names=None):
@@ -158,6 +160,8 @@ def config_options(root, name):
             raise DeclarationError("pytest markers must be strings")
         registrations = {}
         for entry in markers:
+            if not entry.strip():
+                continue
             marker = entry.split(":", 1)[0].strip()
             if not marker or marker in registrations:
                 raise DeclarationError("pytest markers require distinct names")

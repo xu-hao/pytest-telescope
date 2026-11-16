@@ -291,6 +291,26 @@ def test_file_marker_union_keeps_batch_members_together(tmp_path):
     assert warm["counts"]["reused"] == 2
 
 
+def test_multiline_ini_options_survive_synthesized_view(tmp_path):
+    project(tmp_path, "pytest.ini")
+    put(
+        tmp_path,
+        "pytest.ini",
+        "[pytest]\nfilterwarnings =\n    error\n    ignore:expected warning:DeprecationWarning\n",
+    )
+    put(
+        tmp_path,
+        "tests/test_sample.py",
+        "import pytest\nimport warnings\n"
+        "pytestmark=pytest.mark.telescope(inputs=[])\n"
+        "def test_sample():\n"
+        "    warnings.warn('expected warning', DeprecationWarning)\n",
+    )
+    report = controller.run(tmp_path)
+    assert report["status"] == "passed", report
+    assert report["counts"]["executed"] == 1
+
+
 def test_collect_only_primes_scoped_inventory_without_running_bodies(tmp_path):
     project(tmp_path)
     put(
