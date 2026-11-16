@@ -98,8 +98,9 @@ def skips(rows, *, suites=None):
             require(row["suite"] in suites and row["route"] in ("ordinary", "scoped"))
 
 
-def counts(rows):
-    result = {name: sum(row["outcome"] == name for row in rows) for name in OUTCOMES}
+def counts(rows, *, collect_only=False):
+    outcomes = OUTCOMES if collect_only else OUTCOMES[:-1]
+    result = {name: sum(row["outcome"] == name for row in rows) for name in outcomes}
     result["unsupported"] = 0
     result["selected"] = sum(row["selected"] for row in rows)
     return result
@@ -226,11 +227,14 @@ def validate_observations(value, *, guarded=False):
                 and row["complete"]
                 and status in ("passed", "skipped")
             )
-    count_record(value["counts"], counts(units))
+    collect_only = "not-run" in value["counts"]
+    require(collect_only or all(row["outcome"] != "not-run" for row in units))
+    count_record(value["counts"], counts(units, collect_only=collect_only))
     record(value["route_counts"], {"ordinary", "scoped"})
     for route in ("ordinary", "scoped"):
         count_record(
-            value["route_counts"][route], counts([row for row in units if row["route"] == route])
+            value["route_counts"][route],
+            counts([row for row in units if row["route"] == route], collect_only=collect_only),
         )
     count_record(
         value["cases"],

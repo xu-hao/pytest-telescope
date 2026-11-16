@@ -44,7 +44,6 @@ OUTCOMES = (
     "unsupported",
     "infrastructure_error",
     "not-selected",
-    "not-run",
 )
 ROUTES = ("ordinary", "scoped")
 
@@ -377,8 +376,10 @@ def inventory_matches_manifest(result, manifest):
     return True
 
 
-def _counts(rows):
+def _counts(rows, *, collect_only=False):
     counts = {name: sum(row["outcome"] == name for row in rows) for name in OUTCOMES}
+    if collect_only:
+        counts["not-run"] = sum(row["outcome"] == "not-run" for row in rows)
     counts["selected"] = sum(row["selected"] for row in rows)
     return counts
 
@@ -662,7 +663,7 @@ def run(
             for row in results:
                 if row["route"] == "scoped":
                     row["worker_seconds"] = None
-        counts = _counts(results)
+        counts = _counts(results, collect_only=collect_only)
         cases = {
             name: sum(row[name] for row in results)
             for name in ("collected", "passed", "failed", "skipped")
@@ -731,7 +732,9 @@ def run(
             grouping_complete=progress["grouping_complete"],
             counts=counts,
             route_counts={
-                route: _counts([row for row in results if row["route"] == route])
+                route: _counts(
+                    [row for row in results if row["route"] == route], collect_only=collect_only
+                )
                 for route in ROUTES
             },
             cases=cases,

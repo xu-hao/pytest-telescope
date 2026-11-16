@@ -1309,7 +1309,10 @@ def main(request=None, *, ordinary=False):
             else:
                 file_inventory = sorted(
                     (
-                        {key: row[key] for key in ("case_id", "origins", "owners", "parameters")}
+                        {
+                            key: row[key]
+                            for key in ("case_id", "origins", "markers", "owners", "parameters")
+                        }
                         for _, row in self.captured.values()
                     ),
                     key=lambda row: row["case_id"],
