@@ -104,9 +104,14 @@ class Suite:
         if self.config.endswith("pyproject.toml"):
             lines = ["[tool.pytest.ini_options]"]
             for key, value in sorted(options.items()):
-                lines.append(
-                    f"{json.dumps(key)} = {json.dumps(value) if type(value) in (str, list) else str(value).lower() if type(value) is bool else value}"
+                rendered = (
+                    json.dumps(value, ensure_ascii=False)
+                    if type(value) in (str, list)
+                    else str(value).lower()
+                    if type(value) is bool
+                    else str(value)
                 )
+                lines.append(f"{json.dumps(key, ensure_ascii=False)} = {rendered}")
         else:
             lines = ["[tool:pytest]" if self.config.endswith("setup.cfg") else "[pytest]"]
             for key, value in sorted(options.items()):
