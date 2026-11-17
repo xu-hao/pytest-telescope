@@ -232,6 +232,7 @@ class PendingRecords:
 
     def __init__(self, execution_store, inventory_store):
         self.stores = {"execution": execution_store, "collection": inventory_store}
+        self.publish_on_exit = False
         self.paths = {}
         self.queues = {"execution": [], "collection": []}
         self.sizes = {"execution": 0, "collection": 0}
@@ -275,12 +276,16 @@ class PendingRecords:
 
     def __exit__(self, *exc):
         try:
-            for path in self.paths:
-                path.unlink(missing_ok=True)
-        except OSError as error:
-            raise sandbox.CleanupError(
-                "pending result cleanup failed; no new records were eligible"
-            ) from error
+            if exc[0] is None and self.publish_on_exit:
+                self.publish()
+        finally:
+            try:
+                for path in self.paths:
+                    path.unlink(missing_ok=True)
+            except OSError as error:
+                raise sandbox.CleanupError(
+                    "pending result cleanup failed; no new records were eligible"
+                ) from error
 
 
 def runner_identity():
@@ -1318,7 +1323,7 @@ def run(
                                 result_status="not-run",
                             )
                         tools.verify(tuple(manifest.tools))
-                        pending.publish()
+                        pending.publish_on_exit = True
                         progress["published"] = True
                         return summary()
                     jobs = []

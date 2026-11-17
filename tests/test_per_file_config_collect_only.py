@@ -1,12 +1,13 @@
 """Per-file pytest configuration and body-free collection preflight."""
 
+import contextlib
 import json
 import subprocess
 import sys
 
 import pytest
 
-from pytest_telescope import controller
+from pytest_telescope import controller, sandbox
 from pytest_telescope.model import DeclarationError, UnsupportedCapability
 from pytest_telescope.plan import make_plan
 
@@ -332,6 +333,28 @@ def test_collect_only_primes_scoped_inventory_without_running_bodies(tmp_path):
     second = controller.run(tmp_path)
     assert second["collection"]["suites"][0]["outcome"] == "reused"
     assert (tmp_path / "ordinary_ran").exists()
+
+
+def test_collect_only_does_not_publish_when_outer_cleanup_fails(tmp_path, monkeypatch):
+    project(tmp_path)
+    invocation = sandbox.invocation
+    allocations = 0
+
+    @contextlib.contextmanager
+    def failed_outer_cleanup(root):
+        nonlocal allocations
+        allocations += 1
+        with invocation(root) as directory:
+            yield directory
+        if allocations == 1:
+            raise sandbox.CleanupError("owned outer cleanup failed")
+
+    monkeypatch.setattr(sandbox, "invocation", failed_outer_cleanup)
+    report = controller.run(tmp_path, collect_only=True)
+
+    assert report["status"] == "infrastructure_error", report
+    assert not list((tmp_path / ".pytest-telescope/cache/inventory").glob("*.json"))
+    assert not list((tmp_path / ".pytest-telescope/cache/inventory").glob("*.pending"))
 
 
 def test_cli_collect_only_has_body_free_accounting(tmp_path):
