@@ -28,7 +28,11 @@ def make_plan(root, *, suites=None, structural_files=None):
         "suites": [
             {
                 **suite.identity(),
-                "structural_files": suite.structural_files,
+                **(
+                    {"structural_files": suite.structural_files}
+                    if suite.structural_files is not None
+                    else {}
+                ),
                 "inventory": suite.inventory,
                 "ordinary_files": manifest.ordinary_files[suite.name],
                 "scoped_files": manifest.scoped_files[suite.name],

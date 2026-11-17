@@ -125,7 +125,10 @@ def test_old_scoped_protocols_and_old_cache_envelopes_are_ineligible(actual_reco
                 else {"case_id": request["case_id"]}
             )
         )
-        for schema, accepted in [(8, True), *((old, False) for old in range(8))]:
+        for schema, accepted in [
+            (controller.SCHEMA, True),
+            *((old, False) for old in range(controller.SCHEMA)),
+        ]:
             path.write_text(
                 json.dumps(
                     {

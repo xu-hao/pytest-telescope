@@ -311,7 +311,10 @@ def test_guard_success_record_validates_strict_flag_and_cache_protocol(tmp_path,
         registry_id=request["registry_id"],
         graph_id=request["graph_id"],
     )
-    for schema, allowed in [(8, True), *((old, False) for old in range(8))]:
+    for schema, allowed in [
+        (controller.SCHEMA, True),
+        *((old, False) for old in range(controller.SCHEMA)),
+    ]:
         path.write_text(
             json.dumps(
                 {"schema": schema, "key": key, "result": value, "checksum": fingerprint(value)}
