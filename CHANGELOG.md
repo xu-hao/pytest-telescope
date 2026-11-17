@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.4
+
+Per-file synthesized suite configuration, inventory-scoped `structural_files`, and
+body-free collection preflight.
+
+- Suites without explicit raw config declarations receive a deduplicated minimal pytest
+  configuration at `/project/<suite.config>`, rather than auto-injecting root
+  `pyproject.toml` into every scoped unit. Collection registers all suite markers;
+  per-file execution and fixture-guard runs include only the markers used by that file,
+  so unrelated edits or unused marker declarations keep cache hits. Explicitly declared
+  config inputs continue to mount and hash raw file bytes.
+- `structural_files` overrides remain part of the collection `inventory_key` and are no
+  longer hashed into per-case or batch execution `Suite.identity()` records, preserving
+  cache hits on unchanged files when other structural selections change.
+- `controller.run(..., collect_only=True)` and `pytest-telescope run --collect-only`
+  validate configuration, capture frozen tools, run sandboxed and ordinary collection,
+  select cases, evaluate `fixture_guard="available-v1"` without running test bodies, and
+  publish validated `inventory_key` records on clean exit for subsequent run reuse.
+- Results cached by 0.1.3 are not reused, because the package version is part of every
+  scoped cache key. The first run after the upgrade executes every scoped test again.
+
 ## 0.1.3
 
 Glob discovery starts at a pattern's literal directory prefix, so declarations such as
