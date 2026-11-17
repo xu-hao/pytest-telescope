@@ -21,7 +21,7 @@ BOOT = (
 )
 
 
-def session(manifest, suite, files, options, selectors, selection_disabled):
+def session(manifest, suite, files, options, selectors, selection_disabled, *, collect_only=False):
     """Run the suite's ordinary cases with the invoking interpreter and environment.
 
     Every file is collected; scoped cases of mixed files are removed before fixture
@@ -39,6 +39,7 @@ def session(manifest, suite, files, options, selectors, selection_disabled):
         registry=[row for row in manifest.registry if row["file"] in files],
         selectors=selectors,
         selection_disabled=selection_disabled,
+        collect_only=collect_only,
         allow_unknown_selectors=True,
         metadata=False,
         args=[
@@ -84,7 +85,9 @@ def session(manifest, suite, files, options, selectors, selection_disabled):
             raise ValueError("ordinary result frame count")
         result = json.loads(frames[0])
         if (
-            not validate_ordinary(result, nonce, context_id=request["context_id"])
+            not validate_ordinary(
+                result, nonce, context_id=request["context_id"], collect_only=collect_only
+            )
             or result["exit_code"] != code
         ):
             raise ValueError("ordinary result protocol")

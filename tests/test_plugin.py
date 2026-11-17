@@ -169,7 +169,6 @@ def test_plan_is_sorted_complete_and_does_not_import(project):
             "conftest.py",
             "data.json",
             "helper.py",
-            "pyproject.toml",
             "test_another.py",
             "test_subject.py",
         ],

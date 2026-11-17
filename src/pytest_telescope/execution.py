@@ -1,6 +1,8 @@
 """Execution settings and independent pytest suite configuration."""
 
 import configparser
+import hashlib
+import json
 import shlex
 import tomllib
 from dataclasses import dataclass
@@ -67,6 +69,8 @@ class Suite:
     raw: bytes
     inventory: list
     structural_files: list | None = None
+    ini_options: dict | None = None
+    markers: dict | None = None
 
     def identity(self):
         result = {
@@ -84,9 +88,44 @@ class Suite:
                 "plugins",
             )
         }
-        if self.structural_files is not None:
-            result["structural_files"] = self.structural_files
         return result
+
+    def config_bytes(self, marker_names=None):
+        """Render only pytest options, with registrations needed by this view."""
+        options = dict(self.ini_options)
+        entries = (
+            self.markers.values()
+            if marker_names is None
+            else (entry for name, entry in self.markers.items() if name in marker_names)
+        )
+        entries = list(entries)
+        if entries:
+            options["markers"] = entries
+        if self.config.endswith("pyproject.toml"):
+            lines = ["[tool.pytest.ini_options]"]
+            for key, value in sorted(options.items()):
+                rendered = (
+                    json.dumps(value, ensure_ascii=False)
+                    if type(value) in (str, list)
+                    else str(value).lower()
+                    if type(value) is bool
+                    else str(value)
+                )
+                lines.append(f"{json.dumps(key, ensure_ascii=False)} = {rendered}")
+        else:
+            lines = ["[tool:pytest]" if self.config.endswith("setup.cfg") else "[pytest]"]
+            for key, value in sorted(options.items()):
+                if type(value) is list:
+                    lines.append(f"{key} =")
+                    lines.extend(f"    {entry}" for entry in value)
+                else:
+                    first, *continuation = value.splitlines() or [""]
+                    lines.append(f"{key} = {first}")
+                    lines.extend(f"    {entry}" for entry in continuation)
+        return ("\n".join(lines) + "\n").encode()
+
+    def config_digest(self, marker_names=None):
+        return hashlib.sha256(self.config_bytes(marker_names)).hexdigest()
 
 
 def config_options(root, name):
@@ -111,13 +150,40 @@ def config_options(root, name):
             raise UnsupportedCapability(
                 "pytest:configuration", "unsupported pytest configuration format"
             )
+        if name.endswith("pyproject.toml"):
+            for key, value in options.items():
+                if type(key) is not str or not (
+                    type(value) in (str, bool, int, float)
+                    or type(value) is list
+                    and all(type(entry) is str for entry in value)
+                ):
+                    raise DeclarationError("pytest ini option has an unsupported TOML value")
+        markers = options.pop("markers", [])
+        if type(markers) is str:
+            markers = markers.splitlines()
+        if type(markers) is not list or any(type(entry) is not str for entry in markers):
+            raise DeclarationError("pytest markers must be strings")
+        registrations = {}
+        for entry in markers:
+            if not entry.strip():
+                continue
+            marker = entry.split(":", 1)[0].strip()
+            if not marker:
+                raise DeclarationError("pytest markers require names")
+            registrations[marker] = entry
         addopts = options.get("addopts", [])
         if isinstance(addopts, str):
             addopts = shlex.split(addopts)
         patterns = options.get("python_files", ["test_*.py", "*_test.py"])
         if isinstance(patterns, str):
             patterns = patterns.split()
-        return raw, sequence(addopts, "pytest addopts"), sequence(patterns, "python_files")
+        return (
+            raw,
+            sequence(addopts, "pytest addopts"),
+            sequence(patterns, "python_files"),
+            options,
+            registrations,
+        )
     except (UnicodeError, ValueError, configparser.Error) as exc:
         if isinstance(exc, DeclarationError):
             raise
@@ -208,7 +274,7 @@ def suites(root, spec, selected=None):
                     "the Bubblewrap sandbox controls only the filesystem view and does not "
                     "provide this capability",
                 )
-        raw, args, patterns = config_options(root, configuration)
+        raw, args, patterns, ini_options, registrations = config_options(root, configuration)
         roots = [
             relative(value)
             for value in sequence(entry.get("test_roots", [directory]), "suite test_roots")
@@ -244,6 +310,8 @@ def suites(root, spec, selected=None):
                 patterns,
                 raw,
                 [],
+                ini_options=ini_options,
+                markers=registrations,
             )
         )
     return result

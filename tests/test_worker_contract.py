@@ -182,6 +182,7 @@ def collection_record():
                 "case_id": "c" * 64,
                 "file": "test_subject.py",
                 "origins": [],
+                "markers": [],
                 "owners": [hashlib.sha256(b"test_subject.py").hexdigest()],
                 "parameters": [],
                 "aliases": sorted(["c" * 64, hashlib.sha256(b"test_subject.py").hexdigest()]),
@@ -453,7 +454,10 @@ def run_worker(root, box, source, *, arguments=(), timeout=10, registry=None):
             json.dumps(
                 sorted(
                     (
-                        {key: row[key] for key in ("case_id", "origins", "owners", "parameters")}
+                        {
+                            key: row[key]
+                            for key in ("case_id", "origins", "markers", "owners", "parameters")
+                        }
                         for row in inventory["items"]
                     ),
                     key=lambda row: row["case_id"],

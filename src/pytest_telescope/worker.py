@@ -1246,6 +1246,7 @@ def main(request=None, *, ordinary=False):
                 "case_id": case_identity(nodeid),
                 "file": filename,
                 "origins": sorted(declaration_ids),
+                "markers": sorted({mark.name for mark in item.iter_markers()}),
                 "owners": owners,
                 "parameters": [
                     {"dimension": dimension, "index": index}
@@ -1308,7 +1309,10 @@ def main(request=None, *, ordinary=False):
             else:
                 file_inventory = sorted(
                     (
-                        {key: row[key] for key in ("case_id", "origins", "owners", "parameters")}
+                        {
+                            key: row[key]
+                            for key in ("case_id", "origins", "markers", "owners", "parameters")
+                        }
                         for _, row in self.captured.values()
                     ),
                     key=lambda row: row["case_id"],
@@ -1395,7 +1399,8 @@ def main(request=None, *, ordinary=False):
                         invalid("fixture plan changed before dispatch")
                 except (AttributeError, KeyError, OSError, TypeError, ValueError, UnicodeError):
                     invalid("fixture plan cannot be revalidated")
-            self.dispatch_started = True
+            if not request.get("collect_only", False):
+                self.dispatch_started = True
             yield
             self.unchanged(session)
 
@@ -1500,7 +1505,9 @@ def main(request=None, *, ordinary=False):
 
     observer = Observer()
     arguments = list(request["args"])
-    if mode in ("collection", "guard-capture", "guard-inspection"):
+    if mode in ("collection", "guard-capture", "guard-inspection") or (
+        ordinary and request.get("collect_only", False)
+    ):
         arguments.append("--collect-only")
     saved_out, saved_err = sys.stdout, sys.stderr
     with open(os.devnull, "w") as sink:
@@ -1651,8 +1658,12 @@ def main(request=None, *, ordinary=False):
             "complete": observer.checkpoint
             and not declaration_error
             and not leaked
-            and set(selected_ids) == finished
-            and len(cases) == len(selected_ids),
+            and (
+                request.get("collect_only", False)
+                and ordinary
+                or set(selected_ids) == finished
+                and len(cases) == len(selected_ids)
+            ),
         }
     if mode in ("batch", "guard-batch"):
         requested = request["case_ids"]

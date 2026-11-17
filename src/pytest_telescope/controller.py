@@ -35,9 +35,16 @@ from .model import (
 )
 
 # Cache record format; records from earlier backends are never eligible.
-SCHEMA = 8
+SCHEMA = 9
 RESULT_SCHEMA = 4
-OUTCOMES = ("executed", "reused", "failed", "unsupported", "infrastructure_error", "not-selected")
+OUTCOMES = (
+    "executed",
+    "reused",
+    "failed",
+    "unsupported",
+    "infrastructure_error",
+    "not-selected",
+)
 ROUTES = ("ordinary", "scoped")
 
 
@@ -225,6 +232,7 @@ class PendingRecords:
 
     def __init__(self, execution_store, inventory_store):
         self.stores = {"execution": execution_store, "collection": inventory_store}
+        self.publish_on_exit = False
         self.paths = {}
         self.queues = {"execution": [], "collection": []}
         self.sizes = {"execution": 0, "collection": 0}
@@ -268,12 +276,16 @@ class PendingRecords:
 
     def __exit__(self, *exc):
         try:
-            for path in self.paths:
-                path.unlink(missing_ok=True)
-        except OSError as error:
-            raise sandbox.CleanupError(
-                "pending result cleanup failed; no new records were eligible"
-            ) from error
+            if exc[0] is None and self.publish_on_exit:
+                self.publish()
+        finally:
+            try:
+                for path in self.paths:
+                    path.unlink(missing_ok=True)
+            except OSError as error:
+                raise sandbox.CleanupError(
+                    "pending result cleanup failed; no new records were eligible"
+                ) from error
 
 
 def runner_identity():
@@ -369,8 +381,10 @@ def inventory_matches_manifest(result, manifest):
     return True
 
 
-def _counts(rows):
+def _counts(rows, *, collect_only=False):
     counts = {name: sum(row["outcome"] == name for row in rows) for name in OUTCOMES}
+    if collect_only:
+        counts["not-run"] = sum(row["outcome"] == "not-run" for row in rows)
     counts["selected"] = sum(row["selected"] for row in rows)
     return counts
 
@@ -425,7 +439,10 @@ def _file_digest(inventory, filename):
     return fingerprint(
         sorted(
             (
-                {key: entry[key] for key in ("case_id", "origins", "owners", "parameters")}
+                {
+                    key: entry[key]
+                    for key in ("case_id", "origins", "markers", "owners", "parameters")
+                }
                 for entry in inventory
                 if entry["file"] == filename
             ),
@@ -523,6 +540,7 @@ def run(
     suites=None,
     execution_mode=None,
     structural_files=None,
+    collect_only=False,
     fixture_guard=None,
     condition_checks=(),
 ):
@@ -539,6 +557,8 @@ def run(
     from .tool_capture import Capture
     from .tool_context import validate_environment
 
+    if type(collect_only) is not bool:
+        raise DeclarationError("collect_only must be a literal boolean")
     condition_checks = _guard_conditions(fixture_guard, condition_checks)
     started = time.monotonic()
     if not math.isfinite(timeout) or not 0.1 <= timeout <= 3600:
@@ -648,7 +668,7 @@ def run(
             for row in results:
                 if row["route"] == "scoped":
                     row["worker_seconds"] = None
-        counts = _counts(results)
+        counts = _counts(results, collect_only=collect_only)
         cases = {
             name: sum(row[name] for row in results)
             for name in ("collected", "passed", "failed", "skipped")
@@ -669,7 +689,7 @@ def run(
             status = "infrastructure_error"
         elif counts["failed"] or collection["outcome"] == "failed":
             status = "failed"
-        elif not cases["collected"]:
+        elif not (len(results) if collect_only else cases["collected"]):
             status = "no_tests"
         if (
             collection["outcome"] != "infrastructure_error"
@@ -717,7 +737,9 @@ def run(
             grouping_complete=progress["grouping_complete"],
             counts=counts,
             route_counts={
-                route: _counts([row for row in results if row["route"] == route])
+                route: _counts(
+                    [row for row in results if row["route"] == route], collect_only=collect_only
+                )
                 for route in ROUTES
             },
             cases=cases,
@@ -778,7 +800,15 @@ def run(
             session_started()
             attempt_started = time.monotonic()
             try:
-                result = ordinary.session(manifest, suite, files, options, selectors, disabled)
+                result = ordinary.session(
+                    manifest,
+                    suite,
+                    files,
+                    options,
+                    selectors,
+                    disabled,
+                    collect_only=collect_only,
+                )
             except InfrastructureError as exc:
                 if isinstance(exc, sandbox.CleanupError):
                     raise
@@ -800,8 +830,12 @@ def run(
             seen_files.update(hashlib.sha256(name.encode()).hexdigest() for name in files)
             if len(results) + len(scoped) + len(result["items"]) > 100_000:
                 raise DeclarationError("combined suite inventory exceeds 100000 cases")
-            group = _ordinary_group(
-                suite, files, result, effective, time.monotonic() - attempt_started
+            group = (
+                None
+                if collect_only
+                else _ordinary_group(
+                    suite, files, result, effective, time.monotonic() - attempt_started
+                )
             )
             outcomes = {case["case_id"]: case for case in result["case_results"]}
             # Keep selected order unique within the suite across both collections.
@@ -826,6 +860,11 @@ def run(
                             "not selected by pytest arguments" if explain else "",
                         )
                     )
+                    continue
+                if collect_only:
+                    unit = _row(item, suite, "ordinary", "not-run")
+                    unit.update(collected=1, result_status="not-run")
+                    results.append(unit)
                     continue
                 if item["case_id"] not in outcomes:
                     if result["declaration_error"] and not result["dispatch_started"]:
@@ -859,7 +898,8 @@ def run(
                     reports=outcomes[item["case_id"]]["reports"],
                 )
                 results.append(unit)
-            groups.append(group)
+            if group is not None:
+                groups.append(group)
             row.update(
                 outcome="failed" if result["declaration_error"] else "executed",
                 collected=len(result["items"]),
@@ -887,7 +927,7 @@ def run(
             if ordinary_sessions(scoped):
                 if requested_selectors - seen_aliases - seen_files:
                     raise DeclarationError("selector does not identify a collected case")
-                progress["grouping_complete"] = True
+                progress["grouping_complete"] = not collect_only
             return summary()
         except DeclarationError as error:
             retain_refusal(error)
@@ -958,6 +998,12 @@ def run(
                             {
                                 **common,
                                 "suite": suite.identity(),
+                                "structural_files": suite.structural_files,
+                                **(
+                                    {"config_digest": suite.config_digest()}
+                                    if suite.config not in collection_unit.inputs
+                                    else {}
+                                ),
                                 "all_args": effective,
                                 "kind": "collection",
                                 "inputs": [record_map[name] for name in collection_unit.inputs],
@@ -990,7 +1036,9 @@ def run(
                             try:
                                 with sandbox.invocation(manifest.root) as directory:
                                     frozen = directory / "project"
-                                    materialize(pool, collection_unit, frozen, record_map)
+                                    materialize(
+                                        pool, collection_unit, frozen, record_map, suite=suite
+                                    )
                                     suite_directories(frozen, suite)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
@@ -1080,7 +1128,7 @@ def run(
                     if requested_selectors - seen_aliases - seen_files:
                         raise DeclarationError("selector does not identify a collected case")
 
-                    jobs, scopes, digests = [], {}, {}
+                    jobs, scopes, digests, file_markers = [], {}, {}, {}
                     progress["scoped_rows"] = True
                     for suite, item, inventory in scoped:
                         index = len(results)
@@ -1096,6 +1144,14 @@ def run(
                             )
                             continue
                         signature = (suite.name, item["file"], tuple(item["origins"]))
+                        file_key = (suite.name, item["file"])
+                        if file_key not in file_markers:
+                            file_markers[file_key] = {
+                                name
+                                for entry in inventory
+                                if entry["file"] == item["file"]
+                                for name in entry["markers"]
+                            }
                         if signature not in scopes:
                             unit = case_unit(manifest, item, suite)
                             tool_view = tools.view(unit.tools)
@@ -1109,6 +1165,15 @@ def run(
                                 fingerprint(
                                     {
                                         "inputs": frozen_scope_hashes[inputs],
+                                        **(
+                                            {
+                                                "config_digest": suite.config_digest(
+                                                    file_markers[file_key]
+                                                )
+                                            }
+                                            if suite.config not in unit.inputs
+                                            else {}
+                                        ),
                                         "absent": unit.absent,
                                         "metadata": metadata_identity(unit.distributions),
                                         "cache": unit.cache,
@@ -1145,6 +1210,7 @@ def run(
                                 registry=frozen_registry.for_view(unit),
                                 digest=digest,
                                 scope=scope_key,
+                                marker_names=file_markers[file_key],
                                 enabled=unit.cache and not no_cache,
                                 identity={
                                     **common,
@@ -1172,7 +1238,14 @@ def run(
                                 try:
                                     with sandbox.invocation(manifest.root) as directory:
                                         frozen = directory / "project"
-                                        materialize(pool, unit, frozen, record_map)
+                                        materialize(
+                                            pool,
+                                            unit,
+                                            frozen,
+                                            record_map,
+                                            suite=suite,
+                                            marker_names=candidate["marker_names"],
+                                        )
                                         suite_directories(frozen, suite)
                                         metadata = directory / "metadata"
                                         materialize_metadata(
@@ -1241,6 +1314,18 @@ def run(
                             condition_checks, candidates
                         )
                         guard_state["admitted"] = True
+                    if collect_only:
+                        for job in jobs:
+                            results[job["index"]].update(
+                                outcome="not-run",
+                                reason="",
+                                collected=1,
+                                result_status="not-run",
+                            )
+                        tools.verify(tuple(manifest.tools))
+                        pending.publish_on_exit = True
+                        progress["published"] = True
+                        return summary()
                     jobs = []
                     for candidate in candidates:
                         candidate["group_index"] = len(groups)
@@ -1308,7 +1393,14 @@ def run(
                                     )
                                 with sandbox.invocation(manifest.root) as directory:
                                     frozen = directory / "project"
-                                    materialize(pool, unit, frozen, record_map)
+                                    materialize(
+                                        pool,
+                                        unit,
+                                        frozen,
+                                        record_map,
+                                        suite=suite,
+                                        marker_names=job["marker_names"],
+                                    )
                                     suite_directories(frozen, suite)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
@@ -1565,6 +1657,7 @@ def main(argv=None):
     execution.add_argument("--force", action="store_true")
     execution.add_argument("--no-cache", action="store_true")
     execution.add_argument("--explain", action="store_true")
+    execution.add_argument("--collect-only", action="store_true")
     execution.add_argument("--cache-dir", type=Path)
     execution.add_argument("--timeout", type=float, default=60)
     execution.add_argument("--execution-mode", choices=("case", "batch"))
@@ -1590,6 +1683,7 @@ def main(argv=None):
                 force=options.force,
                 no_cache=options.no_cache,
                 explain=options.explain,
+                collect_only=options.collect_only,
                 cache_dir=options.cache_dir,
                 timeout=options.timeout,
                 arguments=arguments,

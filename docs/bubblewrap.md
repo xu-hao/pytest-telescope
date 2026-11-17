@@ -100,6 +100,11 @@ package module lies below its own project root, for example
 `Path(my_package.__file__).is_relative_to(Path(__file__).parents[1])`, passes in a scoped
 session as it does in an ordinary one.
 
+Unless explicitly declared as a raw input, that configuration file is a minimal
+frozen file synthesized from the suite's pytest ini options at the same relative
+path. Its location preserves pytest's relative path option behavior. A configuration
+declared through `inputs` or `distributions` retains its exact frozen bytes.
+
 ### One path for every file
 
 This is a design rule of the sandbox. Every change to the sandbox must keep it.
@@ -457,7 +462,8 @@ a scoped runner starts.
 
 Scoped discovery for files whose module-level declaration scopes every case runs in one
 sandboxed pytest collection per suite. Its view is the union of those files'
-declarations, project defaults, configuration and the files themselves. That union is a collection
+declarations, project defaults and the files themselves, plus synthesized pytest
+configuration unless explicitly declared as a raw input. That union is a collection
 view only: no case body ever runs with it. Scoped cases in mixed files are identified by
 the ordinary session's collection. A file's *case inventory* is the complete list of
 cases pytest collects from it. Every scoped execution collects its containing file
@@ -466,7 +472,8 @@ selected membership differs.
 
 A scoped result is keyed by the case's actual pytest identity, the frozen bytes and
 modes of its effective declared files, declared absence, selected metadata, the
-containing file's case inventory, the suite configuration and arguments, the effective
+containing file's case inventory, the containing file's synthesized pytest
+configuration digest (or declared raw configuration) and arguments, the effective
 forwarded environment names and their captured presence and values, the runner
 implementation, the sandbox policy version (`bubblewrap-view-v3`, the single `/project`
 view with rewritten environment files; results recorded under an earlier policy are

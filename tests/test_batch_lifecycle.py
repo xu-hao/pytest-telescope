@@ -235,6 +235,7 @@ def test_collection_order_is_validated_as_actual_unique_selected_positions():
             case_id=case,
             file="test_one.py",
             origins=[],
+            markers=[],
             owners=[hashlib.sha256(b"test_one.py").hexdigest()],
             parameters=[],
             selected=True,

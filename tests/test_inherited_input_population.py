@@ -50,5 +50,5 @@ class TestOwned:
     }
     unit = model.case_unit(manifest, item, manifest.suites[0])
     explicit = {"data/a", "data/b", "data/c", "data/" + parameter}
-    assert set(unit.inputs) == explicit | {"tests/test_owned.py", "pyproject.toml"}
+    assert set(unit.inputs) == explicit | {"tests/test_owned.py"}
     assert not unit.absent and unit.cache

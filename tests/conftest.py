@@ -31,6 +31,7 @@ def scoped_module(root, filename, functions):
                 case_id=case,
                 file=filename,
                 origins=origins,
+                markers=["telescope"],
                 owners=sorted(
                     [owner_identity(filename, []), owner_identity(filename, [f"test_{name}"])]
                 ),

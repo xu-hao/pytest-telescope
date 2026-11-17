@@ -9,6 +9,7 @@ import os
 import posixpath
 import stat
 import tomllib
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
@@ -925,10 +926,9 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
             for name in suite.inventory
             if any(scoping(row) for row in rows_by_file.get(name, []))
         ]
-        configuration = {"pyproject.toml", suite.config}
         if with_scope:
             inputs, absent, _, _, selected_tools, _ = support(with_scope)
-            pool_inputs.update(inputs | configuration)
+            pool_inputs.update(inputs)
             pool_absent.update(absent)
             pool_tools.update(selected_tools)
         if not wholly:
@@ -938,7 +938,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         collection = Unit(
             suite.name,
             wholly,
-            sorted(inputs | configuration),
+            sorted(inputs),
             sorted(absent),
             cache,
             sorted(metadata),
@@ -1034,7 +1034,7 @@ def case_unit(manifest, item, suite):
     origins = item["origins"]
     if not scoped_item(manifest, item):
         raise InfrastructureError("an ordinary case has no scoped execution unit")
-    inputs = set(manifest.defaults.inputs) | {item["file"], "pyproject.toml", suite.config}
+    inputs = set(manifest.defaults.inputs) | {item["file"]}
     metadata = set(manifest.defaults.distributions)
     absent = set(manifest.defaults.absent)
     env = set(manifest.env) | set(manifest.defaults.env)
@@ -1132,8 +1132,14 @@ def snapshot(manifest, unit, destination):
             ) from exc
     for path in _with_first(destination, walk_bounded(destination, destination)):
         os.utime(path, ns=(0, 0), follow_symlinks=False)
-    if (destination / "pyproject.toml").read_bytes() != manifest.raw:
-        raise InfrastructureError("manifest changed while freezing inputs")
+    try:
+        if regular_bytes(manifest.root, "pyproject.toml", 1_048_576)[0] != manifest.raw:
+            raise InfrastructureError("manifest changed while freezing inputs")
+        for suite in manifest.suites:
+            if regular_bytes(manifest.root, suite.config, 1_048_576)[0] != suite.raw:
+                raise InfrastructureError("suite configuration changed while freezing inputs")
+    except DeclarationError as exc:
+        raise InfrastructureError("configuration changed while freezing inputs") from exc
     for name in unit.absent:
         if os.path.lexists(manifest.root / name):
             raise InfrastructureError("expected-absent input appeared during snapshot")
@@ -1153,7 +1159,7 @@ def fingerprint(value):
     ).hexdigest()
 
 
-def materialize(pool, unit, destination, records):
+def materialize(pool, unit, destination, records, *, suite=None, marker_names=None):
     """Build a narrow view of already-frozen immutable bytes, without host reads."""
     destination.mkdir(mode=0o755)
     destination.chmod(0o755)
@@ -1174,6 +1180,29 @@ def materialize(pool, unit, destination, records):
             target.chmod(0o755)
         else:
             raise InfrastructureError("frozen scope contains an invalid file record")
+    if suite is not None and suite.config not in selected:
+        target = destination / suite.config
+        target.parent.mkdir(parents=True, exist_ok=True)
+        for parent in [target.parent, *target.parent.parents]:
+            if parent.is_relative_to(destination):
+                parent.chmod(0o755)
+        content = suite.config_bytes(marker_names)
+        store = pool.parent / "configurations"
+        store.mkdir(mode=0o700, exist_ok=True)
+        source = store / hashlib.sha256(content).hexdigest()
+        if not source.exists():
+            temporary = store / (source.name + "." + uuid.uuid4().hex)
+            try:
+                temporary.write_bytes(content)
+                temporary.chmod(0o444)
+                os.utime(temporary, ns=(0, 0))
+                try:
+                    os.link(temporary, source)
+                except FileExistsError:
+                    pass
+            finally:
+                temporary.unlink(missing_ok=True)
+        os.link(source, target)
     for path in _with_first(destination, walk_bounded(destination, destination)):
         if path.is_dir() or path.is_symlink():
             os.utime(path, ns=(0, 0), follow_symlinks=False)

@@ -36,7 +36,7 @@ def test_stale_structural_tool_refuses_selected_unrelated_case_without_erasing_c
     assert_counts(project.run(), executed=2)
     full_boundary = cache_bytes(project.root)
     boundary = {"default": ["tests/test_first.py"]}
-    assert_counts(project.run(structural_files=boundary), executed=1)
+    assert_counts(project.run(structural_files=boundary), reused=1)
     previous = cache_bytes(project.root)
     assert all(previous.get(name) == content for name, content in full_boundary.items())
     put(second, "value.txt", "changed without matching pin")

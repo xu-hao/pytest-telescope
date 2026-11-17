@@ -368,6 +368,7 @@ def _inventory(items):
             "case_id",
             "file",
             "origins",
+            "markers",
             "aliases",
             "selected",
             "order",
@@ -392,6 +393,13 @@ def _inventory(items):
             return False
         identities.add(item["case_id"])
         origins, aliases = item["origins"], item["aliases"]
+        marker_names = item["markers"]
+        if (
+            type(marker_names) is not list
+            or any(type(name) is not str or not name or len(name) > 256 for name in marker_names)
+            or marker_names != sorted(set(marker_names))
+        ):
+            return False
         if type(origins) is not list or len(origins) > 100_000:
             return False
         if any(
@@ -423,7 +431,7 @@ def _inventory(items):
     return sorted(orders) == list(range(len(orders)))
 
 
-def validate_ordinary(result, nonce=None, context_id=None):
+def validate_ordinary(result, nonce=None, context_id=None, *, collect_only=False):
     """One ordinary session: its full collected inventory and its own ordinary outcomes."""
     fields = FIELDS | {
         "kind",
@@ -473,11 +481,21 @@ def validate_ordinary(result, nonce=None, context_id=None):
     if not _failure_phases(result, rows):
         return False
     if result["complete"] and (
-        not result["inventory_complete"] or not all(row["complete"] for row in rows)
+        not result["inventory_complete"]
+        or not collect_only
+        and not all(row["complete"] for row in rows)
     ):
         return False
     if result["exit_code"] in (0, 5) and (
-        not result["complete"] or counts["failed"] or counts["not-run"] or result["failures"]
+        not result["complete"]
+        or counts["failed"]
+        or not collect_only
+        and counts["not-run"]
+        or result["failures"]
+    ):
+        return False
+    if collect_only and (
+        result["dispatch_started"] or any(row["outcome"] != "not-run" for row in rows)
     ):
         return False
     return True
