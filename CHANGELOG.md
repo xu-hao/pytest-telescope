@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.1.5
+
+Parallel fixture-guard inspection, and an optional remote result store that shares
+scoped results between machines.
+
+- With `fixture_guard="available-v1"`, each candidate file's capture and inspection now
+  run as one unit in the bounded worker pool, so `workers` bounds inspection sandboxes as
+  well as test sessions. Candidates are submitted in order; the first failure in
+  candidate order is reported for every worker count, and the controller waits for
+  active sandboxes before reporting. Group identities, cache keys, record formats and
+  result order are unchanged.
+- A remote result store layers an object store over the local result cache. Set
+  `result_store = "gs://bucket/prefix"` under `[tool.pytest_telescope.execution]`, pass
+  `run --result-store URL`, or call `controller.run(..., result_store=...)`; the argument
+  or flag overrides the key. Without one, no remote request is sent and results are
+  unchanged.
+  - Install the Google Cloud Storage client with `pytest-telescope[gcs]`. Credentials
+    come from application default credentials and no project is needed. Readers need
+    `storage.objects.get` and `storage.objects.list`; writers also need
+    `storage.objects.create`. A `gs://` store without the client refuses with capability
+    `result-store:gcs`.
+  - On a local miss, a group's record is fetched before its sandbox starts. It is reused
+    only if it passes the local record validation and is byte for byte the record this
+    cache writes; it then enters the local cache like a fresh result. Anything else is a
+    miss, and the store never turns a miss into a pass.
+  - New successful records are uploaded after local publication, validated again just
+    before upload, and created only if absent; existing objects are never replaced.
+  - Every request is bounded (10-second timeout, at most three attempts for transient
+    failures). A failing or interrupted store degrades to local-only for the rest of the
+    invocation; the run's status and exit code never depend on it.
+  - Runs with a configured store report `result_store`: state and reason, reused groups
+    from the local cache and from the store, and lookup, upload and retry counts.
+  - Anyone who can create objects in the store can cause reuse; read the trust model in
+    the remote result store guide before granting write access.
+- Results cached by 0.1.4 are not reused, because the package version is part of every
+  scoped cache key. The first run after the upgrade executes every scoped test again.
+
 ## 0.1.4
 
 Per-file synthesized suite configuration, inventory-scoped `structural_files`, and
