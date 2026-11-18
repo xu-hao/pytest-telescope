@@ -6,6 +6,11 @@ across worker counts with real Bubblewrap sessions.
 """
 
 import copy
+import json
+import os
+import signal
+import subprocess
+import sys
 import threading
 import time
 from collections import Counter
@@ -489,3 +494,54 @@ def test_real_sessions_agree_across_worker_counts(tmp_path, monkeypatch):
         root, fixture_guard="available-v1", workers=1, cache_dir=tmp_path / "cache-4"
     )
     assert warm["counts"]["reused"] == 8
+
+
+def test_interrupt_stops_every_active_inspection_and_cleans_up(tmp_path):
+    root = tmp_path / "project"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text(
+        '[tool.pytest_telescope]\ntest_roots = ["tests"]\n'
+        '[tool.pytest_telescope.execution]\nmode = "batch"\n'
+    )
+    for name in ("a", "b", "c", "d", "e", "f"):
+        # Collection imports the module at once; a capture session holds its slot.
+        (root / "tests" / f"test_{name}.py").write_text(
+            "import json\nimport time\nimport pytest\n"
+            "pytestmark = pytest.mark.telescope(inputs=[])\n"
+            f'if json.load(open("{sandbox.REQUEST}"))["mode"] == "guard-capture":\n'
+            "    time.sleep(300)\n"
+            "def test_item(): pass\n"
+        )
+    scratch = root / ".pytest-telescope/scratch"
+    command = [sys.executable, "-m", "pytest_telescope", "run"]
+    command += ["--fixture-guard", "available-v1", "--workers", "4", "--timeout", "240"]
+    with subprocess.Popen(
+        command,
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            deadline = time.monotonic() + 120
+            # The frozen project copy plus one invocation for each occupied worker slot.
+            while len(list(scratch.glob("invocation-*"))) < 5:
+                assert process.poll() is None and time.monotonic() < deadline
+                time.sleep(0.05)
+            time.sleep(2)  # The four capture sessions reach their held imports.
+            assert len(list(scratch.glob("invocation-*"))) == 5
+            process.send_signal(signal.SIGINT)
+            stdout, _ = process.communicate(timeout=60)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=10)
+    report = json.loads(stdout)
+    assert process.returncode == 3 and report["status"] == "infrastructure_error"
+    assert report["collection"]["reason"] == "controller interrupted; owned sandboxes stopped"
+    assert report["fixture_guard"]["state"] == "unavailable"
+    assert report["counts"]["infrastructure_error"] == 6 and not report["groups"]
+    assert not list(scratch.iterdir())
+    assert not list((root / ".pytest-telescope/cache").rglob("*.json"))
