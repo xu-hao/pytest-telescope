@@ -47,7 +47,10 @@ itself: the attached service account from the metadata server on Google Cloud, o
 credentials that the environment provides elsewhere. A URL cannot carry a key, and no
 setting names one. The identity needs permission to read objects
 (`storage.objects.get`) and, to share its own results, to create them
-(`storage.objects.create`). It never lists, overwrites or deletes objects.
+(`storage.objects.create`). It never lists, overwrites or deletes objects. Some versions
+of the client library also read the bucket's metadata once, in the background, for
+their own diagnostics; pytest-telescope neither waits for that request nor depends on
+it, and denying it changes nothing.
 
 A malformed URL is a declaration error. A URL with another scheme refuses with capability
 `result-store:backend`, and a `gs://` URL without the installed client refuses with

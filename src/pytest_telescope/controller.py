@@ -1696,7 +1696,8 @@ def run(
         for row in results:
             if row["outcome"] == "infrastructure_error":
                 row["reason"] = collection["reason"]
-    if remote is not None and published:
+    fresh = [(path, key) for path, key in uploads.items() if path in published]
+    if remote is not None and fresh:
         # Write-behind: only records this invocation published locally, after the cache
         # lock is released, on at most `workers` threads. A store failure is counted in
         # the report and never changes the run's outcome.
@@ -1708,7 +1709,6 @@ def run(
             else:
                 remote.upload(key, data)
 
-        fresh = [(path, key) for path, key in uploads.items() if path in published]
         active, cursor = set(), 0
         executor = ThreadPoolExecutor(max_workers=concurrency)
         try:
