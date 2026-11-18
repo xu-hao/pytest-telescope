@@ -58,11 +58,11 @@ def run_case(root, monkeypatch, mode):
 
     class ObservedExecutor(base_executor):
         def submit(self, fn, *args, **kwargs):
-            job = args[0]
-            if "inspection" not in job:
+            if fn.__name__ == "inspect_group":
                 # Capture and inspection use worker slots before admission; these
                 # controls observe the dispatch of admitted groups only.
                 return super().submit(fn, *args, **kwargs)
+            job = args[0]
             assert len(job["case_ids"]) == 1 and job["case_ids"][0] in ids
             name = ids[job["case_ids"][0]]
             events.append(("submitted", name, job["key"]))

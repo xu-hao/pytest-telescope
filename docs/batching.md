@@ -252,12 +252,12 @@ its inspection run in that order in one worker slot, and up to `workers` candida
 inspected at once; see [parallel scoped workers](scoped-execution.md#parallel-scoped-workers).
 The comparison across candidates starts only after every inspection has finished, and
 group identities, admission and reported order do not depend on the worker count or on
-which inspection finished first. Collection runs Python and
-hooks and can have side effects even though selected test setup and bodies have not run.
-After admission, execution recollection checks the admitted inventory, membership,
-registry and graph immediately before setup. A later mismatch stops new dispatch, drains
-owned work, retains actual prior attempts and prevents publication of new cached results;
-it does not imply earlier groups did not run.
+which inspection finished first. Collection runs Python and hooks and can have side
+effects even though selected test setup and bodies have not run. After admission,
+execution recollection checks the admitted inventory, membership, registry and graph
+immediately before setup. A later mismatch stops new dispatch, drains owned work,
+retains actual prior attempts and prevents publication of new cached results; it does
+not imply earlier groups did not run.
 
 For each item, inspect the fixed admitted fixture and plugin registry, including all
 available definitions and applicable override chains, effective scope and owner, and

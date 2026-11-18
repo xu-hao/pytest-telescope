@@ -315,6 +315,7 @@ def test_refusal_cancels_unstarted_candidates_and_drains_active_ones(
     tmp_path, sandbox_double, module_rows
 ):
     both_active = threading.Barrier(2, timeout=10)
+    drained = threading.Event()
 
     def refuse_first(index, request, kwargs):
         both_active.wait()
@@ -324,11 +325,16 @@ def test_refusal_cancels_unstarted_candidates_and_drains_active_ones(
             )
         # The later candidate's sandbox is stopped; the pool waits for its cleanup.
         assert kwargs["cancellation"].wait(10)
-        raise sandbox.InvocationInterrupted("synthetic cancellation")
+        try:
+            time.sleep(0.5)  # Stopping the sandbox outlasts the refusal itself.
+            raise sandbox.InvocationInterrupted("synthetic cancellation")
+        finally:
+            drained.set()
 
     seam = guarded_project(tmp_path, sandbox_double, module_rows, refuse_first)
     with pytest.raises(UnsupportedCapability) as caught:
         controller.run(tmp_path, fixture_guard="available-v1", workers=2)
+    assert drained.is_set()
     assert caught.value.capability == "execution:fixture-metadata"
     assert seam.modes() == ["guard-capture", "guard-capture"] and seam.started() == {0, 1}
     assert not seam.active
@@ -407,6 +413,7 @@ def test_inspection_outage_retries_in_its_slot_and_reports_like_one_worker(
 
 def test_cleanup_failure_stops_every_active_inspection(tmp_path, sandbox_double, module_rows):
     both_active = threading.Barrier(2, timeout=10)
+    drained = threading.Event()
 
     def cleanup_failure(index, request, kwargs):
         both_active.wait()
@@ -414,10 +421,15 @@ def test_cleanup_failure_stops_every_active_inspection(tmp_path, sandbox_double,
             raise sandbox.CleanupError("synthetic cleanup failure")
         # An owned-resource failure also stops candidates that precede it.
         assert kwargs["cancellation"].wait(10)
-        raise sandbox.InvocationInterrupted("synthetic cancellation")
+        try:
+            time.sleep(0.5)  # Stopping the sandbox outlasts the failure itself.
+            raise sandbox.InvocationInterrupted("synthetic cancellation")
+        finally:
+            drained.set()
 
     seam = guarded_project(tmp_path, sandbox_double, module_rows, cleanup_failure)
     report = controller.run(tmp_path, fixture_guard="available-v1", workers=2)
+    assert drained.is_set()
     assert report["status"] == "infrastructure_error"
     assert report["collection"]["reason"] == "synthetic cleanup failure"
     assert report["fixture_guard"]["state"] == "unavailable"
