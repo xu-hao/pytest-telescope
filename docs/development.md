@@ -238,6 +238,13 @@ corrupt/concurrent records, deadlines, retry exhaustion and cleanup. Every test 
 simulates a host refusal with a stand-in `bwrap` says so in its name. Avoid tests that
 assert source code or documentation text instead of observable behavior.
 
+[Remote result store](result-store.md) tests never reach a network. Controller behavior
+is tested against an in-memory object store installed where a `gs://` URL resolves to its
+client. The `gs://` backend itself is tested through the real Google Cloud Storage
+client, which the development extra pins: a transport adapter mounted on the client's
+HTTP session answers its requests from memory, so the tests observe the actual requests,
+including the range, the creation precondition and the absence of client-side retries.
+
 Functional tests use portable controlled inputs. Their ordinary Python, pytest and
 Bubblewrap runner dependencies remain normal test infrastructure; using those programs
 does not itself make a test a compatibility benchmark. Classify a case by its purpose

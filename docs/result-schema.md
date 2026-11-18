@@ -33,6 +33,7 @@ A run result has `schema: 4` and `kind: "run"`. These fields distinguish it from
 | `route_counts` | Exactly `ordinary` and `scoped`, each with the same seven keys as `counts`; for each key the two routes sum to `counts`. |
 | `cases` | Collected, passed, failed and skipped totals from selected case results. |
 | `case_outcomes` | Separate fresh/cached passed and skipped totals. |
+| `result_store` | Present only when a [remote result store](#remote-result-store) is configured: its state, reuse sources and request counts. |
 
 `sandbox.required` is true when the effective structural boundary contains any scope
 declaration, even if no scoped case is selected; an all-ordinary run never starts
@@ -91,6 +92,38 @@ project structure and should not themselves contain private values.
 membership, not test success. Consumers must also inspect
 `inventory_complete`, selection and outcomes. A reused pass is previous evidence accepted
 under the current identity, not a newly executed case.
+
+## Remote result store
+
+A run with a configured [remote result store](result-store.md) adds `result_store` to
+its result. A run without one has no such field and sends no remote request; all other
+fields are the same in both cases. The object has exactly these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `backend` | The store's URL scheme, `gs`. The bucket and prefix are not reported. |
+| `state` | `available`, or `degraded` once a lookup or upload has failed after its bounded attempts or was rejected. A degraded store receives no further requests in this invocation. |
+| `reason` | `null` while available. When degraded: `transient` when retries were exhausted, `rejected` when the store refused a request, such as denied access or missing credentials. |
+| `reused_groups` | Exactly `local` and `remote`: the scoped groups with outcome `reused` whose record was already in the local cache, and those whose record this run fetched from the store. They sum to the reused scoped groups. |
+| `lookups` | Exactly `hits`, `misses`, `invalid`, `failed` and `skipped`, counted per group that the local cache could not serve. |
+| `uploads` | Exactly `created`, `existing`, `failed` and `skipped`, counted per record that this run published locally. |
+| `retries` | Repeated requests after transient failures, across all lookups and uploads. |
+
+A lookup is a `hit` when the store returned a record that passed the local record
+validation, a `miss` when the store has no such object, and `invalid` when the object
+failed validation; a group with an invalid record executes like a miss. An upload is
+`created` when this run stored the record and `existing` when the store already held an
+object of that name, which is kept. `failed` counts requests that used all their
+attempts or were rejected. `skipped` counts lookups and uploads that were not sent
+because the store was already degraded, and uploads whose record had left the local
+cache again before it was read.
+
+The run's `status`, counts and exit code never depend on `result_store`. A group whose
+lookup failed or was skipped executes normally, and a failed upload leaves the local
+record in place. Callers that require the store should treat `state: "degraded"` as an
+infrastructure incident of the store, separate from the test verdict. Retained
+[refusal accounting](#retained-observations-after-a-late-refusal) does not include
+`result_store`.
 
 ## Collection-only accounting
 

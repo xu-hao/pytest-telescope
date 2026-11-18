@@ -188,6 +188,12 @@ ownership cannot reuse an earlier inventory or success. Raw parameter values, di
 IDs and environment values remain outside persistent ownership records and normal
 diagnostics.
 
+An optional [remote result store](result-store.md) supplies case and batch records that
+the local cache lacks. A fetched record passes the same validation as a local record
+before it is written into the local cache and reused; an invalid or unreadable one is a
+miss, and a store failure never fails the run. Inventory records are never fetched or
+uploaded.
+
 The guard registry is bound to the same exact readable view. Changing a declared
 helper's bytes invalidates its consumers; a helper available only to another case does
 not join this case's registry or result identity. Stale or malformed registry evidence
@@ -566,6 +572,9 @@ and bounded failure evidence, not arbitrary pytest output.
 - `run --no-cache`: execute without reading or writing successful result records.
 - `run --explain`: explain each case's route and execution or reuse decision.
 - `run --cache-dir PATH`: select the result-record directory.
+- `run --result-store URL`: also read missing records from, and upload new records to,
+  a [remote result store](result-store.md). Without it, or its configuration key, no
+  remote request is sent.
 - `run --timeout SECONDS`: bound the wall time of each sandboxed session (scoped
   collection, case or batch); default 60 seconds, allowed range 0.1 through 3,600
   seconds. Ordinary suite sessions have no pytest-telescope deadline, like normal
