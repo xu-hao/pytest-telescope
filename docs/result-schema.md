@@ -102,21 +102,22 @@ fields are the same in both cases. The object has exactly these fields:
 | Field | Meaning |
 | --- | --- |
 | `backend` | The store's URL scheme, `gs`. The bucket and prefix are not reported. |
-| `state` | `available`, or `degraded` once a lookup or upload has failed after its bounded attempts or was rejected. A degraded store receives no further requests in this invocation. |
-| `reason` | `null` while available. When degraded: `transient` when retries were exhausted, `rejected` when the store refused a request, such as denied access or missing credentials. |
+| `state` | `available`, or `degraded` once a lookup or upload has failed after its bounded attempts or was rejected, or the invocation was interrupted while it uploaded. A degraded store receives no further requests in this invocation. |
+| `reason` | `null` while available. When degraded: `transient` when retries were exhausted, `rejected` when the store refused a request, such as denied access, missing credentials or a missing bucket, and `cancelled` when the invocation was interrupted while it uploaded. |
 | `reused_groups` | Exactly `local` and `remote`: the scoped groups with outcome `reused` whose record was already in the local cache, and those whose record this run fetched from the store. They sum to the reused scoped groups. |
-| `lookups` | Exactly `hits`, `misses`, `invalid`, `failed` and `skipped`, counted per group that the local cache could not serve. |
-| `uploads` | Exactly `created`, `existing`, `failed` and `skipped`, counted per record that this run published locally. |
+| `lookups` | Exactly `hits`, `misses`, `invalid`, `failed` and `skipped`, counted per cacheable group that the local cache could not serve. Groups marked `cache=False` and runs with `--no-cache` or `--force` send no lookup and count none. |
+| `uploads` | Exactly `created`, `existing`, `failed` and `skipped`, counted per new record that this run published locally. |
 | `retries` | Repeated requests after transient failures, across all lookups and uploads. |
 
 A lookup is a `hit` when the store returned a record that passed the local record
-validation, a `miss` when the store has no such object, and `invalid` when the object
-failed validation; a group with an invalid record executes like a miss. An upload is
-`created` when this run stored the record and `existing` when the store already held an
-object of that name, which is kept. `failed` counts requests that used all their
-attempts or were rejected. `skipped` counts lookups and uploads that were not sent
-because the store was already degraded, and uploads whose record had left the local
-cache again before it was read.
+validation and is byte for byte the record this cache writes for that result, a `miss`
+when the store has no such object, and `invalid` otherwise; a group with an invalid
+record executes like a miss. An upload is `created` when this run stored the record and
+`existing` when the store already held an object of that name, which is kept. `failed`
+counts requests that used all their attempts or were rejected. `skipped` counts lookups
+and uploads that were not sent because the store was already degraded, uploads that had
+not started when the invocation was interrupted, and uploads whose local record had left
+the cache or no longer validated when it was read again for the upload.
 
 The run's `status`, counts and exit code never depend on `result_store`. A group whose
 lookup failed or was skipped executes normally, and a failed upload leaves the local
@@ -308,7 +309,7 @@ values.
 
 ## Internal protocol and cache versions
 
-Persistent cache envelopes use schema 8. Collection, singleton execution, batch execution
+Persistent cache envelopes use schema 9. Collection, singleton execution, batch execution
 and ordinary-session worker protocols use versions 11, 9, 10 and 4 respectively. Old cache
 records and protocols are ineligible; strict producers and validators advance together.
 
@@ -320,9 +321,9 @@ records and protocols are ineligible; strict producers and validators advance to
 | Singleton worker | 9 |
 | Batch worker | 10, with required guarded bindings when selected |
 | Ordinary-session worker | 4 |
-| Persistent inventory/case/group cache envelope | 8 |
+| Persistent inventory/case/group cache envelope | 9 |
 
-Both cache profiles use envelope 8, but their exact contexts, profiles and result
+Both cache profiles use envelope 9, but their exact contexts, profiles and result
 validators remain distinct. They cannot reuse one another's records. Unguarded worker
 nonces are 32 lowercase hexadecimal characters; guarded capture, inspection and batch
 nonces are 64. Neither accepts the other's nonce shape.

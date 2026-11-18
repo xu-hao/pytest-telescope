@@ -770,7 +770,7 @@ Python signature above, `fixture_guard` is exactly `None` or `"available-v1"`; t
 requires batch mode and refuses ordinary or mixed structural routes. The CLI opts in
 with `run --fixture-guard available-v1`; it accepts no condition expectation values.
 Existing calls and CLI behavior with the guard omitted retain schema 4 and use cache
-envelope 8. The [joint protocol
+envelope 9. The [joint protocol
 table](result-schema.md#internal-protocol-and-cache-versions) applies to both guarded
 and unguarded records.
 

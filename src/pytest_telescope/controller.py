@@ -163,19 +163,31 @@ def parse_record(
         return None
 
 
+def record_content(key, result):
+    """The exact bytes of the record of `result` under `key`, as the cache writes them."""
+    record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
+    return json.dumps(record, sort_keys=True).encode()
+
+
+def parse_shared_record(data, key, **binding):
+    """The validated result of a shared record, only if its bytes are the cache's own.
+
+    A shared record is written into the local cache, and uploaded, byte for byte, so any
+    other serialization of a valid result is a miss.
+    """
+    result = parse_record(data, key, **binding)
+    if result is None or data != record_content(key, result):
+        return None
+    return result
+
+
 def write_record(path, key, result, *, kind="execution"):
     limit = (
         64 * 1024 * 1024
         if kind in {"collection", "guarded-batch"} or result["protocol"] == 10
         else 1_048_576
     )
-    record = {
-        "schema": SCHEMA,
-        "key": key,
-        "result": result,
-        "checksum": fingerprint(result),
-    }
-    content = json.dumps(record, sort_keys=True).encode()
+    content = record_content(key, result)
     if len(content) > limit:
         raise InfrastructureError("successful result exceeds record size limit")
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
@@ -1475,13 +1487,13 @@ def run(
                             and not cancellation.is_set()
                         ):
                             # Read-through in this worker slot: a local miss asks the store
-                            # before it starts a sandbox. Anything but a valid record for
-                            # exactly this group is a miss.
+                            # before it starts a sandbox. Anything but this cache's own
+                            # bytes of a valid record for exactly this group is a miss.
                             binding = record_binding(job)
                             previous = remote.lookup(
                                 job["key"],
                                 record_limit(record_kind),
-                                lambda data: parse_record(data, job["key"], **binding),
+                                lambda data: parse_shared_record(data, job["key"], **binding),
                             )
                             if previous is not None:
                                 projected, group = project_result(job, previous, mode, reused=True)
@@ -1655,7 +1667,7 @@ def run(
                                     )
                                     if not fetched:
                                         eligible_groups.add(job["key"])
-                                        uploads[job["path"]] = job["key"]
+                                        uploads[job["path"]] = (job["key"], record_binding(job))
                     except (sandbox.InvocationInterrupted, KeyboardInterrupt):
                         blocked = (
                             "run cancelled; active sandboxes drained before result publication"
@@ -1696,15 +1708,16 @@ def run(
         for row in results:
             if row["outcome"] == "infrastructure_error":
                 row["reason"] = collection["reason"]
-    fresh = [(path, key) for path, key in uploads.items() if path in published]
+    fresh = [(path, *uploads[path]) for path in uploads if path in published]
     if remote is not None and fresh:
         # Write-behind: only records this invocation published locally, after the cache
         # lock is released, on at most `workers` threads. A store failure is counted in
         # the report and never changes the run's outcome.
-        def upload(path, key):
-            data = record_bytes(path, record_limit(record_kind))
-            if data is None or len(data) > record_limit(record_kind):
-                # Evicted or replaced since publication; the local cache owns that.
+        def upload(path, key, binding):
+            data = record_bytes(path, record_limit(binding["kind"]))
+            if parse_shared_record(data, key, **binding) is None:
+                # Evicted, replaced or changed since publication: a created object is
+                # permanent, so only a record that a reader would accept is uploaded.
                 remote.skip_upload()
             else:
                 remote.upload(key, data)
@@ -1719,6 +1732,10 @@ def run(
                 completed, active = wait(active, return_when=FIRST_COMPLETED)
                 for future in completed:
                     future.result()
+        except (sandbox.InvocationInterrupted, KeyboardInterrupt):
+            # An interrupt ends the uploads, not the finished run: the uploads not yet
+            # started are skipped, and those in flight end after their current attempt.
+            remote.cancel(len(fresh) - cursor)
         finally:
             executor.shutdown(wait=True, cancel_futures=False)
     return summary()

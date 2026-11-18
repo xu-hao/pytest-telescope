@@ -4,6 +4,7 @@ The client sends real HTTP requests through `requests`; a transport adapter moun
 its session answers them from memory as the storage JSON API would.
 """
 
+import gzip
 import io
 import json
 import re
@@ -31,6 +32,8 @@ class Service(requests.adapters.BaseAdapter):
     def __init__(self):
         super().__init__()
         self.objects, self.requests, self.faults = {}, [], []
+        # Objects stored with `Content-Encoding: gzip`, by (bucket, name).
+        self.compressed = set()
         self.lock = threading.Lock()
 
     def close(self):
@@ -71,9 +74,17 @@ class Service(requests.adapters.BaseAdapter):
             raise fault
         download = re.fullmatch(r"/download/storage/v1/b/([^/]+)/o/([^/]+)", parts.path)
         if request.method == "GET" and download and query == {"alt": ["media"]}:
-            body = self.objects.get((download[1], unquote(download[2])))
+            name = (download[1], unquote(download[2]))
+            body = self.objects.get(name)
             if body is None:
                 return self.respond(request, 404)
+            if name in self.compressed:
+                if "gzip" not in request.headers.get("Accept-Encoding", ""):
+                    # Decompressive transcoding serves the whole object, ignoring Range.
+                    return self.respond(request, 200, gzip.decompress(body))
+                encoding = {"Content-Encoding": "gzip"}
+            else:
+                encoding = {}
             first, last = map(
                 int, re.fullmatch(r"bytes=(\d+)-(\d+)", request.headers["Range"]).groups()
             )
@@ -84,7 +95,7 @@ class Service(requests.adapters.BaseAdapter):
                 request,
                 206,
                 part,
-                {"Content-Range": f"bytes {first}-{first + len(part) - 1}/{len(body)}"},
+                {"Content-Range": f"bytes {first}-{first + len(part) - 1}/{len(body)}", **encoding},
             )
         upload = re.fullmatch(r"/upload/storage/v1/b/([^/]+)/o", parts.path)
         if request.method == "POST" and upload and query.get("uploadType") == ["multipart"]:
@@ -154,6 +165,16 @@ def test_read_is_bounded_and_missing_or_empty_objects_hold_no_record(service, ob
     assert sent["range"] == "bytes=0-10"
     assert all(request["timeout"] == result_store.REQUEST_TIMEOUT for request in service.requests)
     assert len(service.requests) == 4
+
+
+def test_compressed_objects_are_read_as_stored_and_bounded(service, objects):
+    # The bound applies to the stored bytes, which are never decompressed: a small
+    # compressed object cannot expand into an unbounded read.
+    stored = gzip.compress(b"0" * (8 * 1024 * 1024))
+    service.objects["shared-results", "team/packed.json"] = stored
+    service.compressed.add(("shared-results", "team/packed.json"))
+    assert objects.read("team/packed.json", 100) == stored[:101]
+    assert objects.read("team/packed.json", len(stored)) == stored
 
 
 def test_create_is_conditional_on_absence_and_keeps_the_first_object(service, objects):
@@ -231,6 +252,28 @@ def test_credentials_that_name_no_project_reach_the_store(machines, service):
     assert len(service.objects) == 3
     # One client per invocation, and the store never supplies credentials itself.
     assert len(service.clients) == 1 and "credentials" not in service.clients[0]
+
+
+def test_compressed_records_are_invalid_lookups(machines, service):
+    controller.run(machines("first"), result_store=URL)
+    for name, data in list(service.objects.items()):
+        service.objects[name] = gzip.compress(data)
+        service.compressed.add(name)
+    report = controller.run(machines("second"), result_store=URL)
+    assert report["status"] == "passed" and report["counts"]["executed"] == 3
+    assert report["result_store"]["lookups"] == NO_LOOKUPS | dict(invalid=3)
+
+
+def test_missing_bucket_looks_like_misses_until_the_first_upload(machines, service):
+    # The service answers a missing bucket and a missing object alike; the first upload
+    # is rejected and the store degrades.
+    service.faults = [404] * 100
+    report = controller.run(machines("first"), result_store=URL)
+    assert report["status"] == "passed" and report["counts"]["executed"] == 3
+    assert report["result_store"]["state"] == "degraded"
+    assert report["result_store"]["reason"] == "rejected"
+    assert report["result_store"]["lookups"] == NO_LOOKUPS | dict(misses=3)
+    assert report["result_store"]["uploads"] == NO_UPLOADS | dict(failed=1, skipped=2)
 
 
 def test_unavailable_service_degrades_after_three_requests(machines, service):

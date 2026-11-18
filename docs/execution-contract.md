@@ -664,7 +664,7 @@ without broadening declared inputs. Mutable
 framework fixtures retain their documented per-group lifetime. The discovery union is
 not an execution view, and collection hooks can have side effects. Execution-side drift
 preserves actual prior attempts and prevents new cache publication. Unguarded behavior
-and schema 4 remain unchanged; unguarded records use cache envelope 8. A body-free
+and schema 4 remain unchanged; unguarded records use cache envelope 9. A body-free
 fixture capture binds provisional context and membership; its registry and
 context-independent content commitments enter
 the final group and cache identity before context-bound inspection and execution

@@ -90,14 +90,23 @@ class GcsObjects:
         return (TransientStoreError if transient else StoreError)(type(error).__name__)
 
     def read(self, name, limit):
-        """At most `limit + 1` bytes of the object, or None when it does not exist."""
+        """At most `limit + 1` stored bytes of the object, or None when it does not exist.
+
+        The bytes are read as stored, never decompressed, so the range bounds the read.
+        """
         from google.api_core.exceptions import NotFound, RequestRangeNotSatisfiable
 
         try:
             return (
                 self._handle()
                 .blob(name)
-                .download_as_bytes(end=limit, checksum=None, retry=None, timeout=REQUEST_TIMEOUT)
+                .download_as_bytes(
+                    end=limit,
+                    raw_download=True,
+                    checksum=None,
+                    retry=None,
+                    timeout=REQUEST_TIMEOUT,
+                )
             )
         except NotFound:
             return None
@@ -205,6 +214,13 @@ class RemoteStore:
     def skip_upload(self):
         with self._lock:
             self._uploads["skipped"] += 1
+
+    def cancel(self, remaining):
+        """The invocation was interrupted: `remaining` uploads will not start."""
+        with self._lock:
+            self._uploads["skipped"] += remaining
+            if self._reason is None:
+                self._reason = "cancelled"
 
     def report(self, *, local, remote):
         with self._lock:

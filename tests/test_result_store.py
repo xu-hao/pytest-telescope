@@ -4,8 +4,10 @@ No test here reaches a network: `gs://` URLs resolve to the `Objects` stand-in.
 """
 
 import json
+import os
 import re
 import shutil
+import signal
 import sys
 import threading
 
@@ -186,6 +188,40 @@ def test_invalid_remote_record_is_a_miss_and_never_a_pass(machines, store, damag
     assert store.objects[name] == damaged
 
 
+def compact(data):
+    return json.dumps(json.loads(data), separators=(",", ":")).encode()
+
+
+def compact_unicode_near_the_limit(data):
+    record = json.loads(data)
+    skip = {
+        "file": "tests/données" * 4,
+        "reason": {"profile": "pytest-reason-sha256-v1", "kind": "skip", "sha256": "c" * 64},
+    }
+    record["result"]["collection_skips"] = [skip] * 4800
+    reshaped = json.dumps(reseal(record), separators=(",", ":"), ensure_ascii=False).encode()
+    # Within the record size limit as stored, beyond it as this cache would write it.
+    assert len(reshaped) <= 1_048_576 < len(json.dumps(record, sort_keys=True).encode())
+    return reshaped
+
+
+@pytest.mark.parametrize("reshape", [compact, compact_unicode_near_the_limit])
+def test_valid_record_in_another_encoding_is_a_miss(machines, store, reshape):
+    # The same valid result, serialized differently. A fetched record enters the local
+    # cache byte for byte as this cache writes it, so any other bytes are a miss.
+    controller.run(machines("first", count=1), result_store=URL)
+    (name,) = store.objects
+    store.objects[name] = reshaped = reshape(store.objects[name])
+    assert controller.parse_record(reshaped, name.rsplit("/", 1)[1][:-5], kind="execution")
+
+    report = controller.run(machines("second", count=1), result_store=URL)
+    assert report["status"] == "passed", report.get("collection", {}).get("reason")
+    assert report["counts"]["executed"] == 1 and report["counts"]["reused"] == 0
+    assert report["result_store"]["lookups"] == NO_LOOKUPS | dict(invalid=1)
+    assert report["result_store"]["uploads"] == NO_UPLOADS | dict(existing=1)
+    assert store.objects[name] == reshaped
+
+
 def test_record_of_another_key_is_a_miss_even_when_relabelled(machines, store):
     controller.run(machines("first", count=2), result_store=URL)
     one, two = sorted(store.objects)
@@ -215,6 +251,46 @@ def test_only_locally_published_records_are_uploaded(machines, store):
     assert store.count("create") == 0 and not store.objects
     assert report["result_store"]["uploads"] == NO_UPLOADS
     assert report["result_store"]["lookups"] == NO_LOOKUPS | dict(misses=3)
+
+
+def test_local_records_changed_before_upload_are_not_uploaded(machines, store):
+    root = machines("first")
+    cache = root / ".pytest-telescope/cache"
+
+    def change_the_other_records():
+        # Another process changes the local cache while the first record uploads.
+        store.before["create"] = None
+        uploading = store.calls[-1][1].rsplit("/", 1)[1]
+        truncated, relabelled = sorted(p for p in cache.glob("*.json") if p.name != uploading)
+        truncated.write_bytes(truncated.read_bytes()[:-1])
+        relabelled.write_bytes((cache / uploading).read_bytes())
+
+    store.before["create"] = change_the_other_records
+    report = controller.run(root, result_store=URL)
+    assert report["status"] == "passed" and report["counts"]["executed"] == 3
+    assert report["result_store"]["state"] == "available"
+    assert report["result_store"]["uploads"] == NO_UPLOADS | dict(created=1, skipped=2)
+    assert store.count("create") == 1 and len(store.objects) == 1
+
+
+def test_interrupted_uploads_keep_the_finished_run(machines, store, monkeypatch, capsys):
+    root = machines("first")
+
+    def interrupt():
+        store.before["create"] = None
+        os.kill(os.getpid(), signal.SIGINT)
+
+    store.before["create"] = interrupt
+    monkeypatch.chdir(root)
+    assert controller.main(["run", "--result-store", URL]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "passed" and report["counts"]["executed"] == 3
+    assert report["result_store"]["state"] == "degraded"
+    assert report["result_store"]["reason"] == "cancelled"
+    # The upload in flight finished; the two not yet started were skipped.
+    assert report["result_store"]["uploads"] == NO_UPLOADS | dict(created=1, skipped=2)
+    assert len(store.objects) == 1
+    assert controller.run(root)["counts"]["reused"] == 3
 
 
 def test_create_if_absent_race_keeps_the_first_record(machines, store):

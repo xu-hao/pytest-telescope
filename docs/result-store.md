@@ -46,12 +46,18 @@ credentials](https://cloud.google.com/docs/authentication/application-default-cr
 itself: the attached service account from the metadata server on Google Cloud, or the
 credentials that the environment provides elsewhere. A URL cannot carry a key, and no
 setting names one. No Google Cloud project is needed either: requests name only the
-bucket and its objects, so credentials that carry no project work as well. The identity
-needs permission to read objects (`storage.objects.get`) and, to share its own results,
-to create them (`storage.objects.create`). It never lists, overwrites or deletes
-objects. Some versions of the client library also read the bucket's metadata once, in
-the background, for their own diagnostics; pytest-telescope neither waits for that
-request nor depends on it, and denying it changes nothing.
+bucket and its objects, so credentials that carry no project work as well.
+
+Every identity that reads the store needs `storage.objects.get` and
+`storage.objects.list`; an identity that also shares its own results needs
+`storage.objects.create` as well. pytest-telescope never lists objects, but Cloud
+Storage answers a request for a missing object with "access denied" instead of "not
+found" when the identity may not list, and a denied lookup degrades the store. Without
+`storage.objects.list`, the first miss would therefore end all use of the store for the
+invocation. pytest-telescope never overwrites or deletes objects. Some versions of the
+client library also read the bucket's metadata once, in the background, for their own
+diagnostics; pytest-telescope neither waits for that request nor depends on it, and
+denying it changes nothing.
 
 A malformed URL is a declaration error. A URL with another scheme refuses with capability
 `result-store:backend`, and a `gs://` URL without the installed client refuses with
@@ -73,9 +79,13 @@ format writes under a new name and leaves older records untouched.
 **Reading.** When the local cache has no valid record for a group, the run asks the
 store for that group's object before it starts a sandbox. The bytes are checked with the
 same validation as a local record: the record format, its checksum, the key it names,
-and that its result is a complete success of exactly this group. A valid record is
-written into the local cache through the same staging and publication as a freshly
-recorded result, and the group is reported as `reused`. Later runs on that machine find
+and that its result is a complete success of exactly this group. The bytes must also be
+exactly the bytes that this cache writes for that result, so the record can enter the
+local cache, and later be uploaded, unchanged; the same valid result serialized any
+other way is a miss. Objects are read as stored and never decompressed, so an object
+stored with a compressed content encoding is a miss as well. A valid record is written
+into the local cache through the same staging and publication as a freshly recorded
+result, and the group is reported as `reused`. Later runs on that machine find
 it locally and do not ask the store again. A missing object, or one that fails any
 check, is a miss: the group executes as if no store were configured. The store never
 turns a miss into a pass.
@@ -89,6 +99,10 @@ replaced. A record that was itself fetched from the store is not uploaded again,
 neither is a record that the local cache already held before the invocation: a local
 hit sends no request. To upload results that so far exist only in a local cache, run
 once with `--force`.
+
+Because a created object is never replaced, each record is read from the local cache
+again just before its upload and checked exactly like a fetched record. A record that
+has left the local cache or changed since publication is skipped, never uploaded.
 
 Only what the local cache would record is uploaded. A failed or incomplete group, a
 group marked `cache=False`, a run with `--no-cache`, and an invocation whose cleanup
@@ -120,6 +134,12 @@ that reads the store will reuse it.
 - Do not point a run that tests untrusted changes at a store it can write to.
 - Use a separate bucket or prefix for each trust boundary.
 
+A valid record also stands for every machine that computes its key. The key does not
+cover system libraries, the kernel, the hardware or any other host state that the tests
+do not declare, so machines that differ only in such state reuse each other's results,
+just as one machine reuses its own results after such a change. Use a separate bucket or
+prefix for hosts whose undeclared state you do not trust to give the same outcomes.
+
 A read-only job still reuses stored records. Its first upload is refused, which the
 report shows as a degraded store with `reason: "rejected"`, one failed upload and no
 failed lookup; its remaining uploads are skipped.
@@ -142,6 +162,11 @@ test outcome. Every remote request is bounded:
   response) is not repeated. The client resolves credentials once, on the first
   request; a run that finds none has its first lookup rejected.
 
+Cloud Storage answers a lookup in a missing bucket exactly like a lookup of a missing
+object, so a misspelled or deleted bucket first shows as misses. Its first upload is
+rejected, which degrades the store with `reason: "rejected"`. A run that uploads
+nothing, for example because every group that missed failed, reports only misses.
+
 When a lookup or upload has used its attempts, or was rejected, the store is *degraded*
 for the rest of the invocation. No further request starts: the remaining lookups are
 treated as misses and their groups execute, and the remaining uploads are skipped.
@@ -153,8 +178,12 @@ The report states the degraded store and counts what failed, so that a caller ca
 an infrastructure incident for the store while accepting the test results. A degraded
 store is reported, never hidden as an ordinary cache miss.
 
-Interrupting an invocation while it uploads ends it like any other interruption. Its
-local records are already published by then; the records not yet uploaded stay local.
+Interrupting an invocation while it uploads (for example with Ctrl-C) ends the uploads,
+not the run. Its local records are already published by then. The uploads not yet
+started are counted as skipped, the ones in flight end after their current attempt, and
+the store is reported degraded with `reason: "cancelled"`. The run then reports its
+results with the status and exit code its tests earned. A second interrupt while the
+uploads in flight finish ends the invocation as interrupted.
 
 ## Accounting
 
