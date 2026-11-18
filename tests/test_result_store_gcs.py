@@ -15,7 +15,6 @@ import pytest
 import requests
 from google.auth.credentials import AnonymousCredentials
 from google.auth.exceptions import DefaultCredentialsError
-from google.auth.transport.requests import AuthorizedSession
 from google.cloud import storage
 from urllib3.response import HTTPResponse
 
@@ -112,17 +111,18 @@ class Service(requests.adapters.BaseAdapter):
 def service(monkeypatch):
     """Route the client that `gs://` stores construct to the in-memory service.
 
-    The store's own client arguments are kept; only the HTTP session is replaced. The
-    application default credentials name no project, and the environment names none.
+    The client is built from the store's own arguments and resolves its credentials from
+    application default credentials, which name no project; the environment names none.
+    Only the transport of the session it opens is replaced.
     """
     served, real_client = Service(), storage.Client
     served.clients = []
 
     def client(**arguments):
         served.clients.append(arguments)
-        session = AuthorizedSession(AnonymousCredentials())
-        session.mount("https://", served)
-        return real_client(_http=session, **arguments)
+        built = real_client(**arguments)
+        built._http.mount("https://", served)
+        return built
 
     def application_default(*args, **kwargs):
         return AnonymousCredentials(), None
@@ -254,10 +254,10 @@ def test_denied_access_degrades_after_one_request(machines, service):
 
 
 def test_missing_credentials_degrade_without_failing_the_run(machines, service, monkeypatch):
-    def client(**arguments):
+    def application_default(*args, **kwargs):
         raise DefaultCredentialsError("no application default credentials")
 
-    monkeypatch.setattr(storage, "Client", client)
+    monkeypatch.setattr(google.auth, "default", application_default)
     report = controller.run(machines("first"), result_store=URL)
     assert report["status"] == "passed" and report["counts"]["executed"] == 3
     assert report["result_store"]["state"] == "degraded"
