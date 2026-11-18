@@ -45,12 +45,13 @@ Credentials are never part of the configuration. The client finds [application d
 credentials](https://cloud.google.com/docs/authentication/application-default-credentials)
 itself: the attached service account from the metadata server on Google Cloud, or the
 credentials that the environment provides elsewhere. A URL cannot carry a key, and no
-setting names one. The identity needs permission to read objects
-(`storage.objects.get`) and, to share its own results, to create them
-(`storage.objects.create`). It never lists, overwrites or deletes objects. Some versions
-of the client library also read the bucket's metadata once, in the background, for
-their own diagnostics; pytest-telescope neither waits for that request nor depends on
-it, and denying it changes nothing.
+setting names one. No Google Cloud project is needed either: requests name only the
+bucket and its objects, so credentials that carry no project work as well. The identity
+needs permission to read objects (`storage.objects.get`) and, to share its own results,
+to create them (`storage.objects.create`). It never lists, overwrites or deletes
+objects. Some versions of the client library also read the bucket's metadata once, in
+the background, for their own diagnostics; pytest-telescope neither waits for that
+request nor depends on it, and denying it changes nothing.
 
 A malformed URL is a declaration error. A URL with another scheme refuses with capability
 `result-store:backend`, and a `gs://` URL without the installed client refuses with
@@ -145,8 +146,8 @@ When a lookup or upload has used its attempts, or was rejected, the store is *de
 for the rest of the invocation. No further request starts: the remaining lookups are
 treated as misses and their groups execute, and the remaining uploads are skipped.
 A request already in flight on another worker finishes its current attempt and is not
-repeated. The run continues with the local cache only, publishes its local records as usual, and keeps the
-status and exit code its tests earned.
+repeated. The run continues with the local cache only, publishes its local records as
+usual, and keeps the status and exit code its tests earned.
 
 The report states the degraded store and counts what failed, so that a caller can raise
 an infrastructure incident for the store while accepting the test results. A degraded

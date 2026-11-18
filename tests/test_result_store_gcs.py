@@ -10,6 +10,7 @@ import re
 import threading
 from urllib.parse import parse_qs, unquote, urlsplit
 
+import google.auth
 import pytest
 import requests
 from google.auth.credentials import AnonymousCredentials
@@ -109,14 +110,28 @@ class Service(requests.adapters.BaseAdapter):
 
 @pytest.fixture
 def service(monkeypatch):
-    """Route the client that `gs://` stores construct to the in-memory service."""
-    served, real_client = Service(), storage.Client
+    """Route the client that `gs://` stores construct to the in-memory service.
 
-    def client():
+    The store's own client arguments are kept; only the HTTP session is replaced. The
+    application default credentials name no project, and the environment names none.
+    """
+    served, real_client = Service(), storage.Client
+    served.clients = []
+
+    def client(**arguments):
+        served.clients.append(arguments)
         session = AuthorizedSession(AnonymousCredentials())
         session.mount("https://", served)
-        return real_client(project="synthetic", credentials=AnonymousCredentials(), _http=session)
+        return real_client(_http=session, **arguments)
 
+    def application_default(*args, **kwargs):
+        return AnonymousCredentials(), None
+
+    for name in ("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT"):
+        monkeypatch.delenv(name, raising=False)
+    for name in ("STORAGE_EMULATOR_HOST", "API_ENDPOINT_OVERRIDE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(google.auth, "default", application_default)
     monkeypatch.setattr(storage, "Client", client)
     monkeypatch.setattr(result_store, "RETRY_DELAYS", (0, 0))
     return served
@@ -208,6 +223,16 @@ def test_records_are_shared_through_the_client(machines, service):
     assert second["result_store"]["state"] == "available"
 
 
+def test_credentials_that_name_no_project_reach_the_store(machines, service):
+    # Reading and creating objects bills no project, so credentials need not name one.
+    report = controller.run(machines("first"), result_store=URL)
+    assert report["result_store"]["state"] == "available", report["result_store"]
+    assert report["result_store"]["uploads"] == NO_UPLOADS | dict(created=3)
+    assert len(service.objects) == 3
+    # One client per invocation, and the store never supplies credentials itself.
+    assert len(service.clients) == 1 and "credentials" not in service.clients[0]
+
+
 def test_unavailable_service_degrades_after_three_requests(machines, service):
     service.faults = [503] * 100
     report = controller.run(machines("first"), result_store=URL)
@@ -229,7 +254,7 @@ def test_denied_access_degrades_after_one_request(machines, service):
 
 
 def test_missing_credentials_degrade_without_failing_the_run(machines, service, monkeypatch):
-    def client():
+    def client(**arguments):
         raise DefaultCredentialsError("no application default credentials")
 
     monkeypatch.setattr(storage, "Client", client)

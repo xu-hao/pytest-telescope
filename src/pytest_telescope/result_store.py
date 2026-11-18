@@ -57,9 +57,11 @@ class GcsObjects:
 
     def _handle(self):
         # Credentials are resolved on first use, never while a declaration is validated.
+        # Reading and creating objects bills no project, so the client is built without
+        # one: credentials that name no project still reach the bucket.
         with self._lock:
             if self._bucket is None:
-                self._bucket = self._client().bucket(self._name)
+                self._bucket = self._client(project=None).bucket(self._name)
             return self._bucket
 
     @staticmethod
