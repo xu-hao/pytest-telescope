@@ -517,7 +517,8 @@ merged into a union.
 Independent cases or batches run in parallel up to the configured number of `workers`
 (default 1, at most 32). Workers is a count of concurrent sandboxes, not a resource
 budget. Collection and ordinary sessions run one at a time before scoped execution
-starts.
+starts. The [fixture guard](batching.md#fixture-guard) inspects up to `workers` batches
+at a time before any of them executes.
 
 ## Order of an invocation
 
@@ -528,7 +529,9 @@ starts.
    preflight. A failure refuses the whole run before any test code executes.
 3. Collect files that are scoped as a whole, in a sandbox (or reuse a valid inventory).
 4. Run each suite's ordinary session; it also identifies scoped cases in mixed files.
-5. Reuse or execute scoped cases and batches, up to `workers` at a time.
+5. With the fixture guard, capture and inspect every batch, up to `workers` at a time,
+   and admit or refuse the run.
+6. Reuse or execute scoped cases and batches, up to `workers` at a time.
 
 `--timeout` bounds each sandboxed session: a scoped collection, case or batch. Ordinary
 suite sessions have no pytest-telescope deadline, like normal pytest; the job that runs

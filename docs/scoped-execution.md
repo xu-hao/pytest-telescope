@@ -309,7 +309,11 @@ infer them from the host. Limit resources in the job that runs pytest; every san
 child process of the invocation and stays inside those limits.
 
 Collection and ordinary sessions run one at a time; independent scoped case misses or
-batches then use up to `workers` sandboxes. By default each scoped case starts a fresh
+batches then use up to `workers` sandboxes. With the
+[fixture guard](batching.md#fixture-guard), `workers` bounds the inspection sandboxes
+too: each candidate batch's capture and inspection occupy one worker slot, capture
+first, and up to `workers` candidates are inspected at once before any body runs.
+Inspection and execution never overlap, so the bound covers both. By default each scoped case starts a fresh
 sandbox and pytest session with private scratch. The optional [batch profile](batching.md)
 instead shares one fresh sandbox and scratch only among exactly equal scopes in one
 suite/module. The number of workers does not change results and is not part of any cache
@@ -326,6 +330,15 @@ cleanup failure, drains active work, marks unscheduled selected cases with expli
 infrastructure outcomes, and waits for cleanup before accepting results. Infrastructure retry
 remains at most two attempts per scoped case or batch; a retry occupies the same worker
 slot.
+
+Guard inspection follows the same rules. Candidates are submitted in their
+deterministic order and each capture or inspection gets at most two attempts in its
+slot. A candidate that fails stops new submissions and stops the sandboxes of the
+candidates after it; candidates before it finish. The reported refusal or outage is
+therefore that of the first failing candidate in order, as with one worker. A terminal
+cleanup failure or an interruption of the invocation stops every active inspection. In
+each case the controller waits for all active sandboxes to exit and be cleaned up before
+it reports, admits nothing and dispatches no body.
 
 ## Explicit capability refusals
 

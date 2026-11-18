@@ -30,6 +30,7 @@ cannot predict dynamically collected group membership.
 
 The versioned execution profiles are `case-v2` and `batch-v2`. A batch occupies one
 worker slot regardless of member count; `workers` bounds how many cases or batches run at
+once, and how many candidate batches the [fixture guard](#fixture-guard) inspects at
 once. Set `workers` to choose the concurrency; pytest-telescope does not infer it from
 the host's CPUs. Batching does not change which source or metadata a test can read.
 
@@ -246,7 +247,12 @@ The discovery union is only an inventory view. Before bodies, collect each candi
 again in its own exact frozen execution view, with its effective environment and
 configuration, and validate selected order, declarations, fixture registry and hooks.
 Compare all candidate views and fixture owners before admitting the plan; never treat a
-union view as proof of an individual group's execution view. Collection runs Python and
+union view as proof of an individual group's execution view. A candidate's capture and
+its inspection run in that order in one worker slot, and up to `workers` candidates are
+inspected at once; see [parallel scoped workers](scoped-execution.md#parallel-scoped-workers).
+The comparison across candidates starts only after every inspection has finished, and
+group identities, admission and reported order do not depend on the worker count or on
+which inspection finished first. Collection runs Python and
 hooks and can have side effects even though selected test setup and bodies have not run.
 After admission, execution recollection checks the admitted inventory, membership,
 registry and graph immediately before setup. A later mismatch stops new dispatch, drains

@@ -21,7 +21,8 @@ error_result(error, *, fixture_guard=None)
 ```
 
 - `workers` is the number of concurrent scoped sandboxes, an integer from 1 to 32. `None`
-  uses `[tool.pytest_telescope.execution] workers`, default 1.
+  uses `[tool.pytest_telescope.execution] workers`, default 1. It bounds fixture guard
+  inspection sandboxes as well as execution sandboxes.
 - `execution_mode` is `"case"` or `"batch"`; `None` uses the configured mode, default
   `"case"`.
 - `timeout` bounds each sandboxed session (scoped collection, case or batch), from 0.1 to

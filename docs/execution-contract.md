@@ -570,7 +570,8 @@ and bounded failure evidence, not arbitrary pytest output.
   collection, case or batch); default 60 seconds, allowed range 0.1 through 3,600
   seconds. Ordinary suite sessions have no pytest-telescope deadline, like normal
   pytest; the job that runs pytest bounds them.
-- `run --workers N`: run up to N independent scoped sandboxes at once; default 1.
+- `run --workers N`: run up to N independent scoped sandboxes at once; default 1. The
+  bound covers fixture guard capture and inspection as well as execution.
 - Marker `cache=False`: always execute the case and never record a reusable
   success, regardless of other cases' cache settings.
 
@@ -658,5 +659,8 @@ and schema 4 remain unchanged; unguarded records use cache envelope 8. A body-fr
 fixture capture binds provisional context and membership; its registry and
 context-independent content commitments enter
 the final group and cache identity before context-bound inspection and execution
-revalidation. A guarded run with incomplete pre-admission observations can report guard
-state `unavailable` without inferring whether any bodies ran.
+revalidation. Each group's capture and inspection run in that order in one of the
+`workers` slots; admission compares all groups after every inspection has finished and
+does not depend on the worker count. A guarded run with incomplete pre-admission
+observations can report guard state `unavailable` without inferring whether any bodies
+ran.

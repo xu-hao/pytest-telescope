@@ -1232,10 +1232,14 @@ def run(
                             require_conservation,
                         )
 
-                        def inspect_candidate(candidate, inspection_mode):
+                        def inspect_candidate(candidate, inspection_mode, interrupted):
                             suite, unit = candidate["suite"], candidate["unit"]
                             for attempt in range(2):
                                 try:
+                                    if interrupted.is_set():
+                                        raise sandbox.InvocationInterrupted(
+                                            "run cancelled before sandbox start"
+                                        )
                                     with sandbox.invocation(manifest.root) as directory:
                                         frozen = directory / "project"
                                         materialize(
@@ -1284,6 +1288,7 @@ def run(
                                             suite=suite.name,
                                             metadata_directory=metadata,
                                             tool_view=tools.view(unit.tools),
+                                            cancellation=interrupted,
                                             request=request,
                                         )
                                 except (InfrastructureError, OSError) as exc:
@@ -1294,9 +1299,11 @@ def run(
                                             ) from exc
                                         raise
 
-                        inspections = []
-                        for candidate in candidates:
-                            candidate["capture"] = inspect_candidate(candidate, "guard-capture")
+                        def inspect_group(candidate, interrupted):
+                            """One worker slot: capture, then the context-bound inspection."""
+                            candidate["capture"] = inspect_candidate(
+                                candidate, "guard-capture", interrupted
+                            )
                             candidate["key"] = guarded_group_id(
                                 candidate["key"],
                                 candidate["capture"]["registry_id"],
@@ -1305,10 +1312,53 @@ def run(
                             candidate["path"] = state / (candidate["key"] + ".json")
                             candidate["profile"] = profile
                             candidate["inspection"] = inspect_candidate(
-                                candidate, "guard-inspection"
+                                candidate, "guard-inspection", interrupted
                             )
                             require_capture_match(candidate["capture"], candidate["inspection"])
-                            inspections.append(candidate["inspection"])
+
+                        # Candidates are submitted in order. A failure stops submissions
+                        # and interrupts only later candidates, so every earlier one still
+                        # finishes and the first failure in order is the one reported,
+                        # whatever the worker count. A cleanup failure interrupts them all.
+                        interrupts = [threading.Event() for _ in candidates]
+                        inspecting, cursor, failures = {}, 0, {}
+                        executor = ThreadPoolExecutor(max_workers=concurrency)
+                        try:
+                            while inspecting or (cursor < len(candidates) and not failures):
+                                while (
+                                    not failures
+                                    and cursor < len(candidates)
+                                    and len(inspecting) < concurrency
+                                ):
+                                    future = executor.submit(
+                                        inspect_group, candidates[cursor], interrupts[cursor]
+                                    )
+                                    inspecting[future] = cursor
+                                    cursor += 1
+                                completed, _ = wait(
+                                    inspecting, timeout=0.1, return_when=FIRST_COMPLETED
+                                )
+                                for future in completed:
+                                    index = inspecting.pop(future)
+                                    error = future.exception()
+                                    if error is None or (
+                                        isinstance(error, sandbox.InvocationInterrupted)
+                                        and interrupts[index].is_set()
+                                    ):
+                                        continue
+                                    failures[index] = error
+                                    terminal = isinstance(error, sandbox.CleanupError)
+                                    for event in interrupts[0 if terminal else index + 1 :]:
+                                        event.set()
+                        except BaseException:
+                            for event in interrupts:
+                                event.set()
+                            raise
+                        finally:
+                            executor.shutdown(wait=True, cancel_futures=False)
+                        if failures:
+                            raise failures[min(failures)]
+                        inspections = [candidate["inspection"] for candidate in candidates]
                         require_conservation(inspections, candidates)
                         guard_state["conditions"] = evaluate_conditions(
                             condition_checks, candidates
