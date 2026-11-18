@@ -684,8 +684,8 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
                 raise DeclarationError("expanded declarations exceed 100000 paths")
         return sorted(found)
 
+    from .execution import result_store_url, worker_count
     from .execution import suites as parse_suites
-    from .execution import worker_count
     from .project_metadata import load_distributions
 
     configured_suites = parse_suites(root, spec, suite_names)
@@ -724,6 +724,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
         suite.structural_files = sorted(names)
     execution = spec.get("execution", {})
     worker_count(execution)
+    result_store_url(execution)
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
     pending_inputs = []
 

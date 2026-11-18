@@ -85,8 +85,28 @@ def lock(path, timeout):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def read_record(
-    path,
+def record_limit(kind):
+    return 64 * 1024 * 1024 if kind in {"collection", "batch", "guarded-batch"} else 1_048_576
+
+
+def record_bytes(path, limit):
+    """At most `limit + 1` bytes of a regular record file, or None."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return None
+            return stream.read(limit + 1)
+    except OSError:
+        return None
+
+
+def read_record(path, key, *, kind="execution", **binding):
+    return parse_record(record_bytes(path, record_limit(kind)), key, kind=kind, **binding)
+
+
+def parse_record(
+    data,
     key,
     *,
     kind="execution",
@@ -96,14 +116,9 @@ def read_record(
     registry_id=None,
     graph_id=None,
 ):
-    limit = 64 * 1024 * 1024 if kind in {"collection", "batch", "guarded-batch"} else 1_048_576
+    """The validated result of one record's bytes, local or remote; None is a miss."""
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(descriptor, "rb") as stream:
-            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                return None
-            data = stream.read(limit + 1)
-        if len(data) > limit:
+        if type(data) is not bytes or len(data) > record_limit(kind):
             return None
         record = json.loads(data)
         if type(record) is not dict or set(record) != {"schema", "key", "result", "checksum"}:
@@ -144,8 +159,26 @@ def read_record(
         if not valid:
             return None
         return result
-    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+    except (ValueError, TypeError, KeyError, RecursionError):
         return None
+
+
+def record_content(key, result):
+    """The exact bytes of the record of `result` under `key`, as the cache writes them."""
+    record = {"schema": SCHEMA, "key": key, "result": result, "checksum": fingerprint(result)}
+    return json.dumps(record, sort_keys=True).encode()
+
+
+def parse_shared_record(data, key, **binding):
+    """The validated result of a shared record, only if its bytes are the cache's own.
+
+    A shared record is written into the local cache, and uploaded, byte for byte, so any
+    other serialization of a valid result is a miss.
+    """
+    result = parse_record(data, key, **binding)
+    if result is None or data != record_content(key, result):
+        return None
+    return result
 
 
 def write_record(path, key, result, *, kind="execution"):
@@ -154,13 +187,7 @@ def write_record(path, key, result, *, kind="execution"):
         if kind in {"collection", "guarded-batch"} or result["protocol"] == 10
         else 1_048_576
     )
-    record = {
-        "schema": SCHEMA,
-        "key": key,
-        "result": result,
-        "checksum": fingerprint(result),
-    }
-    content = json.dumps(record, sort_keys=True).encode()
+    content = record_content(key, result)
     if len(content) > limit:
         raise InfrastructureError("successful result exceeds record size limit")
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
@@ -261,18 +288,23 @@ class PendingRecords:
             self.counts[kind] -= 1
 
     def publish(self):
+        """Make every staged record eligible; return the published execution records."""
+        published = []
         while self.paths:
             path = next(iter(self.paths))
             final, kind, _ = self.paths[path]
             os.replace(path, final)
             del self.paths[path]
             self.stores[kind].add(final)
+            if kind == "execution":
+                published.append(final)
         for store in self.stores.values():
             descriptor = os.open(store.state, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
+        return published
 
     def __exit__(self, *exc):
         try:
@@ -543,6 +575,7 @@ def run(
     collect_only=False,
     fixture_guard=None,
     condition_checks=(),
+    result_store=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -551,7 +584,7 @@ def run(
     from .batching import group_jobs, project_result
     from .execution import effective_arguments as suite_arguments
     from .execution import execution_mode as choose_mode
-    from .execution import worker_count
+    from .execution import result_store_url, worker_count
     from .model import Unit, scoped_item
     from .project_metadata import materialize_metadata, metadata_records
     from .tool_capture import Capture
@@ -579,6 +612,14 @@ def run(
 
         framework_definition_ids(version("pytest"))
     concurrency = worker_count(manifest.execution, workers)
+    store_url = result_store_url(manifest.execution, result_store)
+    remote = None
+    if store_url is not None:
+        from .result_store import connect
+
+        # Execution records only; inventories stay in the local cache.
+        remote = connect(store_url, f"execution-v{SCHEMA}")
+    remote_groups, uploads = set(), {}
     profile = "batch-available-v1" if fixture_guard else mode + "-v2"
     configured = list(zip(manifest.suites, manifest.units))
     all_tests = set().union(*(set(suite.inventory) for suite, _ in configured))
@@ -766,6 +807,11 @@ def run(
                 "state": "admitted" if guard_state["admitted"] else "unavailable",
                 "conditions": guard_state["conditions"],
             }
+        if remote is not None:
+            reused = sum(group["outcome"] == "reused" for group in groups)
+            report["result_store"] = remote.report(
+                local=reused - len(remote_groups), remote=len(remote_groups)
+            )
         return report
 
     def retain_refusal(error):
@@ -956,6 +1002,7 @@ def run(
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     cancellation = threading.Event()
     blocked = None
+    published = set()
     try:
         with lock(state / ".lock", timeout * 2 + 30):
             store = CacheStore(state)
@@ -1384,26 +1431,32 @@ def run(
                         for index, row in projected:
                             results[index] = row
                     progress["grouping_complete"] = True
+                    record_kind = (
+                        "guarded-batch"
+                        if fixture_guard
+                        else "batch"
+                        if mode == "batch"
+                        else "execution"
+                    )
+
+                    def record_binding(candidate):
+                        """What a local or remote record must match to be this group's result."""
+                        return dict(
+                            kind=record_kind,
+                            case_id=candidate["case_ids"][0],
+                            group_id=candidate["key"],
+                            case_ids=candidate["case_ids"],
+                            registry_id=candidate["inspection"]["registry_id"]
+                            if fixture_guard
+                            else None,
+                            graph_id=candidate["inspection"]["graph_id"] if fixture_guard else None,
+                        )
+
                     for candidate in candidates:
                         tools.verify(candidate["unit"].tools)
                         previous = (
                             read_record(
-                                candidate["path"],
-                                candidate["key"],
-                                kind="guarded-batch"
-                                if fixture_guard
-                                else "batch"
-                                if mode == "batch"
-                                else "execution",
-                                case_id=candidate["case_ids"][0],
-                                group_id=candidate["key"],
-                                case_ids=candidate["case_ids"],
-                                registry_id=candidate["inspection"]["registry_id"]
-                                if fixture_guard
-                                else None,
-                                graph_id=candidate["inspection"]["graph_id"]
-                                if fixture_guard
-                                else None,
+                                candidate["path"], candidate["key"], **record_binding(candidate)
                             )
                             if candidate["enabled"] and not force
                             else None
@@ -1427,6 +1480,24 @@ def run(
                             if not job["enabled"]
                             else "no valid successful group record"
                         )
+                        if (
+                            remote is not None
+                            and job["enabled"]
+                            and not force
+                            and not cancellation.is_set()
+                        ):
+                            # Read-through in this worker slot: a local miss asks the store
+                            # before it starts a sandbox. Anything but this cache's own
+                            # bytes of a valid record for exactly this group is a miss.
+                            binding = record_binding(job)
+                            previous = remote.lookup(
+                                job["key"],
+                                record_limit(record_kind),
+                                lambda data: parse_shared_record(data, job["key"], **binding),
+                            )
+                            if previous is not None:
+                                projected, group = project_result(job, previous, mode, reused=True)
+                                return projected, group, previous, False, None, True
                         attempt_started = time.monotonic()
                         sessions_started = 0
 
@@ -1509,7 +1580,7 @@ def run(
                                     reason=reason if explain else "",
                                     attempt_seconds=time.monotonic() - attempt_started,
                                 )
-                                return projected, group, result, False, None
+                                return projected, group, result, False, None, False
                             except DeclarationError as exc:
                                 cancellation.set()
                                 projected, group = project_result(
@@ -1522,7 +1593,7 @@ def run(
                                 )
                                 if result is None:
                                     group["timing_complete"] = False
-                                return projected, group, None, False, exc
+                                return projected, group, None, False, exc, False
                             except (InfrastructureError, OSError) as exc:
                                 terminal = isinstance(
                                     exc, (sandbox.CleanupError, _FixtureDrift)
@@ -1543,13 +1614,15 @@ def run(
                                     group["timing_complete"] = False
                                     if isinstance(exc, sandbox.InvocationInterrupted):
                                         group["stop_reason"] = "cancelled"
-                                    return projected, group, None, terminal, None
+                                    return projected, group, None, terminal, None, False
 
                     refusal = None
 
-                    def accept(job, projected, group, terminal, error):
+                    def accept(job, projected, group, terminal, error, fetched):
                         nonlocal blocked, refusal
                         groups[job["group_index"]] = group
+                        if fetched:
+                            remote_groups.add(job["key"])
                         for index, row in projected:
                             results[index] = row
                         if error is not None and refusal is None:
@@ -1579,18 +1652,22 @@ def run(
                             completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
                             for future in completed:
                                 job = active.pop(future)
-                                projected, group, result, terminal, error = future.result()
-                                accept(job, projected, group, terminal, error)
+                                projected, group, result, terminal, error, fetched = future.result()
+                                accept(job, projected, group, terminal, error, fetched)
                                 if (
                                     result is not None
                                     and result["exit_code"] == 0
                                     and job["enabled"]
                                     and not cancellation.is_set()
                                 ):
+                                    # A fetched record enters the local cache like a fresh
+                                    # one; only a fresh one is uploaded afterwards.
                                     pending.stage(
                                         job["path"], job["key"], result, guarded=bool(fixture_guard)
                                     )
-                                    eligible_groups.add(job["key"])
+                                    if not fetched:
+                                        eligible_groups.add(job["key"])
+                                        uploads[job["path"]] = (job["key"], record_binding(job))
                     except (sandbox.InvocationInterrupted, KeyboardInterrupt):
                         blocked = (
                             "run cancelled; active sandboxes drained before result publication"
@@ -1603,8 +1680,8 @@ def run(
                         executor.shutdown(wait=True, cancel_futures=False)
                         for future, job in active.items():
                             if future.done() and not future.cancelled():
-                                projected, group, _, terminal, error = future.result()
-                                accept(job, projected, group, terminal, error)
+                                projected, group, _, terminal, error, fetched = future.result()
+                                accept(job, projected, group, terminal, error, fetched)
                         if cancellation.is_set():
                             blocked = blocked or "run cancelled"
                             for job in jobs[cursor:]:
@@ -1615,7 +1692,7 @@ def run(
                         raise refusal
                     tools.verify(tuple(manifest.tools))
                 if blocked is None:
-                    pending.publish()
+                    published = set(pending.publish())
                     progress["published"] = True
                 else:
                     # A completed success is not reusable until every owned copy is removed.
@@ -1631,6 +1708,36 @@ def run(
         for row in results:
             if row["outcome"] == "infrastructure_error":
                 row["reason"] = collection["reason"]
+    fresh = [(path, *uploads[path]) for path in uploads if path in published]
+    if remote is not None and fresh:
+        # Write-behind: only records this invocation published locally, after the cache
+        # lock is released, on at most `workers` threads. A store failure is counted in
+        # the report and never changes the run's outcome.
+        def upload(path, key, binding):
+            data = record_bytes(path, record_limit(binding["kind"]))
+            if parse_shared_record(data, key, **binding) is None:
+                # Evicted, replaced or changed since publication: a created object is
+                # permanent, so only a record that a reader would accept is uploaded.
+                remote.skip_upload()
+            else:
+                remote.upload(key, data)
+
+        active, cursor = set(), 0
+        executor = ThreadPoolExecutor(max_workers=concurrency)
+        try:
+            while cursor < len(fresh) or active:
+                while cursor < len(fresh) and len(active) < concurrency:
+                    active.add(executor.submit(upload, *fresh[cursor]))
+                    cursor += 1
+                completed, active = wait(active, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    future.result()
+        except (sandbox.InvocationInterrupted, KeyboardInterrupt):
+            # An interrupt ends the uploads, not the finished run: the uploads not yet
+            # started are skipped, and those in flight end after their current attempt.
+            remote.cancel(len(fresh) - cursor)
+        finally:
+            executor.shutdown(wait=True, cancel_futures=False)
     return summary()
 
 
@@ -1713,6 +1820,7 @@ def main(argv=None):
     execution.add_argument("--execution-mode", choices=("case", "batch"))
     execution.add_argument("--fixture-guard", choices=("available-v1",))
     execution.add_argument("--workers", type=int)
+    execution.add_argument("--result-store")
     execution.add_argument("--suite", action="append", dest="suites")
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
     guard_context = None
@@ -1741,6 +1849,7 @@ def main(argv=None):
                 suites=options.suites,
                 execution_mode=options.execution_mode,
                 fixture_guard=options.fixture_guard,
+                result_store=options.result_store,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":

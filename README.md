@@ -92,7 +92,10 @@ result, so new tests always run.
 
 In CI, keep the result cache between jobs, or use `run --cache-dir PATH` to choose its
 location. The default is `.pytest-telescope/cache`. Each run checks whether its inputs
-match a saved result; restoring a cache alone does not make a result reusable. Measure
+match a saved result; restoring a cache alone does not make a result reusable. Machines
+that share no disk can share results through an optional
+[remote result store](https://pytest-telescope.readthedocs.io/en/latest/result-store/):
+install `pytest-telescope[gcs]` and pass `run --result-store gs://bucket/prefix`. Measure
 cold and warm runs of your own suite: starting a sandbox and pytest session for each
 scoped test adds overhead, especially for short tests.
 
@@ -160,6 +163,8 @@ behavior. `-p no:telescope` disables the plugin entirely.
   the Python API, command line and capability codes.
 - [Declarations, inventory and reuse](https://pytest-telescope.readthedocs.io/en/latest/execution-contract/):
   the exact rules for declarations and cache reuse.
+- [Remote result store](https://pytest-telescope.readthedocs.io/en/latest/result-store/):
+  sharing results between machines, its trust model and failure reporting.
 - [Development guide](https://pytest-telescope.readthedocs.io/en/latest/development/) and
   [publishing guide](https://pytest-telescope.readthedocs.io/en/latest/publishing/), for
   contributors and maintainers.

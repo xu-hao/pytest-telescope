@@ -342,6 +342,12 @@ interruption of the invocation stops every active inspection. In each case the
 controller waits for all active sandboxes to exit and be cleaned up before it reports,
 admits nothing and dispatches no body.
 
+With a [remote result store](result-store.md), `workers` also bounds its requests. A
+group's lookup runs in the worker slot that would otherwise start its sandbox, and
+uploads run on at most `workers` threads after local publication, when no sandbox is
+active. Worker threads only fetch and validate; the controller alone writes fetched
+records into the local cache, through the same pending staging as new results.
+
 ## Explicit capability refusals
 
 The sandbox provides the [filesystem view](bubblewrap.md): read-only declared project

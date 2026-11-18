@@ -298,6 +298,8 @@ ordinary and scoped routes.
 Install your test dependencies and Bubblewrap, then use the same `run` command in your
 CI job. Save and restore `.pytest-telescope/cache` between jobs, or choose a location with
 `run --cache-dir PATH`. Without a saved cache, the next job must run the tests again.
+Jobs on machines that share no disk can instead share results through a
+[remote result store](result-store.md), such as `run --result-store gs://bucket/prefix`.
 
 A merge-queue job still checks the current checkout. pytest-telescope compares each
 scoped case's inputs and execution settings with the saved result before reusing it.
@@ -410,6 +412,7 @@ Declarations, inventory and reuse <execution-contract>
 Optional batches <batching>
 Metadata and suites <scoped-execution>
 Run result reference <result-schema>
+Remote result store <result-store>
 Benchmark <benchmark>
 ```
 

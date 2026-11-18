@@ -102,3 +102,72 @@ def module_rows():
         return number_rows(rows)
 
     return write
+
+
+@pytest.fixture
+def machines(tmp_path, sandbox_double, module_rows):
+    """Identical checkouts with separate local caches, with a stand-in for the sandbox.
+
+    `machine.executed` lists every case whose sandboxed session started.
+    """
+    executed, current = [], {}
+
+    def execute(*args, request, **kwargs):
+        if request["mode"] == "collection":
+            return dict(
+                protocol=11,
+                declaration_error=False,
+                context_id=request["context_id"],
+                collection_skips=[],
+                kind="collection",
+                nonce="a" * 32,
+                exit_code=0,
+                complete=True,
+                leaked_descendants=False,
+                items=current["rows"],
+                worker_seconds=0.1,
+                failures=[],
+            )
+        kwargs["on_session_start"]()
+        executed.append(request["case_id"])
+        return dict(
+            protocol=9,
+            declaration_error=False,
+            context_id=request["context_id"],
+            collection_skips=[],
+            nonce="a" * 32,
+            exit_code=0,
+            complete=True,
+            leaked_descendants=False,
+            collected=1,
+            passed=1,
+            failed=0,
+            skipped=0,
+            case_ids=[request["case_id"]],
+            case_results=[
+                dict(
+                    case_id=request["case_id"],
+                    outcome="passed",
+                    complete=True,
+                    reports=[
+                        dict(phase=phase, outcome="passed", skip_reason=None)
+                        for phase in ("setup", "call", "teardown")
+                    ],
+                )
+            ],
+            worker_seconds=0.1,
+            failures=[],
+        )
+
+    def machine(name, *, count=3, fail_outer=False):
+        root = tmp_path / name
+        root.mkdir()
+        (root / "pyproject.toml").write_text("[tool.pytest_telescope]\n")
+        current["rows"] = module_rows(
+            root, [(f"test_{number}.py", ["case"]) for number in range(count)]
+        )
+        sandbox_double(execute, fail_outer=fail_outer)
+        return root
+
+    machine.executed = executed
+    return machine

@@ -33,7 +33,7 @@ def execution_config(config):
     for name, message in REMOVED_EXECUTION.items():
         if name in config:
             raise DeclarationError(message)
-    return mapping(config, "execution", {"mode", "workers"})
+    return mapping(config, "execution", {"mode", "workers", "result_store"})
 
 
 def worker_count(config, override=None):
@@ -44,6 +44,16 @@ def worker_count(config, override=None):
     if type(count) is not int or not 1 <= count <= MAX_WORKERS:
         raise DeclarationError(f"workers must be an integer from 1 to {MAX_WORKERS}")
     return count
+
+
+def result_store_url(config, override=None):
+    """The remote result store URL of this invocation; None means no remote store."""
+    from .result_store import parse
+
+    url = execution_config(config).get("result_store") if override is None else override
+    if url is not None:
+        parse(url)
+    return url
 
 
 def execution_mode(config, override=None):

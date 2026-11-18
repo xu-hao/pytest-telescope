@@ -15,7 +15,7 @@ from pytest_telescope.plan import make_plan
 
 run(root, *, force=False, no_cache=False, explain=False, cache_dir=None, timeout=60,
     arguments=(), workers=None, suites=None, execution_mode=None, structural_files=None,
-    fixture_guard=None, condition_checks=(), collect_only=False)
+    fixture_guard=None, condition_checks=(), collect_only=False, result_store=None)
 make_plan(root, *, suites=None, structural_files=None)
 error_result(error, *, fixture_guard=None)
 ```
@@ -43,6 +43,10 @@ error_result(error, *, fixture_guard=None)
   collection cache records. The value must be a literal boolean.
 - `cache_dir` selects the cache directory; `None` uses `.pytest-telescope/cache` under
   `root`.
+- `result_store` is the URL of a [remote result store](result-store.md), such as
+  `"gs://bucket/prefix"`; `None` uses `[tool.pytest_telescope.execution] result_store`.
+  When neither is set, the run sends no remote request and its result has no
+  `result_store` field. A `gs://` URL requires the `pytest-telescope[gcs]` extra.
 - `run` raises `DeclarationError` for invalid declarations and `UnsupportedCapability`
   (a `DeclarationError` subclass with a `capability` attribute) for refusals.
   After a session has started, these typed exceptions can retain immutable, versioned
@@ -57,7 +61,7 @@ error_result(error, *, fixture_guard=None)
 python -m pytest_telescope plan
 python -m pytest_telescope run [--workers N] [--execution-mode case|batch] [--suite NAME]...
     [--force] [--no-cache] [--explain] [--collect-only] [--cache-dir PATH]
-    [--timeout SECONDS] [-- PYTEST-ARGS]
+    [--result-store URL] [--timeout SECONDS] [-- PYTEST-ARGS]
 pytest --telescope [PYTEST-ARGS]
 pytest --telescope-plan
 ```
@@ -72,6 +76,7 @@ Exit statuses: 0 passed, 1 test failure, 3 infrastructure failure,
 [tool.pytest_telescope.execution]
 mode = "case"   # or "batch"
 workers = 4     # concurrent scoped sandboxes, 1-32, default 1
+result_store = "gs://bucket/prefix"  # optional remote result store, default none
 ```
 
 The [marker and project reference](specification.md#project-configuration) defines
@@ -723,6 +728,8 @@ below `/project`. A frozen-tool source or original-path alias may not lie inside
 | `metadata:pep621-static-v1` | Local distribution metadata cannot be translated from the supported static PEP 621 fields. |
 | `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
 | `project:links` | A project input contains an unsupported directory symlink. |
+| `result-store:backend` | The [remote result store](result-store.md) URL names a scheme other than `gs`. |
+| `result-store:gcs` | A `gs://` result store is configured but the Google Cloud Storage client is not installed; install `pytest-telescope[gcs]`. |
 
 Frozen Git history is not supported, so there are no `git:` capability codes.
 
@@ -752,6 +759,9 @@ all fields and accounting rules.
   with profile `ordinary-v2`, never cache eligible.
 - `collection.suites` has one row per suite and route, each with `route` and `files`.
 - Timings report wall-clock durations. CPU and resource accounting belong to the caller.
+- A run with a configured [remote result store](result-store.md) adds `result_store`:
+  the store's state, the reused groups served locally and remotely, and lookup and
+  upload counts.
 
 ## Fixture guard API
 
@@ -760,7 +770,7 @@ Python signature above, `fixture_guard` is exactly `None` or `"available-v1"`; t
 requires batch mode and refuses ordinary or mixed structural routes. The CLI opts in
 with `run --fixture-guard available-v1`; it accepts no condition expectation values.
 Existing calls and CLI behavior with the guard omitted retain schema 4 and use cache
-envelope 8. The [joint protocol
+envelope 9. The [joint protocol
 table](result-schema.md#internal-protocol-and-cache-versions) applies to both guarded
 and unguarded records.
 
