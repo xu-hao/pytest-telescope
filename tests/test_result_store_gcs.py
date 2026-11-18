@@ -110,14 +110,12 @@ class Service(requests.adapters.BaseAdapter):
 @pytest.fixture
 def service(monkeypatch):
     """Route the client that `gs://` stores construct to the in-memory service."""
-    served = Service()
+    served, real_client = Service(), storage.Client
 
     def client():
         session = AuthorizedSession(AnonymousCredentials())
         session.mount("https://", served)
-        return storage.Client(
-            project="synthetic", credentials=AnonymousCredentials(), _http=session
-        )
+        return real_client(project="synthetic", credentials=AnonymousCredentials(), _http=session)
 
     monkeypatch.setattr(storage, "Client", client)
     monkeypatch.setattr(result_store, "RETRY_DELAYS", (0, 0))

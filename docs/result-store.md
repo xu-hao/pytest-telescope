@@ -81,7 +81,10 @@ uploads those records, byte for byte, under the same names. An upload only creat
 is conditional on no object existing under that name (generation precondition 0). When
 two machines record the same key at the same time, the first upload is kept and the
 other is told the object exists, which counts as success. Nothing in the store is ever
-replaced. A record that was itself fetched from the store is not uploaded again.
+replaced. A record that was itself fetched from the store is not uploaded again, and
+neither is a record that the local cache already held before the invocation: a local
+hit sends no request. To upload results that so far exist only in a local cache, run
+once with `--force`.
 
 Only what the local cache would record is uploaded. A failed or incomplete group, a
 group marked `cache=False`, a run with `--no-cache`, and an invocation whose cleanup
@@ -132,7 +135,8 @@ test outcome. Every remote request is bounded:
   three attempts for one lookup or upload. The client library's own retries are
   disabled, so these are the only repetitions.
 - A request that is rejected (denied access, missing credentials, or any other
-  response) is not repeated.
+  response) is not repeated. The client resolves credentials once, on the first
+  request; a run that finds none has its first lookup rejected.
 
 When a lookup or upload has used its attempts, or was rejected, the store is *degraded*
 for the rest of the invocation. No further request starts: the remaining lookups are
@@ -144,6 +148,9 @@ status and exit code its tests earned.
 The report states the degraded store and counts what failed, so that a caller can raise
 an infrastructure incident for the store while accepting the test results. A degraded
 store is reported, never hidden as an ordinary cache miss.
+
+Interrupting an invocation while it uploads ends it like any other interruption. Its
+local records are already published by then; the records not yet uploaded stay local.
 
 ## Accounting
 
