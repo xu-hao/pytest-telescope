@@ -255,7 +255,7 @@ Previously valid A records survive that refusal; no new result is published. An 
 union and permits A alone. Record reusability and admission of an invocation are
 distinct: a mid-invocation source change also prevents pending publication.
 
-Capture runs under the invocation's stable cache lock and owned staging. It performs
+Capture runs in the invocation's owned staging, without the cache lock. It performs
 bounded no-follow entry reads, before/after source checks, a complete final source-record
 pass and independent staged-content verification. It never hard-links mutable source
 files. Immutable owned material may be shared between its views. Recheck relevant source,
@@ -374,7 +374,7 @@ charges its candidate evaluations to the discovery budget.
 
 Bounded defaults: 100,000 actual cases; 100,000 declared paths; 200,000 visited entries while expanding declared directories and globs; 64 MiB per source file; 2 GiB total frozen project bytes; 4,096 bytes per node ID/path; 64 path components; 64 MiB inventory/result-summary encoding; 1 MiB individual case execution response; 64 MiB batch execution response/cache record; 4,096 selected members per batch. An oversized group refuses the entire plan before fresh group execution instead of splitting silently. Static parsing accepts at most 4 MiB, 200,000 AST nodes and depth 128 per Python source file, and in total 2 GiB of Python source, 268,435,456 (2^28) AST nodes and 100,000 literal marker calls, as described [below](#static-parse-budget). Bounded traversal counts nodes without first constructing an unbounded list; parser-depth and allocation failures become declaration errors. Reusable bundle count/depth limits remain separate from case cardinality.
 
-Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the existing stable lock; scan/GC once per invocation and incrementally account new records. New records remain ineligible pending files until the complete invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Pending storage has separate bounded budgets of 256 MiB for cases and 64 MiB for inventory; abandoned pending files are recovered under the same stable lock. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
+Retain up to 100,000 successful execution records (singleton cases or atomic batches) within a 256 MiB total cache budget, plus inventory records within a 64 MiB aggregate inventory budget. The inventory record-count bound is `max(8, selected_suite_count)`, at most 64 records. Enforce both count and byte limits under the cache lock when publishing: each publication scans the cache once, then accounts its new records incrementally. New records remain ineligible pending files in the invocation's private staging directory until the complete invocation has cleaned successfully. A cleanup failure discards those pending records and preserves previously valid hits. Each invocation's pending storage has separate bounded budgets of 100,000 records and 256 MiB for cases and of the inventory record-count bound and 64 MiB for inventory. Eviction changes performance only. Bounded output and record parsing apply during I/O, not after unbounded capture. Limits produce explicit errors and never silently truncate inventory.
 
 The controller freezes each distinct declared file once per invocation and reuses its
 file record when computing case keys. It prepares a sandbox view only for cases that
@@ -387,6 +387,30 @@ Each cache miss still starts a sandboxed pytest session: one per case by default
 one per group in batch mode. Repeated collection of a large parametrized module can
 therefore be expensive. Reusing an inventory or result starts no sandbox. Ordinary
 sessions always run.
+
+### Invocations sharing a cache
+
+Invocations that use the same cache directory run at the same time. The cache lock
+(`.lock` in the cache directory) is held only for short critical sections: when an
+invocation starts, to create its private staging directory and recover abandoned ones,
+and when it publishes, to scan the cache, move its staged records into place, trim the
+cache to its bounds and sync the directories. Snapshotting, ordinary sessions,
+sandboxed collection, fixture-guard inspection and test sessions run without it, so an
+invocation never waits for another's tests.
+
+Each invocation stages new records in its own directory below `staging` in the cache
+directory, which it holds with an owner lock until it removes the directory. Recovery
+removes only staging whose owner lock is free: that of an invocation which ended without
+cleanup, such as one that was killed. Its staged records never become eligible. Staging
+whose owner still runs is never touched, by recovery or by another invocation's
+publication.
+
+Reading a record needs no lock. Every record is written to a temporary file, synced and
+renamed into place, so a reader sees a complete record or none; a record that another
+invocation evicts while it is read is a miss. Two invocations that miss the same key
+may therefore both execute it, and each publishes the same complete success only after
+its own cleanup; later invocations reuse it. An invocation that is interrupted, killed or
+refused, or whose cleanup fails, publishes none of its staged records.
 
 ### Static parse budget
 
@@ -628,9 +652,10 @@ A failed test remains a failed execution and never becomes a reusable success. T
 interpreter probe and Bubblewrap preflight get at most two attempts for transient
 failures; a missing `bwrap` or a namespace denial refuses immediately. A scoped collection,
 case or batch gets at most two execution attempts for infrastructure failures; an
-ordinary session gets one and has no pytest-telescope deadline. Cache lock acquisition
-is bounded by twice the configured timeout plus 30 seconds; a concurrent invocation that
-waits behind a long ordinary session can therefore end with an infrastructure outcome. Startup, deadline, output, storage, invalid-result, or cleanup
+ordinary session gets one and has no pytest-telescope deadline. Each cache lock acquisition
+is bounded by twice the configured timeout plus 30 seconds. The lock is held only to
+create staging and to publish, never during a session, so an invocation does not wait
+behind another's tests ([invocations sharing a cache](#invocations-sharing-a-cache)). Startup, deadline, output, storage, invalid-result, or cleanup
 failure that exhausts recovery ends with an infrastructure outcome. Use `--force` to
 rerun a case when you suspect its cached result. Removing a damaged record causes a
 rerun; the case must pass again before its result can be reused.

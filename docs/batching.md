@@ -116,10 +116,12 @@ failed descendant cleanup and failure to clean up the invocation prevent reusabl
 Cancellation stops new submissions and drains all owned active groups. Unstarted
 members remain explicitly accounted. No fallback widens the view or runs ordinary.
 
-The main controller retains the global cache lock and pending-record staging. A group
+The main controller owns its invocation's private pending-record staging. A group
 record is staged only for a complete successful group, then becomes eligible only after
-all required workers and outer invocation cleanup complete. A terminal cleanup failure
-prevents publication of all new records, including other groups' successes.
+all required workers and outer invocation cleanup complete; the cache lock is taken only
+for that publication, not while groups run. A terminal cleanup failure prevents
+publication of all new records, including other groups' successes. See
+[invocations sharing a cache](execution-contract.md#invocations-sharing-a-cache).
 
 ## Machine accounting
 

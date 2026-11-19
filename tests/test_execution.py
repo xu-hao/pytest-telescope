@@ -104,8 +104,14 @@ def test_failed_and_corrupt_records_execute_again(project):
 def test_concurrent_invocations_accept_only_complete_success(project):
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: controller.run(project), range(2)))
-    assert sorted(item["counts"]["executed"] for item in results) == [0, 1]
-    assert all(item["cases"]["passed"] == 1 for item in results)
+    # The cache lock covers staging and publication only, so both invocations may
+    # execute the cold key; neither reads a partial record.
+    for item in results:
+        assert item["status"] == "passed" and item["cases"]["passed"] == 1, item
+        assert item["counts"]["executed"] + item["counts"]["reused"] == 1, item
+        assert item["counts"]["executed"] in {0, 1}, item
+    assert run(project)["counts"]["reused"] == 1
+    assert not list((project / ".pytest-telescope/cache/staging").iterdir())
 
 
 def test_explicit_environment_and_selectors_invalidate(project, monkeypatch):
