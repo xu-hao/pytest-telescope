@@ -322,9 +322,12 @@ without an unbounded future queue. All summary rows appear in deterministic suit
 order and each current case is accounted exactly once. Completion order never changes
 identity or counts.
 
-A single controller owns the stable cache lock and all cache mutation. Worker threads
-return fully validated results only after their own sandbox has exited. New records stay
-pending until every worker, cancellation handler and frozen-copy cleanup completes. Any
+A single controller owns all cache mutation of its invocation. Worker threads return
+fully validated results only after their own sandbox has exited. New records stay
+pending in the invocation's private staging until every worker, cancellation handler and
+frozen-copy cleanup completes; the controller takes the cache lock only to publish them,
+so other invocations sharing the cache directory run their sandboxes at the same time
+([invocations sharing a cache](execution-contract.md#invocations-sharing-a-cache)). Any
 terminal cleanup failure prevents publication of all new records; previously eligible
 records remain intact. The scheduler stops submitting work on cancellation or terminal
 cleanup failure, drains active work, marks unscheduled selected cases with explicit

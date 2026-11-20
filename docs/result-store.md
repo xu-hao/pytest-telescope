@@ -215,5 +215,5 @@ Lookups and uploads use the [worker pool](scoped-execution.md#parallel-scoped-wo
 A group's lookup runs in the worker slot that would otherwise start its sandbox, so at
 most `workers` lookups or sandboxes are active together. Uploads start after local
 publication, when no sandbox is running, on at most `workers` threads. The local cache
-lock is released before uploads begin, so a slow store does not hold up another
-invocation that uses the same cache directory.
+lock is held only while records are published and is released before uploads begin, so a
+slow store does not hold up another invocation that uses the same cache directory.

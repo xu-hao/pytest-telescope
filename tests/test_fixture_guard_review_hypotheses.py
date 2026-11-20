@@ -81,8 +81,8 @@ def observe_transport(monkeypatch, names, corrupt_b):
 
     def stage(self, final, key, result, *, kind="execution", guarded=False):
         real_stage(self, final, key, result, kind=kind, guarded=guarded)
-        pending = final.with_name(key + "." + self.token + ".pending")
-        assert pending.exists()
+        (pending,) = [path for path, (target, _, _) in self.paths.items() if target == final]
+        assert pending.exists() and pending.parent == self.directory
         staged.append((kind, guarded, key, final, pending))
         events.append(("stage", kind, key))
 

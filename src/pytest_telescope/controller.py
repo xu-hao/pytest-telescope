@@ -6,6 +6,7 @@ import hashlib
 import heapq
 import math
 import re
+import shutil
 import stat
 from importlib.metadata import version
 
@@ -206,10 +207,28 @@ def write_record(path, key, result, *, kind="execution"):
         temporary.unlink(missing_ok=True)
 
 
-class CacheStore:
-    """One bounded scan per invocation, then incremental owned-record accounting."""
+# Execution records: count and total bytes, in the cache and in one invocation's staging.
+RECORD_BOUNDS = (100_000, 256 * 1024 * 1024)
+INVENTORY_BYTES = 64 * 1024 * 1024
+# Staging directories of concurrent or abandoned invocations sharing one cache.
+STAGING_LIMIT = 1024
 
-    def __init__(self, state, *, count=100_000, size=256 * 1024 * 1024):
+
+def _fsync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+class CacheStore:
+    """One bounded scan per publication, then incremental owned-record accounting.
+
+    Construct and use it only under the cache lock.
+    """
+
+    def __init__(self, state, *, count=RECORD_BOUNDS[0], size=RECORD_BOUNDS[1]):
         self.state = state
         self.count, self.size = count, size
         self.records, self.heap, self.total = {}, [], 0
@@ -221,6 +240,8 @@ class CacheStore:
                     r"[0-9a-f]{64}\.[0-9a-f]{32}\.(?:tmp|pending)(?:\.[0-9a-f]{32}\.tmp)?",
                     entry.name,
                 ):
+                    # Staging left here by an earlier release, which held the cache lock
+                    # for its whole run. No invocation stages beside the records any more.
                     Path(entry.path).unlink(missing_ok=True)
                 elif re.fullmatch(r"[0-9a-f]{64}\.json", entry.name):
                     self.add(Path(entry.path), trim=False)
@@ -254,11 +275,70 @@ def collect_cache(state):
     return CacheStore(state)
 
 
-class PendingRecords:
-    """Keep new records ineligible until the complete frozen-pool invocation cleans."""
+def recover_staging(staging):
+    """Remove the staging of invocations that no longer hold their owner lock.
 
-    def __init__(self, execution_store, inventory_store):
-        self.stores = {"execution": execution_store, "collection": inventory_store}
+    Call only under the cache lock. Staging directories are created under it, each with
+    its owner lock already held, so one whose owner lock can be taken is abandoned and
+    one without an owner lock is an owner's empty directory that is being removed.
+    """
+    with os.scandir(staging) as entries:
+        paths = []
+        for entry in entries:
+            if len(paths) >= STAGING_LIMIT:
+                raise InfrastructureError("cache staging entry limit exceeded")
+            if not re.fullmatch(r"inv-[0-9a-f]{32}", entry.name) or not entry.is_dir(
+                follow_symlinks=False
+            ):
+                raise InfrastructureError("unrecognized cache staging entry; recovery stopped")
+            paths.append(Path(entry.path))
+    for directory in paths:
+        try:
+            try:
+                descriptor = os.open(directory / "owner.lock", os.O_RDWR | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                # Its owner removed every staged record before its owner lock, so only
+                # the empty directory can remain.
+                with contextlib.suppress(FileNotFoundError):
+                    directory.rmdir()
+                continue
+        except OSError as error:
+            raise InfrastructureError(
+                "unrecognized cache staging entry; recovery stopped"
+            ) from error
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                continue
+            # Either its owner ended without cleanup, or it finished retiring the
+            # directory after the open above; nothing staged there can be published.
+            shutil.rmtree(directory)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            raise InfrastructureError("abandoned cache staging could not be removed") from error
+        finally:
+            os.close(descriptor)
+
+
+class PendingRecords:
+    """Keep new records ineligible until the complete frozen-pool invocation cleans.
+
+    Each invocation stages its records in its own directory below the cache, held by an
+    owner lock, and moves them into the cache only when it publishes. The cache lock is
+    held only to create that directory, to recover abandoned ones and to publish: never
+    while a sandbox runs, so invocations that share a cache overlap.
+    """
+
+    def __init__(self, state, *, inventory_count, timeout):
+        self.state = state
+        self.inventory = state / "inventory"
+        self.bounds = {
+            "execution": RECORD_BOUNDS,
+            "collection": (inventory_count, INVENTORY_BYTES),
+        }
+        self.timeout = timeout
         self.publish_on_exit = False
         self.paths = {}
         self.queues = {"execution": [], "collection": []}
@@ -266,12 +346,34 @@ class PendingRecords:
         self.counts = {"execution": 0, "collection": 0}
         self.sequence = 0
         self.token = uuid.uuid4().hex
+        self.directory = None
+        self.descriptor = None
 
     def __enter__(self):
+        with lock(self.state / ".lock", self.timeout):
+            self.inventory.mkdir(exist_ok=True, mode=0o700)
+            staging = self.state / "staging"
+            staging.mkdir(exist_ok=True, mode=0o700)
+            if staging.is_symlink() or not staging.is_dir():
+                raise InfrastructureError("cache staging must be an owned directory")
+            recover_staging(staging)
+            directory = staging / ("inv-" + self.token)
+            directory.mkdir(mode=0o700)
+            try:
+                descriptor = os.open(
+                    directory / "owner.lock",
+                    os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW,
+                    0o600,
+                )
+            except OSError:
+                directory.rmdir()
+                raise
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        self.directory, self.descriptor = directory, descriptor
         return self
 
     def stage(self, final, key, result, *, kind="execution", guarded=False):
-        path = final.with_name(key + "." + self.token + ".pending")
+        path = self.directory / f"{key}.{kind}.pending"
         write_record(path, key, result, kind="guarded-batch" if guarded else kind)
         size = path.stat().st_size
         self.paths[path] = (final, kind, size)
@@ -279,8 +381,8 @@ class PendingRecords:
         heapq.heappush(self.queues[kind], (self.sequence, path))
         self.sizes[kind] += size
         self.counts[kind] += 1
-        store = self.stores[kind]
-        while self.sizes[kind] > store.size or self.counts[kind] > store.count:
+        count, limit = self.bounds[kind]
+        while self.sizes[kind] > limit or self.counts[kind] > count:
             _, old = heapq.heappop(self.queues[kind])
             _, _, removed = self.paths.pop(old)
             old.unlink()
@@ -290,20 +392,26 @@ class PendingRecords:
     def publish(self):
         """Make every staged record eligible; return the published execution records."""
         published = []
-        while self.paths:
-            path = next(iter(self.paths))
-            final, kind, _ = self.paths[path]
-            os.replace(path, final)
-            del self.paths[path]
-            self.stores[kind].add(final)
-            if kind == "execution":
-                published.append(final)
-        for store in self.stores.values():
-            descriptor = os.open(store.state, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
+        if not self.paths:
+            return published
+        with lock(self.state / ".lock", self.timeout):
+            stores = {
+                kind: CacheStore(state, count=count, size=size)
+                for kind, state, (count, size) in (
+                    ("execution", self.state, self.bounds["execution"]),
+                    ("collection", self.inventory, self.bounds["collection"]),
+                )
+            }
+            while self.paths:
+                path = next(iter(self.paths))
+                final, kind, _ = self.paths[path]
+                os.replace(path, final)
+                del self.paths[path]
+                stores[kind].add(final)
+                if kind == "execution":
+                    published.append(final)
+            for store in stores.values():
+                _fsync_directory(store.state)
         return published
 
     def __exit__(self, *exc):
@@ -312,12 +420,24 @@ class PendingRecords:
                 self.publish()
         finally:
             try:
-                for path in self.paths:
-                    path.unlink(missing_ok=True)
-            except OSError as error:
+                # Everything below the directory is this owner's while it holds the lock.
+                with os.scandir(self.directory) as entries:
+                    for visited, entry in enumerate(entries, 1):
+                        if visited > 2 * RECORD_BOUNDS[0] + 2:
+                            raise InfrastructureError("cache staging entry limit exceeded")
+                        if entry.name != "owner.lock":
+                            Path(entry.path).unlink()
+                self.paths.clear()
+                (self.directory / "owner.lock").unlink()
+                with contextlib.suppress(FileNotFoundError):
+                    # Recovery may already have removed the emptied directory.
+                    self.directory.rmdir()
+            except (OSError, InfrastructureError) as error:
                 raise sandbox.CleanupError(
                     "pending result cleanup failed; no new records were eligible"
                 ) from error
+            finally:
+                os.close(self.descriptor)
 
 
 def runner_identity():
@@ -1004,511 +1124,271 @@ def run(
     blocked = None
     published = set()
     try:
-        with lock(state / ".lock", timeout * 2 + 30):
-            store = CacheStore(state)
-            inventory_state = state / "inventory"
-            inventory_state.mkdir(exist_ok=True, mode=0o700)
-            inventory_store = CacheStore(
-                inventory_state, count=max(8, len(configured)), size=64 * 1024 * 1024
-            )
-            with PendingRecords(store, inventory_store) as pending:
-                with (
-                    sandbox.invocation(manifest.root) as pool_directory,
-                    Capture(manifest, pool_directory, timeout, cancellation, sandbox=box) as tools,
-                ):
-                    pool = pool_directory / "project"
-                    records = snapshot(manifest, manifest.pool, pool)
-                    frozen_registry = FrozenRegistry(
-                        pool, records, manifest.pool.tool_links, manifest.scans
-                    )
-                    for suite, _ in configured:
-                        suite_directories(pool, suite)
-                    record_map = {record["path"]: record for record in records}
-                    tools.verify_project(record_map)
-                    frozen_scope_hashes, metadata_hashes = {}, {}
+        inventory_state = state / "inventory"
+        with PendingRecords(
+            state, inventory_count=max(8, len(configured)), timeout=timeout * 2 + 30
+        ) as pending:
+            with (
+                sandbox.invocation(manifest.root) as pool_directory,
+                Capture(manifest, pool_directory, timeout, cancellation, sandbox=box) as tools,
+            ):
+                pool = pool_directory / "project"
+                records = snapshot(manifest, manifest.pool, pool)
+                frozen_registry = FrozenRegistry(
+                    pool, records, manifest.pool.tool_links, manifest.scans
+                )
+                for suite, _ in configured:
+                    suite_directories(pool, suite)
+                record_map = {record["path"]: record for record in records}
+                tools.verify_project(record_map)
+                frozen_scope_hashes, metadata_hashes = {}, {}
 
-                    def metadata_identity(names):
-                        key = tuple(names)
-                        if key not in metadata_hashes:
-                            metadata_hashes[key] = metadata_records(manifest.distributions, names)
-                        return metadata_hashes[key]
+                def metadata_identity(names):
+                    key = tuple(names)
+                    if key not in metadata_hashes:
+                        metadata_hashes[key] = metadata_records(manifest.distributions, names)
+                    return metadata_hashes[key]
 
-                    for suite, collection_unit in configured:
-                        if collection_unit is None:
-                            continue
-                        row = observation(suite, "scoped")
-                        effective, options, selectors, disabled = invocations[suite.name]
-                        registry = frozen_registry.for_view(collection_unit)
-                        collection_tools = tools.view(collection_unit.tools)
-                        collection_environment = unit_environment(collection_unit)
-                        inventory_key = fingerprint(
-                            {
-                                **common,
-                                "suite": suite.identity(),
-                                "structural_files": suite.structural_files,
-                                **(
-                                    {"config_digest": suite.config_digest()}
-                                    if suite.config not in collection_unit.inputs
-                                    else {}
-                                ),
-                                "all_args": effective,
-                                "kind": "collection",
-                                "inputs": [record_map[name] for name in collection_unit.inputs],
-                                "absent": collection_unit.absent,
-                                "metadata": metadata_identity(collection_unit.distributions),
-                                "files": collection_unit.tests,
-                                "registry": registry,
-                                **(
-                                    {"tools": collection_tools.identity}
-                                    if collection_unit.tools
-                                    else {}
-                                ),
-                                "environment": fingerprint(collection_environment),
-                            }
-                        )
-                        inventory_path = inventory_state / (inventory_key + ".json")
-                        enabled_inventory = collection_unit.cache and not no_cache
-                        collected = (
-                            read_record(inventory_path, inventory_key, kind="collection")
-                            if enabled_inventory and not force
-                            else None
-                        )
-                        if collected is not None and not inventory_matches_manifest(
-                            collected, manifest
-                        ):
-                            collected = None
-                        reused = collected is not None
-                        session_started()
-                        for attempt in range(0 if reused else 2):
-                            try:
-                                with sandbox.invocation(manifest.root) as directory:
-                                    frozen = directory / "project"
-                                    materialize(
-                                        pool, collection_unit, frozen, record_map, suite=suite
-                                    )
-                                    suite_directories(frozen, suite)
-                                    metadata = directory / "metadata"
-                                    materialize_metadata(
-                                        manifest.distributions,
-                                        collection_unit.distributions,
-                                        metadata,
-                                    )
-                                    if frozen_registry.for_view(collection_unit) != registry:
-                                        raise InfrastructureError(
-                                            "frozen collection registry changed"
-                                        )
-                                    collected = sandbox.execute(
-                                        box,
-                                        frozen,
-                                        _session_arguments(suite, options, collection_unit.tests),
-                                        collection_environment,
-                                        timeout,
-                                        root=manifest.root,
-                                        invocation_directory=directory,
-                                        suite_root=suite.root,
-                                        suite_cwd=suite.cwd,
-                                        suite=suite.name,
-                                        metadata_directory=metadata,
-                                        tool_view=tools.view(collection_unit.tools),
-                                        selection_disabled=disabled,
-                                        allow_unknown_selectors=True,
-                                        request={
-                                            "mode": "collection",
-                                            "registry": registry,
-                                            "selectors": selectors,
-                                            "context_id": inventory_key,
-                                        },
-                                    )
-                                break
-                            except InfrastructureError as exc:
-                                if attempt == 1 or isinstance(exc, sandbox.CleanupError):
-                                    row["outcome"] = "infrastructure_error"
-                                    stop("infrastructure_error", str(exc))
-                                    return summary()
-                        row["skips"] = [
-                            {**skip, "phase": "collect"} for skip in collected["collection_skips"]
-                        ]
-                        if collected["declaration_error"]:
-                            raise DeclarationError(
-                                "unsupported or changed declarations during sandboxed collection"
-                            )
-                        if collected["exit_code"] not in (0, 5):
-                            row.update(outcome="failed", worker_seconds=collected["worker_seconds"])
-                            stop("failed", "sandboxed collection failed", collected["failures"])
-                            return summary()
-                        if not inventory_matches_manifest(collected, manifest) or not all(
-                            scoped_item(manifest, item) for item in collected["items"]
-                        ):
-                            raise InfrastructureError(
-                                "collected inventory disagrees with frozen declarations"
-                            )
-                        seen_files.update(
-                            hashlib.sha256(name.encode()).hexdigest()
-                            for name in collection_unit.tests
-                        )
-                        if enabled_inventory and collected["exit_code"] == 0 and not reused:
-                            pending.stage(
-                                inventory_path, inventory_key, collected, kind="collection"
-                            )
-                        row.update(
-                            outcome="reused" if reused else "executed",
-                            collected=len(collected["items"]),
-                            worker_seconds=0 if reused else collected["worker_seconds"],
-                            inventory_digest=fingerprint(
-                                sorted(
-                                    [suite.name, item["case_id"], item["file"]]
-                                    for item in collected["items"]
-                                )
+                for suite, collection_unit in configured:
+                    if collection_unit is None:
+                        continue
+                    row = observation(suite, "scoped")
+                    effective, options, selectors, disabled = invocations[suite.name]
+                    registry = frozen_registry.for_view(collection_unit)
+                    collection_tools = tools.view(collection_unit.tools)
+                    collection_environment = unit_environment(collection_unit)
+                    inventory_key = fingerprint(
+                        {
+                            **common,
+                            "suite": suite.identity(),
+                            "structural_files": suite.structural_files,
+                            **(
+                                {"config_digest": suite.config_digest()}
+                                if suite.config not in collection_unit.inputs
+                                else {}
                             ),
+                            "all_args": effective,
+                            "kind": "collection",
+                            "inputs": [record_map[name] for name in collection_unit.inputs],
+                            "absent": collection_unit.absent,
+                            "metadata": metadata_identity(collection_unit.distributions),
+                            "files": collection_unit.tests,
+                            "registry": registry,
+                            **(
+                                {"tools": collection_tools.identity}
+                                if collection_unit.tools
+                                else {}
+                            ),
+                            "environment": fingerprint(collection_environment),
+                        }
+                    )
+                    inventory_path = inventory_state / (inventory_key + ".json")
+                    enabled_inventory = collection_unit.cache and not no_cache
+                    collected = (
+                        read_record(inventory_path, inventory_key, kind="collection")
+                        if enabled_inventory and not force
+                        else None
+                    )
+                    if collected is not None and not inventory_matches_manifest(
+                        collected, manifest
+                    ):
+                        collected = None
+                    reused = collected is not None
+                    session_started()
+                    for attempt in range(0 if reused else 2):
+                        try:
+                            with sandbox.invocation(manifest.root) as directory:
+                                frozen = directory / "project"
+                                materialize(pool, collection_unit, frozen, record_map, suite=suite)
+                                suite_directories(frozen, suite)
+                                metadata = directory / "metadata"
+                                materialize_metadata(
+                                    manifest.distributions,
+                                    collection_unit.distributions,
+                                    metadata,
+                                )
+                                if frozen_registry.for_view(collection_unit) != registry:
+                                    raise InfrastructureError("frozen collection registry changed")
+                                collected = sandbox.execute(
+                                    box,
+                                    frozen,
+                                    _session_arguments(suite, options, collection_unit.tests),
+                                    collection_environment,
+                                    timeout,
+                                    root=manifest.root,
+                                    invocation_directory=directory,
+                                    suite_root=suite.root,
+                                    suite_cwd=suite.cwd,
+                                    suite=suite.name,
+                                    metadata_directory=metadata,
+                                    tool_view=tools.view(collection_unit.tools),
+                                    selection_disabled=disabled,
+                                    allow_unknown_selectors=True,
+                                    request={
+                                        "mode": "collection",
+                                        "registry": registry,
+                                        "selectors": selectors,
+                                        "context_id": inventory_key,
+                                    },
+                                )
+                            break
+                        except InfrastructureError as exc:
+                            if attempt == 1 or isinstance(exc, sandbox.CleanupError):
+                                row["outcome"] = "infrastructure_error"
+                                stop("infrastructure_error", str(exc))
+                                return summary()
+                    row["skips"] = [
+                        {**skip, "phase": "collect"} for skip in collected["collection_skips"]
+                    ]
+                    if collected["declaration_error"]:
+                        raise DeclarationError(
+                            "unsupported or changed declarations during sandboxed collection"
                         )
-                        if len(results) + len(scoped) + len(collected["items"]) > 100_000:
-                            raise DeclarationError("combined suite inventory exceeds 100000 cases")
-                        for item in collected["items"]:
-                            if item["file"] not in suite.inventory:
-                                raise DeclarationError(
-                                    "collected item is outside its structural suite"
-                                )
-                            seen_aliases.update(item["aliases"])
-                            scoped.append((suite, item, collected["items"]))
-                    if not ordinary_sessions(scoped):
+                    if collected["exit_code"] not in (0, 5):
+                        row.update(outcome="failed", worker_seconds=collected["worker_seconds"])
+                        stop("failed", "sandboxed collection failed", collected["failures"])
                         return summary()
-                    if requested_selectors - seen_aliases - seen_files:
-                        raise DeclarationError("selector does not identify a collected case")
+                    if not inventory_matches_manifest(collected, manifest) or not all(
+                        scoped_item(manifest, item) for item in collected["items"]
+                    ):
+                        raise InfrastructureError(
+                            "collected inventory disagrees with frozen declarations"
+                        )
+                    seen_files.update(
+                        hashlib.sha256(name.encode()).hexdigest() for name in collection_unit.tests
+                    )
+                    if enabled_inventory and collected["exit_code"] == 0 and not reused:
+                        pending.stage(inventory_path, inventory_key, collected, kind="collection")
+                    row.update(
+                        outcome="reused" if reused else "executed",
+                        collected=len(collected["items"]),
+                        worker_seconds=0 if reused else collected["worker_seconds"],
+                        inventory_digest=fingerprint(
+                            sorted(
+                                [suite.name, item["case_id"], item["file"]]
+                                for item in collected["items"]
+                            )
+                        ),
+                    )
+                    if len(results) + len(scoped) + len(collected["items"]) > 100_000:
+                        raise DeclarationError("combined suite inventory exceeds 100000 cases")
+                    for item in collected["items"]:
+                        if item["file"] not in suite.inventory:
+                            raise DeclarationError("collected item is outside its structural suite")
+                        seen_aliases.update(item["aliases"])
+                        scoped.append((suite, item, collected["items"]))
+                if not ordinary_sessions(scoped):
+                    return summary()
+                if requested_selectors - seen_aliases - seen_files:
+                    raise DeclarationError("selector does not identify a collected case")
 
-                    jobs, scopes, digests, file_markers = [], {}, {}, {}
-                    progress["scoped_rows"] = True
-                    for suite, item, inventory in scoped:
-                        index = len(results)
-                        if not item["selected"]:
-                            results.append(
-                                _row(
-                                    item,
-                                    suite,
-                                    "scoped",
-                                    "not-selected",
-                                    "not selected by pytest arguments" if explain else "",
-                                )
-                            )
-                            continue
-                        signature = (suite.name, item["file"], tuple(item["origins"]))
-                        file_key = (suite.name, item["file"])
-                        if file_key not in file_markers:
-                            file_markers[file_key] = {
-                                name
-                                for entry in inventory
-                                if entry["file"] == item["file"]
-                                for name in entry["markers"]
-                            }
-                        if signature not in scopes:
-                            unit = case_unit(manifest, item, suite)
-                            tool_view = tools.view(unit.tools)
-                            inputs = tuple(unit.inputs)
-                            if inputs not in frozen_scope_hashes:
-                                frozen_scope_hashes[inputs] = fingerprint(
-                                    [record_map[name] for name in unit.inputs]
-                                )
-                            scopes[signature] = (
-                                unit,
-                                fingerprint(
-                                    {
-                                        "inputs": frozen_scope_hashes[inputs],
-                                        **(
-                                            {
-                                                "config_digest": suite.config_digest(
-                                                    file_markers[file_key]
-                                                )
-                                            }
-                                            if suite.config not in unit.inputs
-                                            else {}
-                                        ),
-                                        "absent": unit.absent,
-                                        "metadata": metadata_identity(unit.distributions),
-                                        "cache": unit.cache,
-                                        "registry": frozen_registry.for_view(unit),
-                                        **({"tools": tool_view.identity} if unit.tools else {}),
-                                        "environment": fingerprint(unit_environment(unit)),
-                                    }
-                                ),
-                            )
-                        unit, scope_key = scopes[signature]
-                        if (suite.name, item["file"]) not in digests:
-                            digests[suite.name, item["file"]] = _file_digest(
-                                inventory, item["file"]
-                            )
-                        digest = digests[suite.name, item["file"]]
-                        effective, options, _, _ = invocations[suite.name]
+                jobs, scopes, digests, file_markers = [], {}, {}, {}
+                progress["scoped_rows"] = True
+                for suite, item, inventory in scoped:
+                    index = len(results)
+                    if not item["selected"]:
                         results.append(
                             _row(
                                 item,
                                 suite,
                                 "scoped",
-                                "infrastructure_error",
-                                "execution not started",
+                                "not-selected",
+                                "not selected by pytest arguments" if explain else "",
                             )
                         )
-                        jobs.append(
-                            dict(
-                                index=index,
-                                item=item,
-                                unit=unit,
-                                environment=unit_environment(unit),
-                                suite=suite,
-                                options=options,
-                                registry=frozen_registry.for_view(unit),
-                                digest=digest,
-                                scope=scope_key,
-                                marker_names=file_markers[file_key],
-                                enabled=unit.cache and not no_cache,
-                                identity={
-                                    **common,
-                                    "suite": suite.identity(),
-                                    "all_args": effective,
-                                    "kind": "execution",
-                                    "scope": scope_key,
-                                    "inventory": digest,
-                                },
+                        continue
+                    signature = (suite.name, item["file"], tuple(item["origins"]))
+                    file_key = (suite.name, item["file"])
+                    if file_key not in file_markers:
+                        file_markers[file_key] = {
+                            name
+                            for entry in inventory
+                            if entry["file"] == item["file"]
+                            for name in entry["markers"]
+                        }
+                    if signature not in scopes:
+                        unit = case_unit(manifest, item, suite)
+                        tool_view = tools.view(unit.tools)
+                        inputs = tuple(unit.inputs)
+                        if inputs not in frozen_scope_hashes:
+                            frozen_scope_hashes[inputs] = fingerprint(
+                                [record_map[name] for name in unit.inputs]
                             )
-                        )
-
-                    candidates = group_jobs(jobs, mode, state)
-                    if fixture_guard:
-                        from .fixture_guard import (
-                            evaluate_conditions,
-                            guarded_group_id,
-                            require_capture_match,
-                            require_conservation,
-                        )
-
-                        def inspect_candidate(candidate, inspection_mode, interrupted):
-                            suite, unit = candidate["suite"], candidate["unit"]
-                            for attempt in range(2):
-                                try:
-                                    if interrupted.is_set():
-                                        raise sandbox.InvocationInterrupted(
-                                            "run cancelled before sandbox start"
-                                        )
-                                    with sandbox.invocation(manifest.root) as directory:
-                                        frozen = directory / "project"
-                                        materialize(
-                                            pool,
-                                            unit,
-                                            frozen,
-                                            record_map,
-                                            suite=suite,
-                                            marker_names=candidate["marker_names"],
-                                        )
-                                        suite_directories(frozen, suite)
-                                        metadata = directory / "metadata"
-                                        materialize_metadata(
-                                            manifest.distributions, unit.distributions, metadata
-                                        )
-                                        if frozen_registry.for_view(unit) != candidate["registry"]:
-                                            raise InfrastructureError(
-                                                "frozen fixture inspection registry changed"
+                        scopes[signature] = (
+                            unit,
+                            fingerprint(
+                                {
+                                    "inputs": frozen_scope_hashes[inputs],
+                                    **(
+                                        {
+                                            "config_digest": suite.config_digest(
+                                                file_markers[file_key]
                                             )
-                                        request = {
-                                            "mode": inspection_mode,
-                                            "registry": candidate["registry"],
-                                            "expected_digest": candidate["digest"],
-                                            "group_id": candidate["key"],
-                                            "case_ids": candidate["case_ids"],
-                                            "context_id": candidate["key"],
                                         }
-                                        if inspection_mode == "guard-inspection":
-                                            request["registry_id"] = candidate["capture"][
-                                                "registry_id"
-                                            ]
-                                        return sandbox.execute(
-                                            box,
-                                            frozen,
-                                            _session_arguments(
-                                                suite,
-                                                candidate["options"],
-                                                [candidate["item"]["file"]],
-                                            ),
-                                            candidate["environment"],
-                                            timeout,
-                                            root=manifest.root,
-                                            invocation_directory=directory,
-                                            suite_root=suite.root,
-                                            suite_cwd=suite.cwd,
-                                            suite=suite.name,
-                                            metadata_directory=metadata,
-                                            tool_view=tools.view(unit.tools),
-                                            cancellation=interrupted,
-                                            request=request,
-                                        )
-                                except (InfrastructureError, OSError) as exc:
-                                    if attempt == 1 or isinstance(exc, sandbox.CleanupError):
-                                        if isinstance(exc, OSError):
-                                            raise InfrastructureError(
-                                                "fixture inspection storage failed"
-                                            ) from exc
-                                        raise
-
-                        def inspect_group(candidate, interrupted):
-                            """One worker slot: capture, then the context-bound inspection."""
-                            candidate["capture"] = inspect_candidate(
-                                candidate, "guard-capture", interrupted
-                            )
-                            candidate["key"] = guarded_group_id(
-                                candidate["key"],
-                                candidate["capture"]["registry_id"],
-                                candidate["capture"]["content_id"],
-                            )
-                            candidate["path"] = state / (candidate["key"] + ".json")
-                            candidate["profile"] = profile
-                            candidate["inspection"] = inspect_candidate(
-                                candidate, "guard-inspection", interrupted
-                            )
-                            require_capture_match(candidate["capture"], candidate["inspection"])
-
-                        # Candidates are submitted in order. A failure stops submissions
-                        # and interrupts only later candidates, so every earlier one still
-                        # finishes and the first failure in order is the one reported,
-                        # whatever the worker count. A cleanup failure interrupts them all.
-                        interrupts = [threading.Event() for _ in candidates]
-                        inspecting, cursor, failures = {}, 0, {}
-                        executor = ThreadPoolExecutor(max_workers=concurrency)
-                        try:
-                            while inspecting or (cursor < len(candidates) and not failures):
-                                while (
-                                    not failures
-                                    and cursor < len(candidates)
-                                    and len(inspecting) < concurrency
-                                ):
-                                    future = executor.submit(
-                                        inspect_group, candidates[cursor], interrupts[cursor]
-                                    )
-                                    inspecting[future] = cursor
-                                    cursor += 1
-                                completed, _ = wait(
-                                    inspecting, timeout=0.1, return_when=FIRST_COMPLETED
-                                )
-                                for future in completed:
-                                    index = inspecting.pop(future)
-                                    error = future.exception()
-                                    if error is None or (
-                                        isinstance(error, sandbox.InvocationInterrupted)
-                                        and interrupts[index].is_set()
-                                    ):
-                                        continue
-                                    failures[index] = error
-                                    terminal = isinstance(error, sandbox.CleanupError)
-                                    for event in interrupts[0 if terminal else index + 1 :]:
-                                        event.set()
-                        except BaseException:
-                            for event in interrupts:
-                                event.set()
-                            raise
-                        finally:
-                            executor.shutdown(wait=True, cancel_futures=False)
-                        if failures:
-                            raise failures[min(failures)]
-                        inspections = [candidate["inspection"] for candidate in candidates]
-                        require_conservation(inspections, candidates)
-                        guard_state["conditions"] = evaluate_conditions(
-                            condition_checks, candidates
+                                        if suite.config not in unit.inputs
+                                        else {}
+                                    ),
+                                    "absent": unit.absent,
+                                    "metadata": metadata_identity(unit.distributions),
+                                    "cache": unit.cache,
+                                    "registry": frozen_registry.for_view(unit),
+                                    **({"tools": tool_view.identity} if unit.tools else {}),
+                                    "environment": fingerprint(unit_environment(unit)),
+                                }
+                            ),
                         )
-                        guard_state["admitted"] = True
-                    if collect_only:
-                        for job in jobs:
-                            results[job["index"]].update(
-                                outcome="not-run",
-                                reason="",
-                                collected=1,
-                                result_status="not-run",
-                            )
-                        tools.verify(tuple(manifest.tools))
-                        pending.publish_on_exit = True
-                        progress["published"] = True
-                        return summary()
-                    jobs = []
-                    for candidate in candidates:
-                        candidate["group_index"] = len(groups)
-                        projected, group = project_result(candidate, None, mode)
-                        groups.append(group)
-                        for index, row in projected:
-                            results[index] = row
-                    progress["grouping_complete"] = True
-                    record_kind = (
-                        "guarded-batch"
-                        if fixture_guard
-                        else "batch"
-                        if mode == "batch"
-                        else "execution"
+                    unit, scope_key = scopes[signature]
+                    if (suite.name, item["file"]) not in digests:
+                        digests[suite.name, item["file"]] = _file_digest(inventory, item["file"])
+                    digest = digests[suite.name, item["file"]]
+                    effective, options, _, _ = invocations[suite.name]
+                    results.append(
+                        _row(
+                            item,
+                            suite,
+                            "scoped",
+                            "infrastructure_error",
+                            "execution not started",
+                        )
+                    )
+                    jobs.append(
+                        dict(
+                            index=index,
+                            item=item,
+                            unit=unit,
+                            environment=unit_environment(unit),
+                            suite=suite,
+                            options=options,
+                            registry=frozen_registry.for_view(unit),
+                            digest=digest,
+                            scope=scope_key,
+                            marker_names=file_markers[file_key],
+                            enabled=unit.cache and not no_cache,
+                            identity={
+                                **common,
+                                "suite": suite.identity(),
+                                "all_args": effective,
+                                "kind": "execution",
+                                "scope": scope_key,
+                                "inventory": digest,
+                            },
+                        )
                     )
 
-                    def record_binding(candidate):
-                        """What a local or remote record must match to be this group's result."""
-                        return dict(
-                            kind=record_kind,
-                            case_id=candidate["case_ids"][0],
-                            group_id=candidate["key"],
-                            case_ids=candidate["case_ids"],
-                            registry_id=candidate["inspection"]["registry_id"]
-                            if fixture_guard
-                            else None,
-                            graph_id=candidate["inspection"]["graph_id"] if fixture_guard else None,
-                        )
+                candidates = group_jobs(jobs, mode, state)
+                if fixture_guard:
+                    from .fixture_guard import (
+                        evaluate_conditions,
+                        guarded_group_id,
+                        require_capture_match,
+                        require_conservation,
+                    )
 
-                    for candidate in candidates:
-                        tools.verify(candidate["unit"].tools)
-                        previous = (
-                            read_record(
-                                candidate["path"], candidate["key"], **record_binding(candidate)
-                            )
-                            if candidate["enabled"] and not force
-                            else None
-                        )
-                        if previous is None:
-                            jobs.append(candidate)
-                        else:
-                            projected, group = project_result(
-                                candidate, previous, mode, reused=True
-                            )
-                            groups[candidate["group_index"]] = group
-                            for index, row in projected:
-                                results[index] = row
-
-                    def execute_job(job):
-                        item, unit, suite = job["item"], job["unit"], job["suite"]
-                        reason = (
-                            "forced"
-                            if force
-                            else "non-cacheable"
-                            if not job["enabled"]
-                            else "no valid successful group record"
-                        )
-                        if (
-                            remote is not None
-                            and job["enabled"]
-                            and not force
-                            and not cancellation.is_set()
-                        ):
-                            # Read-through in this worker slot: a local miss asks the store
-                            # before it starts a sandbox. Anything but this cache's own
-                            # bytes of a valid record for exactly this group is a miss.
-                            binding = record_binding(job)
-                            previous = remote.lookup(
-                                job["key"],
-                                record_limit(record_kind),
-                                lambda data: parse_shared_record(data, job["key"], **binding),
-                            )
-                            if previous is not None:
-                                projected, group = project_result(job, previous, mode, reused=True)
-                                return projected, group, previous, False, None, True
-                        attempt_started = time.monotonic()
-                        sessions_started = 0
-
-                        def session_started():
-                            nonlocal sessions_started
-                            sessions_started += 1
-
+                    def inspect_candidate(candidate, inspection_mode, interrupted):
+                        suite, unit = candidate["suite"], candidate["unit"]
                         for attempt in range(2):
-                            result = None
                             try:
-                                if cancellation.is_set():
+                                if interrupted.is_set():
                                     raise sandbox.InvocationInterrupted(
                                         "run cancelled before sandbox start"
                                     )
@@ -1520,42 +1400,36 @@ def run(
                                         frozen,
                                         record_map,
                                         suite=suite,
-                                        marker_names=job["marker_names"],
+                                        marker_names=candidate["marker_names"],
                                     )
                                     suite_directories(frozen, suite)
                                     metadata = directory / "metadata"
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
                                     )
-                                    if frozen_registry.for_view(unit) != job["registry"]:
-                                        raise InfrastructureError("frozen case registry changed")
-                                    request = dict(
-                                        mode="guard-batch"
-                                        if fixture_guard
-                                        else "batch"
-                                        if mode == "batch"
-                                        else "execution",
-                                        registry=job["registry"],
-                                        expected_digest=job["digest"],
-                                        context_id=job["key"],
-                                    )
-                                    if mode == "batch":
-                                        request.update(
-                                            group_id=job["key"], case_ids=job["case_ids"]
+                                    if frozen_registry.for_view(unit) != candidate["registry"]:
+                                        raise InfrastructureError(
+                                            "frozen fixture inspection registry changed"
                                         )
-                                        if fixture_guard:
-                                            request.update(
-                                                guard_protocol="batch-guard-v1",
-                                                registry_id=job["inspection"]["registry_id"],
-                                                graph_id=job["inspection"]["graph_id"],
-                                            )
-                                    else:
-                                        request["case_id"] = item["case_id"]
-                                    result = sandbox.execute(
+                                    request = {
+                                        "mode": inspection_mode,
+                                        "registry": candidate["registry"],
+                                        "expected_digest": candidate["digest"],
+                                        "group_id": candidate["key"],
+                                        "case_ids": candidate["case_ids"],
+                                        "context_id": candidate["key"],
+                                    }
+                                    if inspection_mode == "guard-inspection":
+                                        request["registry_id"] = candidate["capture"]["registry_id"]
+                                    return sandbox.execute(
                                         box,
                                         frozen,
-                                        _session_arguments(suite, job["options"], [item["file"]]),
-                                        job["environment"],
+                                        _session_arguments(
+                                            suite,
+                                            candidate["options"],
+                                            [candidate["item"]["file"]],
+                                        ),
+                                        candidate["environment"],
                                         timeout,
                                         root=manifest.root,
                                         invocation_directory=directory,
@@ -1564,139 +1438,360 @@ def run(
                                         suite=suite.name,
                                         metadata_directory=metadata,
                                         tool_view=tools.view(unit.tools),
-                                        cancellation=cancellation,
-                                        on_session_start=session_started,
+                                        cancellation=interrupted,
                                         request=request,
                                     )
-                                if result["declaration_error"]:
-                                    raise DeclarationError(
-                                        "case collection or declarations differ from validated inventory"
-                                    )
-                                projected, group = project_result(
-                                    job,
-                                    result,
-                                    mode,
-                                    attempts=sessions_started,
-                                    reason=reason if explain else "",
-                                    attempt_seconds=time.monotonic() - attempt_started,
-                                )
-                                return projected, group, result, False, None, False
-                            except DeclarationError as exc:
-                                cancellation.set()
-                                projected, group = project_result(
-                                    job,
-                                    result,
-                                    mode,
-                                    attempts=sessions_started,
-                                    reason=str(exc),
-                                    attempt_seconds=time.monotonic() - attempt_started,
-                                )
-                                if result is None:
-                                    group["timing_complete"] = False
-                                return projected, group, None, False, exc, False
                             except (InfrastructureError, OSError) as exc:
-                                terminal = isinstance(
-                                    exc, (sandbox.CleanupError, _FixtureDrift)
-                                ) or (bool(fixture_guard) and attempt == 1)
-                                if terminal:
-                                    cancellation.set()
-                                if attempt == 1 or terminal:
-                                    projected, group = project_result(
-                                        job,
-                                        None,
-                                        mode,
-                                        attempts=sessions_started,
-                                        reason=str(exc)
-                                        if isinstance(exc, InfrastructureError)
-                                        else "owned storage operation failed",
-                                        attempt_seconds=time.monotonic() - attempt_started,
-                                    )
-                                    group["timing_complete"] = False
-                                    if isinstance(exc, sandbox.InvocationInterrupted):
-                                        group["stop_reason"] = "cancelled"
-                                    return projected, group, None, terminal, None, False
+                                if attempt == 1 or isinstance(exc, sandbox.CleanupError):
+                                    if isinstance(exc, OSError):
+                                        raise InfrastructureError(
+                                            "fixture inspection storage failed"
+                                        ) from exc
+                                    raise
 
-                    refusal = None
+                    def inspect_group(candidate, interrupted):
+                        """One worker slot: capture, then the context-bound inspection."""
+                        candidate["capture"] = inspect_candidate(
+                            candidate, "guard-capture", interrupted
+                        )
+                        candidate["key"] = guarded_group_id(
+                            candidate["key"],
+                            candidate["capture"]["registry_id"],
+                            candidate["capture"]["content_id"],
+                        )
+                        candidate["path"] = state / (candidate["key"] + ".json")
+                        candidate["profile"] = profile
+                        candidate["inspection"] = inspect_candidate(
+                            candidate, "guard-inspection", interrupted
+                        )
+                        require_capture_match(candidate["capture"], candidate["inspection"])
 
-                    def accept(job, projected, group, terminal, error, fetched):
-                        nonlocal blocked, refusal
-                        groups[job["group_index"]] = group
-                        if fetched:
-                            remote_groups.add(job["key"])
-                        for index, row in projected:
-                            results[index] = row
-                        if error is not None and refusal is None:
-                            refusal = error
-                            cancellation.set()
-                        if terminal:
-                            blocked = (
-                                "run stopped after infrastructure failure or cancellation"
-                                if fixture_guard
-                                else "run stopped after owned cleanup failure or cancellation"
-                            )
-
-                    active, cursor = {}, 0
+                    # Candidates are submitted in order. A failure stops submissions
+                    # and interrupts only later candidates, so every earlier one still
+                    # finishes and the first failure in order is the one reported,
+                    # whatever the worker count. A cleanup failure interrupts them all.
+                    interrupts = [threading.Event() for _ in candidates]
+                    inspecting, cursor, failures = {}, 0, {}
                     executor = ThreadPoolExecutor(max_workers=concurrency)
                     try:
-                        while cursor < len(jobs) or active:
+                        while inspecting or (cursor < len(candidates) and not failures):
                             while (
-                                not cancellation.is_set()
-                                and cursor < len(jobs)
-                                and len(active) < concurrency
+                                not failures
+                                and cursor < len(candidates)
+                                and len(inspecting) < concurrency
                             ):
-                                job = jobs[cursor]
+                                future = executor.submit(
+                                    inspect_group, candidates[cursor], interrupts[cursor]
+                                )
+                                inspecting[future] = cursor
                                 cursor += 1
-                                active[executor.submit(execute_job, job)] = job
-                            if not active:
-                                break
-                            completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
+                            completed, _ = wait(
+                                inspecting, timeout=0.1, return_when=FIRST_COMPLETED
+                            )
                             for future in completed:
-                                job = active.pop(future)
-                                projected, group, result, terminal, error, fetched = future.result()
-                                accept(job, projected, group, terminal, error, fetched)
-                                if (
-                                    result is not None
-                                    and result["exit_code"] == 0
-                                    and job["enabled"]
-                                    and not cancellation.is_set()
+                                index = inspecting.pop(future)
+                                error = future.exception()
+                                if error is None or (
+                                    isinstance(error, sandbox.InvocationInterrupted)
+                                    and interrupts[index].is_set()
                                 ):
-                                    # A fetched record enters the local cache like a fresh
-                                    # one; only a fresh one is uploaded afterwards.
-                                    pending.stage(
-                                        job["path"], job["key"], result, guarded=bool(fixture_guard)
-                                    )
-                                    if not fetched:
-                                        eligible_groups.add(job["key"])
-                                        uploads[job["path"]] = (job["key"], record_binding(job))
-                    except (sandbox.InvocationInterrupted, KeyboardInterrupt):
-                        blocked = (
-                            "run cancelled; active sandboxes drained before result publication"
-                        )
-                        cancellation.set()
+                                    continue
+                                failures[index] = error
+                                terminal = isinstance(error, sandbox.CleanupError)
+                                for event in interrupts[0 if terminal else index + 1 :]:
+                                    event.set()
                     except BaseException:
-                        cancellation.set()
+                        for event in interrupts:
+                            event.set()
                         raise
                     finally:
                         executor.shutdown(wait=True, cancel_futures=False)
-                        for future, job in active.items():
-                            if future.done() and not future.cancelled():
-                                projected, group, _, terminal, error, fetched = future.result()
-                                accept(job, projected, group, terminal, error, fetched)
-                        if cancellation.is_set():
-                            blocked = blocked or "run cancelled"
-                            for job in jobs[cursor:]:
-                                groups[job["group_index"]]["stop_reason"] = "cancelled"
-                                for index, _ in job["members"]:
-                                    results[index]["reason"] = blocked
-                    if refusal is not None:
-                        raise refusal
+                    if failures:
+                        raise failures[min(failures)]
+                    inspections = [candidate["inspection"] for candidate in candidates]
+                    require_conservation(inspections, candidates)
+                    guard_state["conditions"] = evaluate_conditions(condition_checks, candidates)
+                    guard_state["admitted"] = True
+                if collect_only:
+                    for job in jobs:
+                        results[job["index"]].update(
+                            outcome="not-run",
+                            reason="",
+                            collected=1,
+                            result_status="not-run",
+                        )
                     tools.verify(tuple(manifest.tools))
-                if blocked is None:
-                    published = set(pending.publish())
+                    pending.publish_on_exit = True
                     progress["published"] = True
-                else:
-                    # A completed success is not reusable until every owned copy is removed.
-                    stop("infrastructure_error", blocked)
+                    return summary()
+                jobs = []
+                for candidate in candidates:
+                    candidate["group_index"] = len(groups)
+                    projected, group = project_result(candidate, None, mode)
+                    groups.append(group)
+                    for index, row in projected:
+                        results[index] = row
+                progress["grouping_complete"] = True
+                record_kind = (
+                    "guarded-batch"
+                    if fixture_guard
+                    else "batch"
+                    if mode == "batch"
+                    else "execution"
+                )
+
+                def record_binding(candidate):
+                    """What a local or remote record must match to be this group's result."""
+                    return dict(
+                        kind=record_kind,
+                        case_id=candidate["case_ids"][0],
+                        group_id=candidate["key"],
+                        case_ids=candidate["case_ids"],
+                        registry_id=candidate["inspection"]["registry_id"]
+                        if fixture_guard
+                        else None,
+                        graph_id=candidate["inspection"]["graph_id"] if fixture_guard else None,
+                    )
+
+                for candidate in candidates:
+                    tools.verify(candidate["unit"].tools)
+                    previous = (
+                        read_record(
+                            candidate["path"], candidate["key"], **record_binding(candidate)
+                        )
+                        if candidate["enabled"] and not force
+                        else None
+                    )
+                    if previous is None:
+                        jobs.append(candidate)
+                    else:
+                        projected, group = project_result(candidate, previous, mode, reused=True)
+                        groups[candidate["group_index"]] = group
+                        for index, row in projected:
+                            results[index] = row
+
+                def execute_job(job):
+                    item, unit, suite = job["item"], job["unit"], job["suite"]
+                    reason = (
+                        "forced"
+                        if force
+                        else "non-cacheable"
+                        if not job["enabled"]
+                        else "no valid successful group record"
+                    )
+                    if (
+                        remote is not None
+                        and job["enabled"]
+                        and not force
+                        and not cancellation.is_set()
+                    ):
+                        # Read-through in this worker slot: a local miss asks the store
+                        # before it starts a sandbox. Anything but this cache's own
+                        # bytes of a valid record for exactly this group is a miss.
+                        binding = record_binding(job)
+                        previous = remote.lookup(
+                            job["key"],
+                            record_limit(record_kind),
+                            lambda data: parse_shared_record(data, job["key"], **binding),
+                        )
+                        if previous is not None:
+                            projected, group = project_result(job, previous, mode, reused=True)
+                            return projected, group, previous, False, None, True
+                    attempt_started = time.monotonic()
+                    sessions_started = 0
+
+                    def session_started():
+                        nonlocal sessions_started
+                        sessions_started += 1
+
+                    for attempt in range(2):
+                        result = None
+                        try:
+                            if cancellation.is_set():
+                                raise sandbox.InvocationInterrupted(
+                                    "run cancelled before sandbox start"
+                                )
+                            with sandbox.invocation(manifest.root) as directory:
+                                frozen = directory / "project"
+                                materialize(
+                                    pool,
+                                    unit,
+                                    frozen,
+                                    record_map,
+                                    suite=suite,
+                                    marker_names=job["marker_names"],
+                                )
+                                suite_directories(frozen, suite)
+                                metadata = directory / "metadata"
+                                materialize_metadata(
+                                    manifest.distributions, unit.distributions, metadata
+                                )
+                                if frozen_registry.for_view(unit) != job["registry"]:
+                                    raise InfrastructureError("frozen case registry changed")
+                                request = dict(
+                                    mode="guard-batch"
+                                    if fixture_guard
+                                    else "batch"
+                                    if mode == "batch"
+                                    else "execution",
+                                    registry=job["registry"],
+                                    expected_digest=job["digest"],
+                                    context_id=job["key"],
+                                )
+                                if mode == "batch":
+                                    request.update(group_id=job["key"], case_ids=job["case_ids"])
+                                    if fixture_guard:
+                                        request.update(
+                                            guard_protocol="batch-guard-v1",
+                                            registry_id=job["inspection"]["registry_id"],
+                                            graph_id=job["inspection"]["graph_id"],
+                                        )
+                                else:
+                                    request["case_id"] = item["case_id"]
+                                result = sandbox.execute(
+                                    box,
+                                    frozen,
+                                    _session_arguments(suite, job["options"], [item["file"]]),
+                                    job["environment"],
+                                    timeout,
+                                    root=manifest.root,
+                                    invocation_directory=directory,
+                                    suite_root=suite.root,
+                                    suite_cwd=suite.cwd,
+                                    suite=suite.name,
+                                    metadata_directory=metadata,
+                                    tool_view=tools.view(unit.tools),
+                                    cancellation=cancellation,
+                                    on_session_start=session_started,
+                                    request=request,
+                                )
+                            if result["declaration_error"]:
+                                raise DeclarationError(
+                                    "case collection or declarations differ from validated inventory"
+                                )
+                            projected, group = project_result(
+                                job,
+                                result,
+                                mode,
+                                attempts=sessions_started,
+                                reason=reason if explain else "",
+                                attempt_seconds=time.monotonic() - attempt_started,
+                            )
+                            return projected, group, result, False, None, False
+                        except DeclarationError as exc:
+                            cancellation.set()
+                            projected, group = project_result(
+                                job,
+                                result,
+                                mode,
+                                attempts=sessions_started,
+                                reason=str(exc),
+                                attempt_seconds=time.monotonic() - attempt_started,
+                            )
+                            if result is None:
+                                group["timing_complete"] = False
+                            return projected, group, None, False, exc, False
+                        except (InfrastructureError, OSError) as exc:
+                            terminal = isinstance(exc, (sandbox.CleanupError, _FixtureDrift)) or (
+                                bool(fixture_guard) and attempt == 1
+                            )
+                            if terminal:
+                                cancellation.set()
+                            if attempt == 1 or terminal:
+                                projected, group = project_result(
+                                    job,
+                                    None,
+                                    mode,
+                                    attempts=sessions_started,
+                                    reason=str(exc)
+                                    if isinstance(exc, InfrastructureError)
+                                    else "owned storage operation failed",
+                                    attempt_seconds=time.monotonic() - attempt_started,
+                                )
+                                group["timing_complete"] = False
+                                if isinstance(exc, sandbox.InvocationInterrupted):
+                                    group["stop_reason"] = "cancelled"
+                                return projected, group, None, terminal, None, False
+
+                refusal = None
+
+                def accept(job, projected, group, terminal, error, fetched):
+                    nonlocal blocked, refusal
+                    groups[job["group_index"]] = group
+                    if fetched:
+                        remote_groups.add(job["key"])
+                    for index, row in projected:
+                        results[index] = row
+                    if error is not None and refusal is None:
+                        refusal = error
+                        cancellation.set()
+                    if terminal:
+                        blocked = (
+                            "run stopped after infrastructure failure or cancellation"
+                            if fixture_guard
+                            else "run stopped after owned cleanup failure or cancellation"
+                        )
+
+                active, cursor = {}, 0
+                executor = ThreadPoolExecutor(max_workers=concurrency)
+                try:
+                    while cursor < len(jobs) or active:
+                        while (
+                            not cancellation.is_set()
+                            and cursor < len(jobs)
+                            and len(active) < concurrency
+                        ):
+                            job = jobs[cursor]
+                            cursor += 1
+                            active[executor.submit(execute_job, job)] = job
+                        if not active:
+                            break
+                        completed, _ = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
+                        for future in completed:
+                            job = active.pop(future)
+                            projected, group, result, terminal, error, fetched = future.result()
+                            accept(job, projected, group, terminal, error, fetched)
+                            if (
+                                result is not None
+                                and result["exit_code"] == 0
+                                and job["enabled"]
+                                and not cancellation.is_set()
+                            ):
+                                # A fetched record enters the local cache like a fresh
+                                # one; only a fresh one is uploaded afterwards.
+                                pending.stage(
+                                    job["path"], job["key"], result, guarded=bool(fixture_guard)
+                                )
+                                if not fetched:
+                                    eligible_groups.add(job["key"])
+                                    uploads[job["path"]] = (job["key"], record_binding(job))
+                except (sandbox.InvocationInterrupted, KeyboardInterrupt):
+                    blocked = "run cancelled; active sandboxes drained before result publication"
+                    cancellation.set()
+                except BaseException:
+                    cancellation.set()
+                    raise
+                finally:
+                    executor.shutdown(wait=True, cancel_futures=False)
+                    for future, job in active.items():
+                        if future.done() and not future.cancelled():
+                            projected, group, _, terminal, error, fetched = future.result()
+                            accept(job, projected, group, terminal, error, fetched)
+                    if cancellation.is_set():
+                        blocked = blocked or "run cancelled"
+                        for job in jobs[cursor:]:
+                            groups[job["group_index"]]["stop_reason"] = "cancelled"
+                            for index, _ in job["members"]:
+                                results[index]["reason"] = blocked
+                if refusal is not None:
+                    raise refusal
+                tools.verify(tuple(manifest.tools))
+            if blocked is None:
+                published = set(pending.publish())
+                progress["published"] = True
+            else:
+                # A completed success is not reusable until every owned copy is removed.
+                stop("infrastructure_error", blocked)
     except DeclarationError as error:
         retain_refusal(error)
         raise
