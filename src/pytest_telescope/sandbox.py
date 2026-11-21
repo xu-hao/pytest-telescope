@@ -38,7 +38,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BACKEND = "bubblewrap"
-POLICY = "bubblewrap-view-v4"
+POLICY = "bubblewrap-view-v3"
 MAX_OUTPUT = 1_048_576
 MAX_COLLECTION = 67_108_864
 MAX_PROBE = 4 * 1_048_576

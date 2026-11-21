@@ -8,6 +8,10 @@ therefore all resolve the project to /project and to declared files only. These 
 launch bwrap and are never skipped.
 """
 
+import base64
+import csv
+import hashlib
+import io
 import json
 import os
 import shutil
@@ -15,6 +19,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -208,13 +213,45 @@ def install_external_library(site_packages, library, form):
     install_editable(site_packages, library, form)
 
 
-def install_regular_library(site_packages):
-    """Install a small regular distribution directly into the environment."""
-    put(site_packages, "toypkg/__init__.py", "VALUE = 7\n")
-    put(site_packages, "toypkg/worker.py", "import toypkg\nprint('worker', toypkg.VALUE)\n")
-    record = site_packages / "toypkg-0.1.dist-info"
-    record.mkdir()
-    (record / "METADATA").write_text("Metadata-Version: 2.1\nName: toypkg\nVersion: 0.1\n")
+def install_regular_library(site_packages, directory):
+    """Install a small regular wheel into the test environment."""
+    wheel = directory / "toypkg-0.1-py3-none-any.whl"
+    members = {
+        "toypkg/__init__.py": b"VALUE = 7\n",
+        "toypkg/worker.py": b"import toypkg\nprint('worker', toypkg.VALUE)\n",
+        "toypkg-0.1.dist-info/METADATA": b"Metadata-Version: 2.1\nName: toypkg\nVersion: 0.1\n",
+        "toypkg-0.1.dist-info/WHEEL": (
+            b"Wheel-Version: 1.0\nGenerator: pytest-telescope\n"
+            b"Root-Is-Purelib: true\nTag: py3-none-any\n"
+        ),
+    }
+    rows = []
+    for name, content in members.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b"=").decode()
+        rows.append((name, "sha256=" + digest, str(len(content))))
+    rows.append(("toypkg-0.1.dist-info/RECORD", "", ""))
+    record = io.StringIO(newline="")
+    csv.writer(record, lineterminator="\n").writerows(rows)
+    members["toypkg-0.1.dist-info/RECORD"] = record.getvalue().encode()
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--target",
+            str(site_packages),
+            str(wheel),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
 
 def run(interpreter, project, *arguments):
@@ -290,7 +327,7 @@ def test_outside_project_editable_install_refuses_before_scoped_execution(tmp_pa
 def test_regular_external_distribution_runs_in_scoped_mode(tmp_path):
     project = toy_project(tmp_path / "checkout")
     interpreter, site_packages = environment(tmp_path / "env")
-    install_regular_library(site_packages)
+    install_regular_library(site_packages, tmp_path)
     put(project, "tests/test_external.py", VALUE_TEST.format(declared=DECLARED))
     completed = subprocess.run(
         [str(interpreter), "-m", "pytest_telescope", "run", "--explain"],
