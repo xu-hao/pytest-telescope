@@ -339,10 +339,16 @@ scope-local rule. Nonconsumers retain the environment behavior above.
 
 Bubblewrap creates a user namespace, a mount namespace and a PID namespace. The PID
 namespace is required for a correct view: the host `/proc` would expose other processes'
-root and working directories, which are paths into the host filesystem. The pytest worker
-is PID 1 of its namespace, so it adopts and reaps orphaned descendants; any descendant
-still alive after teardown makes the result unusable, and every remaining process ends
-with the worker. No other namespace is created.
+root and working directories, which are paths into the host filesystem. Bubblewrap runs
+without `--as-pid-1`, so its own minimal init is PID 1 of the namespace and the pytest
+worker runs as its child. Bubblewrap's PID 1 init continuously adopts and reaps exited
+orphaned descendants throughout the session so they do not accumulate as zombies;
+Bubblewrap options are passed over an argument descriptor rather than its command line so
+`/proc/1/cmdline` does not expose host paths. After all pytest teardown, the worker reaps
+any unwaited exited direct children and checks `/proc` for any process besides PID 1 and
+itself: any descendant still alive after teardown (or any zombie remaining past the brief
+reap bound) makes the result unusable, and when the worker or PID 1 exits, every remaining
+process in the namespace ends with it. No other namespace is created.
 
 ## Frozen tools and runtime files
 

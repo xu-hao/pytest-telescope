@@ -46,7 +46,7 @@ collection, sandbox setup, the test sessions and cleanup. CPU time is the user p
 system time of the invocation's whole process tree, read with `RUSAGE_CHILDREN` by the
 measuring process that waits for it. That account is complete: the ordinary session, the
 probe, every `bwrap` process and each sandboxed worker are descendants that their parents
-wait for, the worker reaps its own descendants as PID 1 of its sandbox, and no work runs
+wait for, Bubblewrap's PID 1 init and the worker reap their descendants, and no work runs
 in services outside the tree. When the measuring process runs in its own cgroup v2, the
 cgroup's `cpu.stat` usage over the same interval is recorded as a cross-check.
 

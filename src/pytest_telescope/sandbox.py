@@ -62,9 +62,74 @@ MAX_REWRITE = 1_048_576
 MAX_RECORDS = 4096
 MAX_RECORD_BYTES = 64 * 1_048_576
 # User, mount and PID namespaces only. A PID namespace with its own /proc keeps other
-# processes' root and working directories, which are host paths, out of the view. The
-# worker is PID 1, so it reaps orphans and every remaining process ends with it.
-NAMESPACES = ("--unshare-user", "--unshare-pid", "--as-pid-1", "--die-with-parent")
+# processes' root and working directories, which are host paths, out of the view.
+# Without --as-pid-1, Bubblewrap runs a minimal PID 1 init that reaps orphaned
+# descendants continuously; --die-with-parent ends the sandbox when the caller exits.
+NAMESPACES = ("--unshare-user", "--unshare-pid", "--die-with-parent")
+_BWRAP_OPTION_ARITIES = {
+    "--unshare-user": 0,
+    "--unshare-user-try": 0,
+    "--unshare-pid": 0,
+    "--unshare-ipc": 0,
+    "--unshare-net": 0,
+    "--unshare-uts": 0,
+    "--unshare-cgroup": 0,
+    "--unshare-cgroup-try": 0,
+    "--unshare-all": 0,
+    "--share-net": 0,
+    "--disable-userns": 0,
+    "--assert-userns-disabled": 0,
+    "--clearenv": 0,
+    "--new-session": 0,
+    "--die-with-parent": 0,
+    "--as-pid-1": 0,
+    "--help": 0,
+    "--version": 0,
+    "--args": 1,
+    "--argv0": 1,
+    "--userns": 1,
+    "--userns2": 1,
+    "--pidns": 1,
+    "--uid": 1,
+    "--gid": 1,
+    "--hostname": 1,
+    "--chdir": 1,
+    "--unsetenv": 1,
+    "--lock-file": 1,
+    "--sync-fd": 1,
+    "--remount-ro": 1,
+    "--exec-label": 1,
+    "--file-label": 1,
+    "--proc": 1,
+    "--dev": 1,
+    "--tmpfs": 1,
+    "--mqueue": 1,
+    "--dir": 1,
+    "--seccomp": 1,
+    "--add-seccomp-fd": 1,
+    "--block-fd": 1,
+    "--userns-block-fd": 1,
+    "--info-fd": 1,
+    "--json-status-fd": 1,
+    "--cap-add": 1,
+    "--cap-drop": 1,
+    "--perms": 1,
+    "--size": 1,
+    "--setenv": 2,
+    "--bind": 2,
+    "--bind-try": 2,
+    "--dev-bind": 2,
+    "--dev-bind-try": 2,
+    "--ro-bind": 2,
+    "--ro-bind-try": 2,
+    "--bind-fd": 2,
+    "--ro-bind-fd": 2,
+    "--file": 2,
+    "--bind-data": 2,
+    "--ro-bind-data": 2,
+    "--symlink": 2,
+    "--chmod": 2,
+}
 PROBE = r"""
 import sys
 STARTUP = [(name, getattr(module, "__file__", None)) for name, module in list(sys.modules.items())]
@@ -271,8 +336,8 @@ def _host_environment():
 
 
 def _terminate(process):
-    # Killing the process group reaches bwrap and, while it shares that group, the
-    # sandbox's PID 1; --die-with-parent covers the rest of the sandbox.
+    # Killing the process group reaches bwrap (PID 1 of the sandbox) and the worker;
+    # when PID 1 exits, the kernel ends every remaining process in the PID namespace.
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -286,6 +351,62 @@ def _terminate(process):
             stream.close()
 
 
+def _bwrap_option_split(args):
+    if not args or os.path.basename(os.fspath(args[0])) != "bwrap":
+        return None
+    index = 1
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            return index if index > 1 else None
+        if token == "--args":
+            return None
+        arity = _BWRAP_OPTION_ARITIES.get(token)
+        if arity is None or index + arity >= len(args):
+            return None
+        index += 1 + arity
+    return None
+
+
+def _spawn_process(args, *, env, cwd):
+    # Pass bwrap setup options via --args FD so /proc/1/cmdline never exposes host
+    # bind source paths inside the PID namespace.
+    split = _bwrap_option_split(args)
+    args_fd = None
+    launch_args = args
+    pass_fds = ()
+    if split is not None and hasattr(os, "memfd_create"):
+        encoded = [os.fsencode(item) for item in args[1:split]]
+        if all(b"\0" not in item for item in encoded):
+            payload = memoryview(b"\0".join(encoded) + b"\0")
+            args_fd = os.memfd_create("bwrap-args", 0)
+            try:
+                while payload:
+                    written = os.write(args_fd, payload)
+                    payload = payload[written:]
+                os.lseek(args_fd, 0, os.SEEK_SET)
+            except BaseException:
+                os.close(args_fd)
+                raise
+            launch_args = [args[0], "--args", str(args_fd), *args[split:]]
+            pass_fds = (args_fd,)
+    try:
+        return subprocess.Popen(
+            launch_args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+            pass_fds=pass_fds,
+            start_new_session=True,
+            env=env,
+            cwd=cwd,
+        )
+    finally:
+        if args_fd is not None:
+            os.close(args_fd)
+
+
 def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None, on_start=None):
     """Run one child with bounded merged output; never retain more than the limit.
 
@@ -295,16 +416,7 @@ def capture(args, timeout, *, env, cwd=None, limit=MAX_OUTPUT, cancellation=None
     output = bytearray()
     deadline = None if timeout is None else time.monotonic() + timeout
     try:
-        process = subprocess.Popen(
-            args,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            close_fds=True,
-            start_new_session=True,
-            env=env,
-            cwd=cwd,
-        )
+        process = _spawn_process(args, env=env, cwd=cwd)
         if on_start is not None:
             on_start()
         with selectors.DefaultSelector() as selector:

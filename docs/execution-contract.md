@@ -682,12 +682,14 @@ removes directories whose owner has exited. The pytest adapter may load other ho
 plugins before routing to the controller; use `python -m pytest_telescope` to avoid host
 pytest/plugin startup entirely.
 
-A scoped worker is PID 1 of its sandbox. Completed adopted children are reaped after all
-pytest teardown with nonblocking `waitpid`, bounded to 4096 calls and 50 ms. Every
-process still present afterward, including any live descendant or unconsumed zombie
-after the bound, makes the result ineligible; the remaining processes end with the
-sandbox. The engine never waits for ongoing child work to turn an incomplete run into a
-reusable success.
+Bubblewrap's own PID 1 init continuously adopts and reaps exited orphaned descendants
+during a sandboxed session. After all pytest teardown, the worker reaps any unwaited
+completed direct children with nonblocking `waitpid`, bounded to 4096 calls and 50 ms,
+and checks `/proc` for any process besides itself and PID 1 (allowing at most 50 ms only
+while PID 1 finishes reaping an already-exited orphan zombie). Every process still present
+afterward, including any live descendant or unconsumed zombie after the bound, makes the
+result ineligible; the remaining processes end with the sandbox. The engine never waits for
+ongoing child work to turn an incomplete run into a reusable success.
 
 ## Fixture guard
 
