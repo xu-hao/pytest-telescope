@@ -74,8 +74,8 @@ FRAMEWORK_SOURCE_IDENTITIES = {
 
 
 def reap_completed_children():
-    # The sandboxed worker is PID 1 and adopts orphaned children. Reap only those
-    # already exited after all teardown.
+    # Reap exited direct children that tests left unwaited after all teardown.
+    # Orphaned descendants are reaped continuously by Bubblewrap's PID 1 init.
     # Both bounds prevent a concurrently forking live child from extending this phase.
     reap_deadline = time.monotonic() + 0.05
     for _ in range(4096):
@@ -87,6 +87,40 @@ def reap_completed_children():
             break
         if child == 0:
             break
+
+
+def remaining_descendants():
+    # Bubblewrap's PID 1 init continuously reaps orphaned descendants. After reaping
+    # unwaited direct children, verify no process besides PID 1 and this worker remains;
+    # allow at most 50 ms only while PID 1 finishes reaping an already-exited zombie.
+    reap_completed_children()
+    ignored = {os.getpid()}
+    reaper_parent = os.getpid() != 1 and os.getppid() == 1
+    if reaper_parent:
+        ignored.add(1)
+    deadline = time.monotonic() + 0.05
+    while True:
+        found = []
+        wait_for_reaper = reaper_parent
+        for name in os.listdir("/proc"):
+            if not name.isdecimal() or int(name) in ignored:
+                continue
+            if wait_for_reaper:
+                try:
+                    stat_text = Path(f"/proc/{name}/stat").read_text()
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except OSError:
+                    found.append(name)
+                    wait_for_reaper = False
+                    continue
+                fields = stat_text.rpartition(")")[2].split()
+                if len(fields) < 2 or fields[0] != "Z" or fields[1] != "1":
+                    wait_for_reaper = False
+            found.append(name)
+        if not found or not wait_for_reaper or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.001)
 
 
 def canonical(value):
@@ -1534,11 +1568,7 @@ def main(request=None, *, ordinary=False):
         exit_code = 4
     leaked = []
     if not ordinary:
-        # PID 1 of the sandbox: any other process left after teardown is a descendant.
-        reap_completed_children()
-        leaked = [
-            name for name in os.listdir("/proc") if name.isdecimal() and int(name) != os.getpid()
-        ]
+        leaked = remaining_descendants()
     if invalid_evidence:
         # No raw report, reason or traceback may cross the worker boundary.
         print("TELESCOPE_EVIDENCE_ERROR invalid observed outcome evidence", flush=True)

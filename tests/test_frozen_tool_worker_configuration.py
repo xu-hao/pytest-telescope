@@ -151,7 +151,7 @@ def test_configuration():
     assert stat.S_IMODE(Path('/etc/selected.txt').stat().st_mode) == 0o440
     for path in (Path('/etc/selected.txt'), Path('/etc/new-file')):
         with pytest.raises(OSError): path.write_bytes(b'forbidden')
-    assert os.getpid() == 1 and os.readlink('/proc/self') == '1'
+    assert os.getppid() == 1 and os.getpid() > 1 and os.readlink('/proc/self') == str(os.getpid())
 """,
     )
     finish_diagnostics = observe_worker_capture(monkeypatch, worker.project.external)
