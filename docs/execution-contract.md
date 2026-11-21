@@ -53,6 +53,14 @@ A case without such a field is ordinary: it runs in an ordinary pytest session o
 invocation and is never cached. pytest-telescope does not snapshot, walk or hash
 undeclared project files for it.
 
+Scoped sessions use the invoking environment's installed distributions read-only. An
+editable distribution whose source directory lies outside the project is unsupported in
+scoped mode, whether its import path comes from a `.pth` file or a setuptools finder;
+preflight refuses before starting a scoped session and identifies the distribution and
+source path. Install external dependencies as regular, non-editable distributions. An
+editable install rooted inside the project continues to resolve through the rewritten
+`/project` snapshot, and ordinary, unscoped pytest sessions are not subject to this check.
+
 Declarations cannot name version-control metadata (`.git`, `.hg`, `.svn`), telescope
 state (`.pytest-telescope` and an explicitly selected in-project cache directory),
 pytest/bytecode caches (`.pytest_cache`, `__pycache__`), or host Python environments

@@ -253,10 +253,14 @@ invoking environment in editable form, for example with `pip install -e .`, leav
 sandbox shows those files rewritten to `/project`, so the project's packages import from
 the declared files of the frozen copy in the test itself, in `sys.executable` children
 and in isolated `-I` children, which ignore `PYTHONPATH` and the working directory. An
-undeclared module of the package raises `ModuleNotFoundError`. An editable install of a
-different directory, such as another checkout, is not rewritten, points outside the view
-and is absent. The parent pytest process can also import declared source through pytest
-`pythonpath`; both resolve to the same files below `/project`.
+undeclared module of the package raises `ModuleNotFoundError`. An editable install whose
+source directory is outside the project is refused before any scoped session starts,
+whether it uses a plain `.pth` path or a setuptools finder. The refusal names the
+distribution and source path and recommends installing external dependencies as regular,
+non-editable distributions. This keeps a scoped test from silently relying on source that
+is absent from the frozen view. Regular distributions in `site-packages` continue to work.
+The parent pytest process can also import declared source through pytest `pythonpath`; both
+resolve to the same files below `/project`.
 
 A selected native tool instead closes the supported interpreter prefixes to its
 explicit frozen runtime. Selected `.pth`, finder and other startup hooks are unsupported;

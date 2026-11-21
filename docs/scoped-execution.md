@@ -300,6 +300,11 @@ must be installed there. Ordinary sessions load plugins as ordinary pytest does.
 Distributed schedulers (including xdist), scheduler options and conflicting plugin
 declarations are rejected; use telescope's `workers` setting for parallelism. Install
 third-party packages in the environment; declaring local metadata does not install them.
+External dependencies must be installed as regular, non-editable distributions: scoped
+preflight refuses outside-project editable installs in both `.pth` and setuptools finder
+forms. Editable installs rooted inside the project remain supported through their
+rewritten `/project` snapshot. Ordinary, unscoped pytest sessions do not run this
+scoped-environment check.
 
 ## Parallel scoped workers
 
