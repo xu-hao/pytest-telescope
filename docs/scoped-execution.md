@@ -357,6 +357,15 @@ active units drain and clean up. In each case the controller waits for all activ
 sandboxes to exit and be cleaned up before it reports, admits nothing and dispatches no
 body.
 
+If the controller process itself is killed abruptly without a chance to run cleanup (for
+example with `SIGKILL`), Bubblewrap's `--die-with-parent` stops each active outer `bwrap`
+process, which ends Bubblewrap's PID 1 init inside that sandbox and causes the kernel to
+terminate the sandboxed worker and all of its descendants promptly instead of letting a
+scoped case outlive its controller. Because a `SIGKILL`-terminated controller cannot remove
+its own directories, abandoned invocation scratch and cache staging stay on disk with
+their kernel owner locks released until the next invocation recovers and removes them, and
+none of the killed invocation's pending records are ever published.
+
 With a [remote result store](result-store.md), `workers` also bounds its requests. A
 group's lookup runs in the worker slot that would otherwise start its sandbox, and
 uploads run on at most `workers` threads after local publication, when no sandbox is

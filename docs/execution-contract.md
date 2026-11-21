@@ -688,7 +688,9 @@ completed direct children with nonblocking `waitpid`, bounded to 4096 calls and 
 and checks `/proc` for any process besides itself and PID 1 (allowing at most 50 ms only
 while PID 1 finishes reaping an already-exited orphan zombie). Every process still present
 afterward, including any live descendant or unconsumed zombie after the bound, makes the
-result ineligible; the remaining processes end with the sandbox. The engine never waits for
+result ineligible; the remaining processes end with the sandbox (including when the
+controller itself is killed abruptly with `SIGKILL`, because Bubblewrap's `--die-with-parent`
+stops its PID 1 init and ends the entire sandbox PID namespace). The engine never waits for
 ongoing child work to turn an incomplete run into a reusable success.
 
 ## Fixture guard

@@ -360,9 +360,11 @@ def test_worker_cleanup_failure_supersedes_sibling_typed_refusal_in_execution_po
 
 
 def _socket_held(name):
-    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_NONBLOCK)
     try:
         probe.connect("\0" + name)
+    except BlockingIOError:
+        return True
     except OSError:
         return False
     else:
@@ -388,7 +390,7 @@ pytestmark = pytest.mark.telescope(inputs=[])
 def test_hold():
     held = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     held.bind('\\0{name}')
-    held.listen()
+    held.listen(1)
     time.sleep(30)
 """,
         )
@@ -446,6 +448,7 @@ def test_hold():
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and any(_socket_held(name) for name in names):
             time.sleep(0.02)
+        assert time.monotonic() < deadline
         assert not any(_socket_held(name) for name in names)
         assert report["kind"] == "run" and report["status"] == "infrastructure_error"
         assert (
