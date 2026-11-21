@@ -533,7 +533,10 @@ selected frozen-tool binding described above. Explicit hidden glob components ar
 The default suite keeps pytest configuration in this pyproject's `[tool.pytest.ini_options]`.
 [Independent suite declarations](scoped-execution.md) also support explicit
 pytest.ini, .pytest.ini, tox.ini and setup.cfg files. Discovery honors configured `python_files`
-and `test_roots` (default `["."]`). Bounds fail explicitly; discovery never silently
+and `test_roots` (default `[suite.root]`, `["."]` for the default suite). Every suite
+`test_roots` entry must lie within that suite's `root`; an entry outside `root` refuses
+with `DeclarationError` (set `root` to a common ancestor such as `"."`, with an
+independent `cwd` if needed, to cover sibling directories). Bounds fail explicitly; discovery never silently
 truncates matching files. For scoped collection, a synthesized minimal configuration
 at `/project/<suite.config>` carries all pytest ini options and marker registrations.
 For scoped execution, the synthesized file carries all non-marker options and only

@@ -193,8 +193,15 @@ remains the default.
 Explicit suites cannot be combined with top-level `test_roots`.
 
 All configured paths, declarations, selectors, include/exclude patterns and summary files
-remain relative to one outer project directory. `test_roots` accepts directories or
-explicit Python test files. File patterns use project-relative glob semantics.
+remain relative to one outer project directory. `test_roots` accepts existing regular
+Python test files or directories without symlinks, and defaults to `[suite.root]`. Every
+`test_roots` entry of a suite must lie within that suite's `root` (at `root` itself or
+below it); an entry outside `root` refuses before any session starts (`DeclarationError`
+in Python, `declaration_error` with exit status 4 from the CLI). To cover tests across
+sibling directories in one suite, such as `subproject/tests` and `shared/tests`, set
+`root` to a common ancestor such as `"."` while setting `cwd` independently (for example
+`cwd = "subproject"`) if needed, or declare separate suites. File patterns use
+project-relative glob semantics.
 The file list is refreshed before reuse. Excluded modules are omitted from structural
 test parsing and pytest's collection targets, and cannot be selected with `-k`, `-m`,
 or node selectors. A scoped case may still explicitly declare an excluded Python file
