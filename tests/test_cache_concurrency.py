@@ -238,6 +238,40 @@ def test_invocations_sharing_a_cache_overlap_in_their_sandboxes(tmp_path):
         passed(controller.run(root, cache_dir=cache), executed=0, reused=1)
 
 
+def test_same_checkout_runs_overlap_beyond_shared_scratch_limit(tmp_path, monkeypatch):
+    """Real controllers share scratch; a small abandoned-copy bound excludes live owners."""
+    monkeypatch.setattr(controller.sandbox, "MAX_INVOCATIONS", 2)
+    root, cache = tmp_path / "project", tmp_path / "cache"
+    gate = HostGate()
+    put(root, "pyproject.toml", '[tool.pytest_telescope]\ntest_roots = ["tests"]\n')
+    put(
+        root,
+        "tests/test_overlap.py",
+        SCOPED + gate.client() + "\ndef test_overlap():\n    gate('overlap')\n",
+    )
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            try:
+                first = executor.submit(controller.run, root, cache_dir=cache, timeout=120)
+                assert gate.arrived("overlap"), first.result() if first.done() else None
+                second = executor.submit(controller.run, root, cache_dir=cache, timeout=120)
+                assert gate.arrived("overlap", count=2), second.result() if second.done() else None
+                # Both runs hold an outer copy and a worker copy in the same checkout.
+                scratch = root / ".pytest-telescope/scratch"
+                assert len(list(scratch.iterdir())) == 4
+                controller.sandbox.recover(root)
+                assert len(list(scratch.iterdir())) == 4
+            finally:
+                gate.release()
+            for future in (first, second):
+                passed(future.result(timeout=120), executed=1, reused=0)
+    finally:
+        gate.release()
+        gate.close()
+    assert list(scratch.iterdir()) == []
+    assert staging(cache) == []
+
+
 def test_live_staging_survives_while_abandoned_staging_is_recovered(tmp_path):
     cache = tmp_path / "cache"
     gate = HostGate()

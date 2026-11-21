@@ -42,6 +42,7 @@ POLICY = "bubblewrap-view-v3"
 MAX_OUTPUT = 1_048_576
 MAX_COLLECTION = 67_108_864
 MAX_PROBE = 4 * 1_048_576
+# Bound abandoned copies, not live owners across concurrent runs of one checkout.
 MAX_INVOCATIONS = 64
 WORKER = Path(__file__).with_name("worker.py")
 REQUEST = "/telescope/request.json"
@@ -481,30 +482,72 @@ def _allocation(state):
 
 
 def _remove(directory):
+    """Remove owned contents, retaining the locked owner until atomic deregistration."""
     try:
-        shutil.rmtree(directory)
-    except FileNotFoundError:
-        pass
+        for child in directory.iterdir():
+            if child.name == "owner.lock":
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        # Registration and discovery use this same lock. Neither can see the
+        # interval between unlink and rmdir; large copies are removed outside it.
+        with _allocation(directory.parent.parent):
+            (directory / "owner.lock").unlink()
+            directory.rmdir()
+    except FileNotFoundError as exc:
+        if directory.exists():
+            raise CleanupError("owned frozen copy cleanup failed") from exc
     except OSError as exc:
         raise CleanupError("owned frozen copy cleanup failed") from exc
+
+
+def _abandoned(state, limit, message, deadline):
+    """Discover at most `limit` unlocked copies while the allocation lock is held.
+
+    Live owners consume caller resources, not the abandoned-copy budget. Stream
+    their entries without retaining an unbounded list or waiting for owner locks.
+    Recovery must acquire ownership again before removing any discovered copy.
+    """
+    paths = []
+    with os.scandir(state / "scratch") as entries:
+        for entry in entries:
+            if time.monotonic() > deadline:
+                raise CleanupError("invocation recovery budget exceeded; rerun after inspection")
+            if not re.fullmatch(r"invocation-[0-9a-f]{32}", entry.name):
+                raise CleanupError("unrecognized scratch entry; recovery stopped")
+            if not entry.is_dir(follow_symlinks=False):
+                raise CleanupError("invocation directory changed type; recovery stopped")
+            directory = Path(entry.path)
+            try:
+                descriptor = os.open(directory / "owner.lock", os.O_RDWR | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                raise CleanupError("incomplete invocation directory; recovery stopped") from None
+            try:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                if len(paths) >= limit:
+                    raise CleanupError(message)
+                paths.append(directory)
+            finally:
+                os.close(descriptor)
+    return paths
 
 
 def recover(root):
     """Remove frozen copies left by invocations whose owner no longer holds its lock."""
     state = _state(root)
-    scratch = state / "scratch"
-    with _allocation(state):
-        with os.scandir(scratch) as entries:
-            paths = []
-            for entry in entries:
-                if len(paths) >= MAX_INVOCATIONS:
-                    raise CleanupError("invocation directory budget exceeded; recovery stopped")
-                if not re.fullmatch(r"invocation-[0-9a-f]{32}", entry.name):
-                    raise CleanupError("unrecognized scratch entry; recovery stopped")
-                if not entry.is_dir(follow_symlinks=False):
-                    raise CleanupError("invocation directory changed type; recovery stopped")
-                paths.append(Path(entry.path))
     deadline = time.monotonic() + 60
+    with _allocation(state):
+        paths = _abandoned(
+            state,
+            MAX_INVOCATIONS,
+            "invocation directory budget exceeded; recovery stopped",
+            deadline,
+        )
     for directory in paths:
         if time.monotonic() > deadline:
             raise CleanupError("invocation recovery budget exceeded; rerun after inspection")
@@ -512,9 +555,11 @@ def recover(root):
             descriptor = os.open(directory / "owner.lock", os.O_RDWR | os.O_NOFOLLOW)
         except FileNotFoundError:
             # A concurrent invocation may have completed since directory discovery.
-            if not directory.exists():
-                continue
-            raise CleanupError("incomplete invocation directory; recovery stopped") from None
+            # Recheck under the lock that makes final unlink/rmdir indivisible.
+            with _allocation(state):
+                if not directory.exists():
+                    continue
+                raise CleanupError("incomplete invocation directory; recovery stopped") from None
         try:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -553,10 +598,12 @@ def invocation(root):
     state = _state(root)
     scratch = state / "scratch"
     with _allocation(state):
-        with os.scandir(scratch) as entries:
-            for count, _ in enumerate(entries, 1):
-                if count >= MAX_INVOCATIONS:
-                    raise CleanupError("invocation directory budget exhausted")
+        _abandoned(
+            state,
+            MAX_INVOCATIONS - 1,
+            "invocation directory budget exhausted",
+            time.monotonic() + 60,
+        )
         directory = scratch / ("invocation-" + uuid.uuid4().hex)
         directory.mkdir(mode=0o700)
         descriptor = os.open(directory / "owner.lock", os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)

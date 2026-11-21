@@ -526,6 +526,15 @@ budget. Collection and ordinary sessions run one at a time before scoped executi
 starts. The [fixture guard](batching.md#fixture-guard) inspects up to `workers` batches
 at a time before any of them executes.
 
+Overlapping runs in one checkout keep separate owner-locked scratch directories.
+Recovery spares live owners, even above 64 total directories. The 64-directory safety
+bound applies to abandoned copies: allocation refuses at 64 pending abandoned copies,
+and recovery refuses above 64 before removing any. Scratch scans stream live entries
+and have a 60-second deadline; this does not replace the caller's aggregate resource
+limits. Cleanup keeps each owner lock until the directory's final removal, serialized
+with scratch discovery and registration, so another run cannot observe half a teardown.
+Malformed directories, including a missing owner lock, still refuse recovery.
+
 ## Order of an invocation
 
 1. Parse test declarations and the declared Python sources of scoped views statically,
