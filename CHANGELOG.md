@@ -1,5 +1,132 @@
 # Changelog
 
+## 0.2.0
+
+Unpacked container rootfs views, isolated `editable-v1` project distributions,
+location-blind guarded fixture commitments, concurrent cache and scratch handling,
+continuous PID 1 orphan reaping, and stricter suite and environment preflight contracts.
+
+### Breaking changes
+
+- **Outside-project editable installs are refused in scoped runs.** Scoped preflight now
+  refuses any editable distribution in the invoking environment whose source directory
+  lies outside the project (excluding `pytest-telescope` itself), whether installed via a
+  `.pth` file or a setuptools finder. The refusal reports capability `sandbox:environment`,
+  names the distribution and source path, and advises installing external dependencies as
+  regular, non-editable distributions. Regular packages in `site-packages`, editable
+  installs rooted inside the project (rewritten to `/project`), and ordinary unscoped
+  sessions are unaffected.
+- **Suite `test_roots` must lie within the suite's `root`.** Every `test_roots` entry of
+  a suite must now lie canonically within that suite's `root` (at `root` itself or below
+  it, with no symlink or symlink-ancestor escape). Entries outside `root` refuse before
+  any session starts with `DeclarationError` (`declaration_error`, CLI exit status 4),
+  naming the suite, `root`, and offending entry. To cover tests across sibling
+  directories in one suite, set `root` to a common ancestor such as `"."` with an
+  independent `cwd` if needed, or declare separate suites.
+
+### Unpacked rootfs views, isolated distributions, and location-blind guards
+
+- **Unpacked container rootfs views.** Set `rootfs` and `rootfs_python` under
+  `[tool.pytest_telescope.execution]`, pass `run --rootfs PATH --rootfs-python PATH`, or
+  call `controller.run(..., rootfs=..., rootfs_python=...)`; arguments and flags override
+  configuration. Leaving `rootfs` unset preserves host behavior; `rootfs = "/"` uses `/`
+  with `rootfs_python` (or the invoking interpreter if omitted). An unpacked `rootfs`
+  directory other than `/` requires a canonical absolute `rootfs_python` path inside that
+  view, and `rootfs_python` requires `rootfs`.
+  - Bubblewrap mounts `<rootfs>/usr`, `<rootfs>/etc`, `<rootfs>`'s `/bin`, `/sbin`, and
+    `/lib*`, and the interpreter's environment prefixes from `<rootfs>`, probes the
+    interpreter inside that view, and resolves declared frozen tools against `<rootfs>`.
+  - Neither `rootfs_python` nor its prefixes may overlap `/project`, `/metadata`, `/env`,
+    `/telescope`, `/tools`, `/proc`, `/dev`, or `/tmp`, and `<rootfs>` cannot overlap the
+    project directory (`sandbox:environment`).
+  - Running on a host with `--rootfs <dir> --rootfs-python <interp>` computes the same
+    `sandbox.identity`, local cache keys, and remote result store keys as running inside
+    a container whose `/` holds that tree with `--rootfs / --rootfs-python <interp>`. See
+    [unpacked container rootfs views](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#unpacked-container-rootfs-views).
+- **Isolated `editable-v1` project distributions.**
+  `[tool.pytest_telescope.distributions.<alias>]` now supports `format = "editable-v1"`
+  alongside `format = "pep621-static-v1"`, taking `metadata = "<dir>/pyproject.toml"`
+  (static `[project]` `name` and `version`, no `backend-path`) and optional
+  `build_inputs = [...]`.
+  - For each combination of `sandbox.identity` and the frozen SHA-256 digests of the
+    selected distributions' `metadata` and `build_inputs`, the controller builds and
+    caches a read-only virtual environment under `<cache_dir>/environments` (or private
+    invocation scratch under `--no-cache`) inside Bubblewrap using
+    `venv --system-site-packages --without-pip /env` and
+    `pip --python /env/bin/python install --no-index --no-deps --no-build-isolation --no-compile -e /project/<dir> ...`
+    with only those frozen build inputs mounted. When the base interpreter is a virtual
+    environment, `/env` bridges only its site directories and preserves its
+    `include-system-site-packages` setting.
+  - Mounted read-only at `/env` across scoped collection, fixture-guard capture and
+    inspection, and case, batch, and guarded-batch execution, the worker starts as
+    `/env/bin/python -I -B /telescope/worker.py` with `/env/bin` ahead of the base
+    interpreter directory on `PATH`. `importlib.metadata`, `entry_points()`, and isolated
+    `[sys.executable, "-I", "-m", ...]` child processes see only the base environment
+    plus declared distributions and declared `/project` files, and `editable-v1` coexists
+    with `pep621-static-v1` on the same unit.
+  - Collisions with base-installed distributions refuse with
+    `project-metadata:runtime-conflict`, invalid metadata or install failures refuse with
+    `metadata:editable-v1`, and combining `editable-v1` with closed native tool startup
+    refuses with `tool:layout`. See
+    [isolated `editable-v1` project distributions](https://pytest-telescope.readthedocs.io/en/latest/bubblewrap/#isolated-editable-v1-project-distributions).
+- **Location-blind guarded fixture commitments.** Under `fixture_guard="available-v1"`,
+  fixture definition and plugin module paths in guarded inspection and registry
+  commitments are now normalized relative to resolved `/project`, `/metadata`, `/env`, or
+  Python environment and standard-library roots (`purelib`, `platlib`, `stdlib`,
+  `platstdlib`, and interpreter prefixes, matching the most-specific resolved directory
+  first) alongside SHA-256 file-content digests, failing closed for paths outside
+  admitted roots. Identical checkouts and identical virtual environments at different
+  host paths now compute identical guarded `registry_id` and cache keys locally and with
+  a remote result store, while source changes still invalidate them.
+
+### Concurrency, process teardown, and failure evidence
+
+- **Narrowed cache lock for concurrent invocations.** Invocations sharing a cache
+  directory now stage new records in private owner-locked directories below `staging`
+  inside the cache, holding the cache `.lock` only briefly to create staging and recover
+  abandoned staging, and to publish (scan, move staged records into place, trim to bounds,
+  and sync). Snapshotting, ordinary sessions, sandboxed collection, fixture-guard
+  inspection, and test sessions run without the cache lock, and reading published records
+  requires no lock (records are synced and renamed into place; a record evicted mid-read
+  is treated as a miss). Recovery removes only staging whose owner lock is free, so live
+  staging is untouched and killed invocations publish nothing. See
+  [invocations sharing a cache](https://pytest-telescope.readthedocs.io/en/latest/execution-contract/#invocations-sharing-a-cache).
+- **Same-checkout scratch ownership and recovery concurrency.** Overlapping runs in one
+  checkout keep separate owner-locked scratch directories; live owners no longer share a
+  64-directory ceiling. The 64-directory safety bound applies only to abandoned copies
+  (allocation refuses at 64 pending abandoned copies; recovery refuses above 64 without
+  removing copies, with a 60-second scan deadline). Cleanup holds each directory's owner
+  lock until final unlink and removal under the allocation lock so concurrent scans never
+  observe a half-removed directory; malformed directories still refuse recovery.
+- **Continuous orphan reaping via Bubblewrap PID 1 and `SIGKILL` teardown.** Bubblewrap
+  now runs without `--as-pid-1`, so its minimal PID 1 init continuously adopts and reaps
+  exited orphaned descendants throughout a session instead of letting zombies accumulate.
+  Setup options pass over an argument descriptor (`--args`) so `/proc/1/cmdline` does not
+  expose host bind source paths. After pytest teardown, the worker still reaps unwaited
+  exited direct children (bounded to 4,096 calls and 50 ms) and checks `/proc` for any
+  process besides PID 1 and itself (allowing at most 50 ms only while PID 1 finishes
+  reaping an already-exited orphan zombie); live descendants or remaining zombies still
+  make the result ineligible. With `--die-with-parent`, an abrupt controller exit
+  (including `SIGKILL`) stops outer `bwrap` and its PID 1 init so the kernel terminates
+  the worker and all sandbox descendants promptly, leaving abandoned scratch and staging
+  with released owner locks for recovery on the next run.
+- **Pool cleanup failure precedence and repeated-signal drain.** A terminal cleanup
+  failure in any scoped execution or fixture-guard inspection unit now supersedes a typed
+  refusal (or ordinary outage in guard inspection) from another unit in the same phase,
+  reporting an infrastructure failure and blocking publication, matching outer invocation
+  cleanup. Further `SIGINT` and `SIGTERM` signals are ignored in the main thread while
+  active worker pools drain and staging, tool, and invocation cleanup finishes.
+- **Failure location evidence.** Phase failures whose innermost traceback frame has a
+  non-project or relative `co_filename` (such as generated `<string>` code or relative
+  code filenames) now report `<runtime>` instead of joining the relative filename to the
+  project root or resolving it against `cwd`. Phase failures without an exception (such
+  as strict unexpected passes or reports failed by another plugin hook) now consistently
+  name the module that collected the test, including when the test function was imported
+  from another module. See
+  [failure entries](https://pytest-telescope.readthedocs.io/en/latest/result-schema/#failure-entries).
+- Results cached by 0.1.5 are not reused, because the package version is part of every
+  scoped cache key. The first run after the upgrade executes every scoped test again.
+
 ## 0.1.5
 
 Parallel fixture-guard inspection, and an optional remote result store that shares
