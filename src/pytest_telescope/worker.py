@@ -1054,9 +1054,9 @@ def main(request=None, *, ordinary=False):
 
     def evidence(nodeid, phase, filename, line, kind, *, suite_relative=False):
         """Record one failure. `filename` is an absolute path unless `suite_relative` says
-        that it is the file part of a node ID or report location, which pytest gives
-        relative to the suite root; either way the entry names a project file relative to
-        the project, or `<runtime>` when it does not."""
+        that it is the file part of a node ID, which pytest gives relative to the suite
+        root; either way the entry names a project file relative to the project, or
+        `<runtime>` when it does not."""
         if len(failures) >= 64:
             return
         try:
@@ -1086,6 +1086,7 @@ def main(request=None, *, ordinary=False):
             self.checkpoint = False
             self.dispatch_started = False
             self.selected_case_ids = set()
+            self.selected_items = {}
             self.bytes = 1024
             self.guard_items = None
             self.guard_registry = None
@@ -1393,6 +1394,7 @@ def main(request=None, *, ordinary=False):
             if mode != "collection" and self.checkpoint:
                 selected_ids[:] = [case_identity(item.nodeid) for item in session.items]
                 self.selected_case_ids = set(selected_ids)
+                self.selected_items = {case_identity(item.nodeid): item for item in session.items}
             if mode in ("guard-capture", "guard-inspection", "guard-batch") and self.checkpoint:
                 identities = FRAMEWORK_SOURCE_IDENTITIES.get(pytest.__version__)
                 if identities is None:
@@ -1444,13 +1446,22 @@ def main(request=None, *, ordinary=False):
             yield
             self.unchanged(session)
 
+        def non_exception_failure(self, item, report):
+            if item is not None:
+                return str(item.path), item.location[1] + 1, "UnexpectedPass", False
+            return (
+                report.nodeid.split("::")[0],
+                report.location[1] + 1,
+                "UnexpectedPass",
+                True,
+            )
+
         @pytest.hookimpl(hookwrapper=True)
         def pytest_runtest_makereport(self, item, call):
             outcome = yield
             report = outcome.get_result()
             if report.failed:
-                filename, line = str(item.path), item.location[1] + 1
-                kind = "UnexpectedPass"
+                filename, line, kind, suite_relative = self.non_exception_failure(item, report)
                 if call.excinfo is not None:
                     kind = call.excinfo.type.__name__
                     traceback = call.excinfo.traceback
@@ -1458,7 +1469,13 @@ def main(request=None, *, ordinary=False):
                         entry = traceback[-1]
                         # Read raw co_filename so pytest does not resolve a relative name against cwd.
                         filename, line = entry.frame.code.raw.co_filename, entry.lineno + 1
-                failure_reports[case_identity(report.nodeid), report.when] = (filename, line, kind)
+                        suite_relative = False
+                failure_reports[case_identity(report.nodeid), report.when] = (
+                    filename,
+                    line,
+                    kind,
+                    suite_relative,
+                )
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
         def pytest_collectreport(self, report):
@@ -1526,16 +1543,16 @@ def main(request=None, *, ordinary=False):
                 failure = failure_reports.get((case, report.when))
                 if failure is None:
                     # Another plugin failed the report after it was observed passing.
-                    evidence(
-                        report.nodeid,
-                        report.when,
-                        report.location[0],
-                        report.location[1] + 1,
-                        "UnexpectedPass",
-                        suite_relative=True,
-                    )
-                else:
-                    evidence(report.nodeid, report.when, *failure)
+                    failure = self.non_exception_failure(self.selected_items.get(case), report)
+                filename, line, kind, suite_relative = failure
+                evidence(
+                    report.nodeid,
+                    report.when,
+                    filename,
+                    line,
+                    kind,
+                    suite_relative=suite_relative,
+                )
                 cases[case] = "failed"
             elif previous != "failed":
                 if report.skipped:

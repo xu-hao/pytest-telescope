@@ -33,7 +33,13 @@ def project(request, tmp_path):
     put(root, "subproject/data.txt", "red\n")
     if request.param == "same-name-at-project-root":
         # Unrelated files that the suite-relative names would wrongly point at.
-        for name in ("test_example.py", "test_other.py", "helper.py", "conftest.py"):
+        for name in (
+            "test_example.py",
+            "test_other.py",
+            "helper.py",
+            "shared_cases.py",
+            "conftest.py",
+        ):
             put(root, f"tests/{name}", "def test_unrelated():\n    pass\n")
     return root
 
@@ -191,4 +197,62 @@ def test_failure_decided_by_another_plugin_names_the_project_relative_file(proje
     rows = [row for group in report["groups"] for row in group["failures"]]
     assert [(row["file"], row["phase"], row["exception_type"]) for row in rows] == [
         ("subproject/tests/test_example.py", "call", "UnexpectedPass")
+    ]
+
+
+@pytest.mark.parametrize("route", ["ordinary", "scoped"])
+def test_imported_test_failures_without_an_exception_name_the_collecting_module(project, route):
+    put(
+        project,
+        "subproject/tests/shared_cases.py",
+        "import pytest\n"
+        "\n"
+        "@pytest.mark.xfail(strict=True)\n"
+        "def test_strict_unexpected_pass():\n"
+        "    pass\n"
+        "\n"
+        "def test_plugin_failed():\n"
+        "    pass\n",
+    )
+    put(
+        project,
+        "subproject/tests/conftest.py",
+        "import pytest\n"
+        "@pytest.hookimpl(hookwrapper=True, tryfirst=True)\n"
+        "def pytest_runtest_makereport(item, call):\n"
+        "    outcome = yield\n"
+        "    report = outcome.get_result()\n"
+        '    if report.when == "call" and item.name == "test_plugin_failed":\n'
+        '        report.outcome = "failed"\n',
+    )
+    put(
+        project,
+        "subproject/tests/test_example.py",
+        (
+            "import pytest\npytestmark = pytest.mark.telescope("
+            'inputs=["subproject/data.txt", "subproject/tests/conftest.py", '
+            '"subproject/tests/shared_cases.py"])\n'
+            if route == "scoped"
+            else ""
+        )
+        + "from shared_cases import test_plugin_failed, test_strict_unexpected_pass\n",
+    )
+
+    report = controller.run(project, workers=1)
+
+    assert report["status"] == "failed", report
+    assert {group["route"] for group in report["groups"]} == {route}
+    assert [unit["file"] for unit in report["units"]] == [
+        "subproject/tests/test_example.py",
+        "subproject/tests/test_example.py",
+    ]
+    group_rows = [row for group in report["groups"] for row in group["failures"]]
+    unit_rows = [row for unit in report["units"] for row in unit["failures"]]
+    assert unit_rows == group_rows
+    assert {row["case_id"] for row in group_rows} == {unit["case_id"] for unit in report["units"]}
+    assert sorted(
+        (row["file"], row["line"], row["phase"], row["exception_type"]) for row in group_rows
+    ) == [
+        ("subproject/tests/test_example.py", 3, "call", "UnexpectedPass"),
+        ("subproject/tests/test_example.py", 7, "call", "UnexpectedPass"),
     ]
