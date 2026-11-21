@@ -9,7 +9,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
@@ -137,14 +136,17 @@ def test_ordinary():
         assert "prior-drained" in chronology
         chronology.append("outer-cleanup")
 
-        def rmtree(target):
-            assert target == directory
-            raise OSError(errno.EIO, "owned outer removal I/O failure")
+        original_unlink = Path.unlink
+
+        def unlink(target, *args, **kwargs):
+            if target == directory / "owner.lock":
+                raise OSError(errno.EIO, "owned outer removal I/O failure")
+            return original_unlink(target, *args, **kwargs)
 
         # The actual _remove operation translates the underlying owned I/O fault
         # into terminal CleanupError while the real DeclarationError unwinds.
         with monkeypatch.context() as fault:
-            fault.setattr(sandbox, "shutil", SimpleNamespace(rmtree=rmtree))
+            fault.setattr(Path, "unlink", unlink)
             try:
                 return original_remove(directory)
             except sandbox.CleanupError as error:
@@ -299,12 +301,15 @@ def test_worker_cleanup_failure_supersedes_sibling_typed_refusal_in_execution_po
         if directory not in prior_directories:
             return original_remove(directory)
 
-        def rmtree(target):
-            assert target == directory
-            raise OSError(errno.EIO, "owned worker removal I/O failure")
+        original_unlink = Path.unlink
+
+        def unlink(target, *args, **kwargs):
+            if target == directory / "owner.lock":
+                raise OSError(errno.EIO, "owned worker removal I/O failure")
+            return original_unlink(target, *args, **kwargs)
 
         with monkeypatch.context() as fault:
-            fault.setattr(sandbox, "shutil", SimpleNamespace(rmtree=rmtree))
+            fault.setattr(Path, "unlink", unlink)
             try:
                 return original_remove(directory)
             except sandbox.CleanupError as error:
@@ -360,9 +365,11 @@ def test_worker_cleanup_failure_supersedes_sibling_typed_refusal_in_execution_po
 
 
 def _socket_held(name):
-    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_NONBLOCK)
     try:
         probe.connect("\0" + name)
+    except BlockingIOError:
+        return True
     except OSError:
         return False
     else:
@@ -388,7 +395,7 @@ pytestmark = pytest.mark.telescope(inputs=[])
 def test_hold():
     held = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     held.bind('\\0{name}')
-    held.listen()
+    held.listen(1)
     time.sleep(30)
 """,
         )
@@ -446,6 +453,7 @@ def test_hold():
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline and any(_socket_held(name) for name in names):
             time.sleep(0.02)
+        assert time.monotonic() < deadline
         assert not any(_socket_held(name) for name in names)
         assert report["kind"] == "run" and report["status"] == "infrastructure_error"
         assert (
