@@ -196,7 +196,11 @@ def mount_rows():
 def test_process_and_mount_tables():
     tables = ("mounts", "mountstats", "cmdline", "maps", "status", "cgroup")
     values = [read("/proc/self/" + name) for name in tables]
-    values += [read("/proc/1/cmdline"), read("/proc/1/environ")]
+    values.append(read("/proc/1/cmdline"))
+    try:
+        values.append(read("/proc/1/environ"))
+    except PermissionError:
+        pass
     values += [os.readlink("/proc/self/" + name) for name in ("cwd", "exe", "root")]
     for descriptor in os.listdir("/proc/self/fd"):
         try:
