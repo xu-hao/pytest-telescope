@@ -310,7 +310,11 @@ def test_outside_project_editable_install_does_not_block_ordinary_tests(tmp_path
     put(library, "src/toypkg/__init__.py", "VALUE = 7\n")
     interpreter, site_packages = environment(tmp_path / "env")
     install_external_library(site_packages, library, "finder")
-    put(project, "tests/test_ordinary.py", "import pytest\n\ndef test_ordinary():\n    assert True\n")
+    put(
+        project,
+        "tests/test_ordinary.py",
+        "import pytest\n\ndef test_ordinary():\n    assert True\n",
+    )
     completed = subprocess.run(
         [str(interpreter), "-m", "pytest_telescope", "run", "--explain"],
         cwd=project,
