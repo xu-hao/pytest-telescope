@@ -203,6 +203,20 @@ def install_editable(site_packages, project, form):
         (site_packages / "__editable__.toypkg-0.1.pth").write_text(f"{project / 'src'}\n")
 
 
+def install_external_library(site_packages, library, form):
+    """Install a library outside the project, using one of its editable forms."""
+    install_editable(site_packages, library, form)
+
+
+def install_regular_library(site_packages):
+    """Install a small regular distribution directly into the environment."""
+    put(site_packages, "toypkg/__init__.py", "VALUE = 7\n")
+    put(site_packages, "toypkg/worker.py", "import toypkg\nprint('worker', toypkg.VALUE)\n")
+    record = site_packages / "toypkg-0.1.dist-info"
+    record.mkdir()
+    (record / "METADATA").write_text("Metadata-Version: 2.1\nName: toypkg\nVersion: 0.1\n")
+
+
 def run(interpreter, project, *arguments):
     completed = subprocess.run(
         [str(interpreter), "-m", "pytest_telescope", "run", "--explain", *arguments],
@@ -244,6 +258,70 @@ def test_isolated_children_import_declared_source_through_an_editable_install(tm
     assert report["route_counts"]["scoped"]["executed"] == 3, report
     profiles = [group["profile"] for group in report["groups"]]
     assert profiles == (["case-v2"] * 3 if mode == "case" else ["batch-v2"]), report
+
+
+@pytest.mark.parametrize("form", ["finder", "pth"])
+def test_outside_project_editable_install_refuses_before_scoped_execution(tmp_path, form):
+    project = toy_project(tmp_path / "checkout")
+    library = tmp_path / "outside-library"
+    put(library, "src/toypkg/__init__.py", "VALUE = 7\n")
+    interpreter, site_packages = environment(tmp_path / "env")
+    install_external_library(site_packages, library, form)
+    put(project, "tests/test_scoped.py", VALUE_TEST.format(declared=DECLARED))
+    cache = tmp_path / "results"
+
+    completed = subprocess.run(
+        [str(interpreter), "-m", "pytest_telescope", "run", "--cache-dir", str(cache)],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    report = json.loads(completed.stdout)
+    assert completed.returncode == 4, report
+    assert report["kind"] == "refusal" and report["status"] == "unsupported", report
+    assert report["capability"] == "sandbox:environment", report
+    assert "editable distribution toypkg" in report["error"], report
+    assert "outside the project" in report["error"], report
+    assert str(library) in report["error"], report
+    assert not cache.exists(), report
+
+
+def test_regular_external_distribution_runs_in_scoped_mode(tmp_path):
+    project = toy_project(tmp_path / "checkout")
+    interpreter, site_packages = environment(tmp_path / "env")
+    install_regular_library(site_packages)
+    put(project, "tests/test_external.py", VALUE_TEST.format(declared=DECLARED))
+    completed = subprocess.run(
+        [str(interpreter), "-m", "pytest_telescope", "run", "--explain"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    report = json.loads(completed.stdout)
+    assert completed.returncode == 0, report
+    assert report["route_counts"]["scoped"]["executed"] == 1, report
+
+
+def test_outside_project_editable_install_does_not_block_ordinary_tests(tmp_path):
+    project = toy_project(tmp_path / "checkout")
+    library = tmp_path / "outside-library"
+    put(library, "src/toypkg/__init__.py", "VALUE = 7\n")
+    interpreter, site_packages = environment(tmp_path / "env")
+    install_external_library(site_packages, library, "finder")
+    put(project, "tests/test_ordinary.py", "import pytest\n\ndef test_ordinary():\n    assert True\n")
+    completed = subprocess.run(
+        [str(interpreter), "-m", "pytest_telescope", "run", "--explain"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    report = json.loads(completed.stdout)
+    assert completed.returncode == 0, report
+    assert report["sandbox"]["required"] is False, report
+    assert report["route_counts"]["ordinary"]["executed"] == 1, report
 
 
 ONE_ROOT_TEST = """\

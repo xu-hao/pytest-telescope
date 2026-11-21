@@ -38,7 +38,7 @@ except ImportError:  # Importing the optional adapter remains safe on other host
     fcntl = None
 
 BACKEND = "bubblewrap"
-POLICY = "bubblewrap-view-v3"
+POLICY = "bubblewrap-view-v4"
 MAX_OUTPUT = 1_048_576
 MAX_COLLECTION = 67_108_864
 MAX_PROBE = 4 * 1_048_576
@@ -135,6 +135,7 @@ import sys
 STARTUP = [(name, getattr(module, "__file__", None)) for name, module in list(sys.modules.items())]
 import base64, hashlib, json, os, re, site, sysconfig
 from importlib import metadata
+from urllib.parse import unquote, urlparse
 
 LIMIT = int(sys.argv[2])
 NAME = rb"A-Za-z0-9._~+@%=\x80-\xff-"
@@ -266,7 +267,31 @@ def references(root):
             ]
     return sorted(identity), rewrites, sorted(set(masks)), sorted(oversize)
 
+def external_editables(root):
+    # Editable dependencies keep source outside the read-only project snapshot. The
+    # tool itself may be installed editable during development; it is the runner, not
+    # an application dependency imported by the scoped test, so leave it out.
+    found = set()
+    for dist in metadata.distributions():
+        try:
+            name = normalize(dist.metadata.get("Name", ""))
+            direct = json.loads(dist.read_text("direct_url.json") or "{}")
+            info = direct.get("dir_info", {})
+            parsed = urlparse(direct.get("url", ""))
+            if (
+                not name or name == "pytest-telescope" or info.get("editable") is not True
+                or parsed.scheme != "file" or parsed.netloc not in ("", "localhost")
+            ):
+                continue
+            location = os.path.realpath(unquote(parsed.path))
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        if os.path.isdir(location) and not inside(location, root):
+            found.add((name, location))
+    return sorted([list(row) for row in found])
+
 IDENTITY, REWRITES, MASKS, OVERSIZE = references(sys.argv[1])
+EXTERNAL_EDITABLES = external_editables(os.path.realpath(sys.argv[1]))
 print(json.dumps({
     "executable": sys.executable,
     "prefixes": sorted({sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix}),
@@ -287,6 +312,7 @@ print(json.dumps({
     "rewrites": REWRITES,
     "masks": MASKS,
     "oversize": OVERSIZE,
+    "external_editables": EXTERNAL_EDITABLES,
     "startup": {
         "prefix": sys.prefix, "exec_prefix": sys.exec_prefix,
         "base_prefix": sys.base_prefix, "base_exec_prefix": sys.base_exec_prefix,
@@ -624,6 +650,7 @@ def _probe(executable, project):
                 "rewrites",
                 "masks",
                 "oversize",
+                "external_editables",
                 "startup",
             }
             and type(data["executable"]) is str
@@ -638,6 +665,11 @@ def _probe(executable, project):
                 for row in data["distributions"]
             )
             and type(data["references"]) is list
+            and type(data["external_editables"]) is list
+            and all(
+                type(row) is list and len(row) == 2 and all(type(value) is str for value in row)
+                for row in data["external_editables"]
+            )
             and type(data["startup"]) is dict
             and all(
                 type(row) is list and len(row) == 3 and all(type(value) is str for value in row)
@@ -1239,6 +1271,12 @@ def describe(root, executable=None):
     """
     project = Path(root).resolve()
     description = _probe(executable or sys.executable, project)
+    if description["external_editables"]:
+        name, location = description["external_editables"][0]
+        _refuse(
+            f"editable distribution {name} at {location} is outside the project; "
+            "install external dependencies as regular, non-editable distributions"
+        )
     binds, links = _binds(description, project)
     _check_location(description, project)
     folders = [
