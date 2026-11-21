@@ -328,22 +328,27 @@ pending in the invocation's private staging until every worker, cancellation han
 frozen-copy cleanup completes; the controller takes the cache lock only to publish them,
 so other invocations sharing the cache directory run their sandboxes at the same time
 ([invocations sharing a cache](execution-contract.md#invocations-sharing-a-cache)). Any
-terminal cleanup failure prevents publication of all new records; previously eligible
-records remain intact. The scheduler stops submitting work on cancellation or terminal
-cleanup failure, drains active work, marks unscheduled selected cases with explicit
-infrastructure outcomes, and waits for cleanup before accepting results. Infrastructure retry
-remains at most two attempts per scoped case or batch; a retry occupies the same worker
-slot.
+terminal cleanup failure prevents publication of all new records and supersedes a typed
+refusal from another unit, as an outer invocation cleanup failure does; previously
+eligible records remain intact. The scheduler stops submitting work on refusal,
+cancellation or terminal cleanup failure, drains active work while ignoring further
+`SIGINT` and `SIGTERM` termination signals, marks unscheduled selected cases with
+explicit infrastructure outcomes, and waits for cleanup before accepting results.
+Infrastructure retry remains at most two attempts per scoped case or batch; a retry
+occupies the same worker slot.
 
 Guard inspection follows the same bounds and drain rules, except that earlier
 candidates finish on a refusal. Candidates are submitted in their deterministic order
 and each capture or inspection gets at most two attempts in its slot. A candidate that
 fails stops new submissions and stops the sandboxes of the candidates after it;
 candidates before it finish. The reported refusal or outage is therefore that of the
-first failing candidate in order, as with one worker. A terminal cleanup failure or an
-interruption of the invocation stops every active inspection. In each case the
-controller waits for all active sandboxes to exit and be cleaned up before it reports,
-admits nothing and dispatches no body.
+first failing candidate in order, as with one worker, unless a candidate ends with a
+terminal cleanup failure, which stops every active inspection and supersedes a refusal
+or ordinary outage from another candidate. An interruption of the invocation also stops
+every active inspection, and further `SIGINT` and `SIGTERM` signals are ignored while
+active units drain and clean up. In each case the controller waits for all active
+sandboxes to exit and be cleaned up before it reports, admits nothing and dispatches no
+body.
 
 With a [remote result store](result-store.md), `workers` also bounds its requests. A
 group's lookup runs in the worker slot that would otherwise start its sandbox, and
