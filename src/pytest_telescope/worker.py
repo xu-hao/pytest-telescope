@@ -166,13 +166,15 @@ CANONICAL_FILES = {}
 
 
 def project_file(filename):
-    """The project-relative name of a path, which must lie inside the project."""
+    """The project-relative name of an absolute path inside the project."""
     key = os.fspath(filename)
     try:
         return PROJECT_FILES[key]
     except KeyError:
         pass
-    path = Path(os.path.abspath(PROJECT_ROOT / filename)).relative_to(PROJECT_ROOT)
+    if type(key) is not str or not os.path.isabs(key):
+        raise ValueError("invalid project path")
+    path = Path(os.path.abspath(key)).relative_to(PROJECT_ROOT)
     text = path.as_posix()
     if (
         not text
@@ -741,7 +743,7 @@ def main(request=None, *, ordinary=False):
     root = request.get("project_root")
     if type(root) is not str or not os.path.isabs(root):
         raise ValueError("sessions require an absolute project root")
-    PROJECT_ROOT = Path(root)
+    PROJECT_ROOT = Path(os.path.abspath(root))
     PROJECT_FILES.clear()
     CANONICAL_FILES.clear()
     if request.get("metadata"):
@@ -899,7 +901,9 @@ def main(request=None, *, ordinary=False):
             or any(type(number) is not int or number < 0 for number in row["position"])
         ):
             raise ValueError("invalid declaration registry identity")
-        filename = project_file(row["file"])
+        if type(row["file"]) is not str or os.path.isabs(row["file"]):
+            raise ValueError("noncanonical declaration path")
+        filename = project_file(PROJECT_ROOT / row["file"])
         if filename != row["file"]:
             raise ValueError("noncanonical declaration path")
         if row["id"] != identity(
@@ -1049,14 +1053,16 @@ def main(request=None, *, ordinary=False):
     pytest.mark.telescope = guarded_marker
 
     def evidence(nodeid, phase, filename, line, kind, *, suite_relative=False):
-        """Record one failure. `filename` is a traceback or item path unless
-        `suite_relative` says that it is the file part of a node ID or report location,
-        which pytest gives relative to the suite root; either way the entry names a
-        project file relative to the project."""
+        """Record one failure. `filename` is an absolute path unless `suite_relative` says
+        that it is the file part of a node ID or report location, which pytest gives
+        relative to the suite root; either way the entry names a project file relative to
+        the project, or `<runtime>` when it does not."""
         if len(failures) >= 64:
             return
         try:
             path = canonical_nodeid(filename) if suite_relative else project_file(filename)
+            if not suite_relative and path == ".":
+                path = "<runtime>"
         except (ValueError, OSError):
             path = "<runtime>"
         failures.append(
@@ -1449,7 +1455,9 @@ def main(request=None, *, ordinary=False):
                     kind = call.excinfo.type.__name__
                     traceback = call.excinfo.traceback
                     if traceback:
-                        filename, line = str(traceback[-1].path), traceback[-1].lineno + 1
+                        entry = traceback[-1]
+                        # Read raw co_filename so pytest does not resolve a relative name against cwd.
+                        filename, line = entry.frame.code.raw.co_filename, entry.lineno + 1
                 failure_reports[case_identity(report.nodeid), report.when] = (filename, line, kind)
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)

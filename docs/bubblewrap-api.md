@@ -81,7 +81,10 @@ result_store = "gs://bucket/prefix"  # optional remote result store, default non
 
 The [marker and project reference](specification.md#project-configuration) defines
 `test_roots`, `env`, `defaults` and `bundles`. The
-[metadata and suite reference](scoped-execution.md) defines `distributions` and `suites`.
+[metadata and suite reference](scoped-execution.md) defines `distributions` and `suites`:
+every `test_roots` entry of a suite must lie within that suite's `root` (set `root` to a
+common ancestor such as `"."`, with an independent `cwd` when needed, to cover sibling
+directories; entries outside `root` refuse with `DeclarationError` and CLI exit status 4).
 A suite's `capabilities` list accepts `python` and `project:readonly`;
 `network:none` and `scratch:noexec` refuse with that capability code.
 

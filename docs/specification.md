@@ -351,7 +351,10 @@ bundles. Metadata does not grant application source: declare package modules thr
 
 The [metadata and suite guide](scoped-execution.md) provides versioned static metadata
 and independent suite configuration. A suite's `root`, `config`,
-`test_roots`, `include` and `exclude` paths are all outer-project-relative. Exclusions
+`test_roots`, `include` and `exclude` paths are all outer-project-relative, and every
+`test_roots` entry must lie within that suite's `root` (use a common-ancestor `root` such
+as `"."`, with an independent `cwd` when needed, to cover sibling directories; entries
+outside `root` raise `DeclarationError`). Exclusions
 remove files before parsing or importing them. `args` preserve argument order; `plugins`
 name installed explicit plugins with autoload disabled. A project using explicit suites
 cannot also set top-level `test_roots`.

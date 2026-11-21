@@ -437,6 +437,43 @@ def test_cleanup_failure_stops_every_active_inspection(tmp_path, sandbox_double,
     assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
 
 
+@pytest.mark.parametrize("order", ["refusal-first", "cleanup-first"])
+def test_cleanup_failure_supersedes_earlier_candidate_refusal(
+    tmp_path, sandbox_double, module_rows, order
+):
+    both_active = threading.Barrier(2, timeout=10)
+    cleanup_raised = threading.Event()
+    drained = threading.Event()
+
+    def refuse_and_fail_cleanup(index, request, kwargs):
+        both_active.wait()
+        if index == 0:
+            if order == "cleanup-first":
+                assert cleanup_raised.wait(10)
+            raise UnsupportedCapability(
+                "execution:fixture-metadata", "synthetic earlier candidate refusal"
+            )
+        if index == 1:
+            if order == "refusal-first":
+                assert kwargs["cancellation"].wait(10)
+                time.sleep(0.1)
+            cleanup_raised.set()
+            drained.set()
+            raise sandbox.CleanupError("synthetic later candidate cleanup failure")
+        assert kwargs["cancellation"].wait(10)
+        raise sandbox.InvocationInterrupted("synthetic cancellation")
+
+    seam = guarded_project(tmp_path, sandbox_double, module_rows, refuse_and_fail_cleanup)
+    report = controller.run(tmp_path, fixture_guard="available-v1", workers=2)
+    assert drained.is_set()
+    assert report["status"] == "infrastructure_error"
+    assert report["collection"]["reason"] == "synthetic later candidate cleanup failure"
+    assert report["fixture_guard"]["state"] == "unavailable"
+    assert report["counts"]["infrastructure_error"] == 12 and not report["groups"]
+    assert seam.modes() == ["guard-capture", "guard-capture"] and not seam.active
+    assert not list((tmp_path / ".pytest-telescope/cache").rglob("*.json"))
+
+
 def test_real_sessions_agree_across_worker_counts(tmp_path, monkeypatch):
     root = tmp_path / "project"
     (root / "tests").mkdir(parents=True)
