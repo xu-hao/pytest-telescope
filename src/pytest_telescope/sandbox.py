@@ -65,7 +65,8 @@ MAX_RECORD_BYTES = 64 * 1_048_576
 # User, mount and PID namespaces only. A PID namespace with its own /proc keeps other
 # processes' root and working directories, which are host paths, out of the view.
 # Without --as-pid-1, Bubblewrap runs a minimal PID 1 init that reaps orphaned
-# descendants continuously; --die-with-parent ends the sandbox when the caller exits.
+# descendants continuously; --die-with-parent kills outer bwrap when its caller exits
+# (even on SIGKILL), stopping PID 1 so the kernel ends the whole PID namespace.
 NAMESPACES = ("--unshare-user", "--unshare-pid", "--die-with-parent")
 _BWRAP_OPTION_ARITIES = {
     "--unshare-user": 0,
@@ -337,7 +338,7 @@ def _host_environment():
 
 
 def _terminate(process):
-    # Killing the process group reaches bwrap (PID 1 of the sandbox) and the worker;
+    # Killing the process group reaches outer bwrap, its PID 1 init, and the worker;
     # when PID 1 exits, the kernel ends every remaining process in the PID namespace.
     try:
         os.killpg(process.pid, signal.SIGKILL)

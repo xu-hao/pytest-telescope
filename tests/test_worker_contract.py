@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -582,9 +583,11 @@ def test_real_worker_startup_failure_is_bounded(tmp_path, box):
 
 
 def held(name):
-    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_NONBLOCK)
     try:
         probe.connect("\0" + name)
+        return True
+    except BlockingIOError:
         return True
     except OSError:
         return False
@@ -592,10 +595,72 @@ def held(name):
         probe.close()
 
 
-@pytest.mark.parametrize("signum", [15, 9])
+def test_nonblocking_socket_probe_never_blocks_when_backlog_fills():
+    name = "telescope-probe-" + uuid.uuid4().hex
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.bind("\0" + name)
+        server.listen(1)
+        started = time.monotonic()
+        for _ in range(300):
+            assert held(name) is True
+        assert time.monotonic() - started < 1
+    finally:
+        server.close()
+    assert held(name) is False
+
+
+def _hold_descendants_test_source(worker_name, child_name, orphan_name, *, scoped=False):
+    header = (
+        "import os, signal, socket, subprocess, sys, time, pytest\n\n"
+        "pytestmark = pytest.mark.telescope(inputs=[])\n\n"
+        if scoped
+        else "import os, signal, socket, subprocess, sys, time\n\n"
+    )
+    return f"""{header}def test_wait():
+    child_code = (
+        "import socket, time; "
+        "s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); "
+        "s.bind(chr(0) + {child_name!r}); "
+        "s.listen(1); "
+        "time.sleep(30)"
+    )
+    subprocess.Popen([sys.executable, "-c", child_code])
+
+    read_fd, write_fd = os.pipe()
+    child = os.fork()
+    if child == 0:
+        os.close(read_fd)
+        if os.fork() == 0:
+            os.setsid()
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            orphan = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            orphan.bind(chr(0) + {orphan_name!r})
+            orphan.listen(1)
+            os.close(write_fd)
+            time.sleep(30)
+            os._exit(0)
+        os.close(write_fd)
+        os._exit(0)
+    os.close(write_fd)
+    while os.read(read_fd, 1):
+        pass
+    os.close(read_fd)
+    os.waitpid(child, 0)
+
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(chr(0) + {worker_name!r})
+    listener.listen(1)
+    time.sleep(30)
+"""
+
+
+@pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGKILL])
 def test_real_controller_interruption_stops_the_sandbox_and_recovers(tmp_path, box, signum):
-    name = "telescope-" + uuid.uuid4().hex
+    token = uuid.uuid4().hex
+    names = tuple(f"telescope-{kind}-{token}" for kind in ("worker", "child", "orphan"))
     source_root = str(Path(sandbox.__file__).resolve().parents[1])
+    test_source = _hold_descendants_test_source(*names)
     program = f"""
 import hashlib, json, sys
 sys.path.insert(0, sys.argv[1])
@@ -607,14 +672,7 @@ box = sandbox.prepare(root)
 with sandbox.invocation(root) as directory:
     project = directory / 'project'
     project.mkdir(mode=0o755)
-    (project / 'test_subject.py').write_text(
-        "import socket, time\\n"
-        "def test_wait():\\n"
-        "    held = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\\n"
-        "    held.bind('\\\\0{name}')\\n"
-        "    held.listen()\\n"
-        "    time.sleep(30)\\n"
-    )
+    (project / 'test_subject.py').write_text({test_source!r})
     (project / 'test_subject.py').chmod(0o444)
     nodeid = 'test_subject.py::test_wait'
     case_id = hashlib.sha256(json.dumps(['default', nodeid], separators=(',', ':')).encode()).hexdigest()
@@ -632,30 +690,129 @@ with sandbox.invocation(root) as directory:
                                  'case_id': case_id, 'expected_digest': digest}})
 """
     process = subprocess.Popen(
-        [sys.executable, "-c", program, source_root, str(tmp_path)],
+        [sys.executable, "-B", "-c", program, source_root, str(tmp_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        start_new_session=True,
     )
     try:
         deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and not held(name):
+        while time.monotonic() < deadline and not all(held(item) for item in names):
             assert process.poll() is None, process.communicate()
-            time.sleep(0.05)
-        assert held(name)
+            time.sleep(0.02)
+        assert all(held(item) for item in names)
+        probe_started = time.monotonic()
+        for _ in range(8):
+            assert all(held(item) for item in names)
+        assert time.monotonic() - probe_started < 1
+
+        killed_at = time.monotonic()
         os.kill(process.pid, signum)
         _, stderr = process.communicate(timeout=20)
         assert process.returncode != 0
-        if signum == 15:
+        if signum == signal.SIGTERM:
             assert b"InvocationInterrupted" in stderr
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and held(name):
-            time.sleep(0.05)
-        assert not held(name)
+        deadline = killed_at + (5 if signum == signal.SIGKILL else 10)
+        while time.monotonic() < deadline and any(held(item) for item in names):
+            time.sleep(0.02)
+        assert time.monotonic() < deadline
+        assert not any(held(item) for item in names)
         sandbox.recover(tmp_path)
+        assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
+        recovered = run_worker(tmp_path, box, "def test_after(): pass")
+        assert recovered["exit_code"] == 0 and recovered["passed"] == 1
         assert not list((tmp_path / ".pytest-telescope/scratch").iterdir())
     finally:
         if process.poll() is None:
-            process.kill()
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate(timeout=5)
+        sandbox.recover(tmp_path)
+
+
+@pytest.mark.parametrize("execution_mode", ["case", "batch"])
+def test_real_sigkill_of_controller_stops_sandbox_descendants_and_recovers_on_next_run(
+    tmp_path, execution_mode
+):
+    from pytest_telescope import controller
+
+    token = uuid.uuid4().hex
+    names = tuple(f"telescope-ctrl-{kind}-{token}" for kind in ("worker", "child", "orphan"))
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "pyproject.toml").write_text('[tool.pytest_telescope]\ntest_roots = ["tests"]\n')
+    (tmp_path / "tests/test_fast.py").write_text(
+        "import pytest\npytestmark = pytest.mark.telescope(inputs=[])\ndef test_fast():\n    pass\n"
+    )
+    (tmp_path / "tests/test_hold.py").write_text(_hold_descendants_test_source(*names, scoped=True))
+    source_root = str(Path(sandbox.__file__).resolve().parents[1])
+    program = """import sys
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from pytest_telescope import controller
+controller.run(Path(sys.argv[2]), workers=2, execution_mode=sys.argv[3], timeout=45)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-B", "-c", program, source_root, str(tmp_path), execution_mode],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    scratch = tmp_path / ".pytest-telescope/scratch"
+    cache = tmp_path / ".pytest-telescope/cache"
+    staging = cache / "staging"
+    try:
+
+        def execution_staged():
+            if not staging.exists():
+                return False
+            return any(
+                entry.is_dir() and any(".execution." in file.name for file in entry.iterdir())
+                for entry in staging.iterdir()
+            )
+
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not (
+            all(held(item) for item in names) and execution_staged()
+        ):
+            assert process.poll() is None, process.communicate()
+            time.sleep(0.02)
+        assert all(held(item) for item in names) and execution_staged()
+        assert list(scratch.iterdir())
+
+        killed_at = time.monotonic()
+        os.kill(process.pid, signal.SIGKILL)
+        process.communicate(timeout=5)
+        assert process.returncode == -signal.SIGKILL
+
+        deadline = killed_at + 5
+        while time.monotonic() < deadline and any(held(item) for item in names):
+            time.sleep(0.02)
+        assert time.monotonic() < deadline
+        assert not any(held(item) for item in names)
+
+        # The killed controller left abandoned scratch and staging, and published nothing.
+        assert list(scratch.iterdir())
+        assert list(staging.iterdir())
+        assert not list(cache.glob("*.json"))
+        assert not list((cache / "inventory").glob("*.json"))
+
+        # The next run recovers abandoned scratch and staging automatically without reusing
+        # the killed invocation's staged pass.
+        recovered = controller.run(
+            tmp_path,
+            workers=2,
+            execution_mode=execution_mode,
+            arguments=["-k", "test_fast"],
+            timeout=20,
+        )
+        assert recovered["status"] == "passed", recovered
+        assert recovered["counts"]["executed"] == 1
+        assert recovered["counts"]["reused"] == 0
+        assert not list(scratch.iterdir())
+        assert not list(staging.iterdir())
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
         process.communicate(timeout=5)
         sandbox.recover(tmp_path)
 

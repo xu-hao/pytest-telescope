@@ -350,6 +350,14 @@ itself: any descendant still alive after teardown (or any zombie remaining past 
 reap bound) makes the result unusable, and when the worker or PID 1 exits, every remaining
 process in the namespace ends with it. No other namespace is created.
 
+Bubblewrap also starts with `--die-with-parent`, so if the controller process exits
+abruptly without running cleanup (including on an uncatchable `SIGKILL`), the outer
+`bwrap` process ends, stopping Bubblewrap's PID 1 init inside the namespace so the kernel
+terminates the sandboxed worker and every remaining descendant in that PID namespace
+promptly. Any abandoned invocation scratch and staging directories left behind by a killed
+controller keep their owner locks until the kernel closes them on exit and are removed by
+the next invocation without publishing pending results.
+
 ## Frozen tools and runtime files
 
 A *frozen tool* is an existing installation outside the project, such as a Node
