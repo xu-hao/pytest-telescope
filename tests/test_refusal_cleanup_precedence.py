@@ -9,7 +9,6 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from frozen_tool_fixtures import ToolProject, assert_counts, cache_bytes, put
@@ -137,14 +136,17 @@ def test_ordinary():
         assert "prior-drained" in chronology
         chronology.append("outer-cleanup")
 
-        def rmtree(target):
-            assert target == directory
-            raise OSError(errno.EIO, "owned outer removal I/O failure")
+        original_unlink = Path.unlink
+
+        def unlink(target, *args, **kwargs):
+            if target == directory / "owner.lock":
+                raise OSError(errno.EIO, "owned outer removal I/O failure")
+            return original_unlink(target, *args, **kwargs)
 
         # The actual _remove operation translates the underlying owned I/O fault
         # into terminal CleanupError while the real DeclarationError unwinds.
         with monkeypatch.context() as fault:
-            fault.setattr(sandbox, "shutil", SimpleNamespace(rmtree=rmtree))
+            fault.setattr(Path, "unlink", unlink)
             try:
                 return original_remove(directory)
             except sandbox.CleanupError as error:
@@ -299,12 +301,15 @@ def test_worker_cleanup_failure_supersedes_sibling_typed_refusal_in_execution_po
         if directory not in prior_directories:
             return original_remove(directory)
 
-        def rmtree(target):
-            assert target == directory
-            raise OSError(errno.EIO, "owned worker removal I/O failure")
+        original_unlink = Path.unlink
+
+        def unlink(target, *args, **kwargs):
+            if target == directory / "owner.lock":
+                raise OSError(errno.EIO, "owned worker removal I/O failure")
+            return original_unlink(target, *args, **kwargs)
 
         with monkeypatch.context() as fault:
-            fault.setattr(sandbox, "shutil", SimpleNamespace(rmtree=rmtree))
+            fault.setattr(Path, "unlink", unlink)
             try:
                 return original_remove(directory)
             except sandbox.CleanupError as error:
