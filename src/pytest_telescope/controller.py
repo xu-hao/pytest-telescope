@@ -53,6 +53,12 @@ class _FixtureDrift(InfrastructureError):
     """A guarded execution cannot safely continue or publish results."""
 
 
+def _is_cleanup_failure(error):
+    return isinstance(error, sandbox.CleanupError) and not isinstance(
+        error, sandbox.InvocationInterrupted
+    )
+
+
 def suite_directories(snapshot, suite):
     """Create only structural directories needed for rootdir and cwd."""
     for name in (suite.root, suite.cwd):
@@ -419,25 +425,26 @@ class PendingRecords:
             if exc[0] is None and self.publish_on_exit:
                 self.publish()
         finally:
-            try:
-                # Everything below the directory is this owner's while it holds the lock.
-                with os.scandir(self.directory) as entries:
-                    for visited, entry in enumerate(entries, 1):
-                        if visited > 2 * RECORD_BOUNDS[0] + 2:
-                            raise InfrastructureError("cache staging entry limit exceeded")
-                        if entry.name != "owner.lock":
-                            Path(entry.path).unlink()
-                self.paths.clear()
-                (self.directory / "owner.lock").unlink()
-                with contextlib.suppress(FileNotFoundError):
-                    # Recovery may already have removed the emptied directory.
-                    self.directory.rmdir()
-            except (OSError, InfrastructureError) as error:
-                raise sandbox.CleanupError(
-                    "pending result cleanup failed; no new records were eligible"
-                ) from error
-            finally:
-                os.close(self.descriptor)
+            with sandbox.ignore_termination_signals():
+                try:
+                    # Everything below the directory is this owner's while it holds the lock.
+                    with os.scandir(self.directory) as entries:
+                        for visited, entry in enumerate(entries, 1):
+                            if visited > 2 * RECORD_BOUNDS[0] + 2:
+                                raise InfrastructureError("cache staging entry limit exceeded")
+                            if entry.name != "owner.lock":
+                                Path(entry.path).unlink()
+                    self.paths.clear()
+                    (self.directory / "owner.lock").unlink()
+                    with contextlib.suppress(FileNotFoundError):
+                        # Recovery may already have removed the emptied directory.
+                        self.directory.rmdir()
+                except (OSError, InfrastructureError) as error:
+                    raise sandbox.CleanupError(
+                        "pending result cleanup failed; no new records were eligible"
+                    ) from error
+                finally:
+                    os.close(self.descriptor)
 
 
 def runner_identity():
@@ -1469,7 +1476,8 @@ def run(
                     # Candidates are submitted in order. A failure stops submissions
                     # and interrupts only later candidates, so every earlier one still
                     # finishes and the first failure in order is the one reported,
-                    # whatever the worker count. A cleanup failure interrupts them all.
+                    # whatever the worker count. A cleanup failure interrupts them all
+                    # and supersedes a refusal or ordinary outage from another candidate.
                     interrupts = [threading.Event() for _ in candidates]
                     inspecting, cursor, failures = {}, 0, {}
                     executor = ThreadPoolExecutor(max_workers=concurrency)
@@ -1505,7 +1513,23 @@ def run(
                             event.set()
                         raise
                     finally:
-                        executor.shutdown(wait=True, cancel_futures=False)
+                        with sandbox.ignore_termination_signals():
+                            executor.shutdown(wait=True, cancel_futures=False)
+                            for future, index in inspecting.items():
+                                if future.done() and not future.cancelled():
+                                    error = future.exception()
+                                    if error is not None and not (
+                                        isinstance(error, sandbox.InvocationInterrupted)
+                                        and interrupts[index].is_set()
+                                    ):
+                                        failures[index] = error
+                        cleanup_failures = [
+                            failures[index]
+                            for index in sorted(failures)
+                            if _is_cleanup_failure(failures[index])
+                        ]
+                        if cleanup_failures:
+                            raise cleanup_failures[0]
                     if failures:
                         raise failures[min(failures)]
                     inspections = [candidate["inspection"] for candidate in candidates]
@@ -1711,18 +1735,28 @@ def run(
                                 group["timing_complete"] = False
                                 if isinstance(exc, sandbox.InvocationInterrupted):
                                     group["stop_reason"] = "cancelled"
-                                return projected, group, None, terminal, None, False
+                                return (
+                                    projected,
+                                    group,
+                                    None,
+                                    terminal,
+                                    exc if _is_cleanup_failure(exc) else None,
+                                    False,
+                                )
 
                 refusal = None
+                cleanup_failed = False
 
                 def accept(job, projected, group, terminal, error, fetched):
-                    nonlocal blocked, refusal
+                    nonlocal blocked, cleanup_failed, refusal
                     groups[job["group_index"]] = group
                     if fetched:
                         remote_groups.add(job["key"])
                     for index, row in projected:
                         results[index] = row
-                    if error is not None and refusal is None:
+                    if _is_cleanup_failure(error):
+                        cleanup_failed = True
+                    elif error is not None and refusal is None:
                         refusal = error
                         cancellation.set()
                     if terminal:
@@ -1772,20 +1806,22 @@ def run(
                     cancellation.set()
                     raise
                 finally:
-                    executor.shutdown(wait=True, cancel_futures=False)
-                    for future, job in active.items():
-                        if future.done() and not future.cancelled():
-                            projected, group, _, terminal, error, fetched = future.result()
-                            accept(job, projected, group, terminal, error, fetched)
-                    if cancellation.is_set():
-                        blocked = blocked or "run cancelled"
-                        for job in jobs[cursor:]:
-                            groups[job["group_index"]]["stop_reason"] = "cancelled"
-                            for index, _ in job["members"]:
-                                results[index]["reason"] = blocked
-                if refusal is not None:
+                    with sandbox.ignore_termination_signals():
+                        executor.shutdown(wait=True, cancel_futures=False)
+                        for future, job in active.items():
+                            if future.done() and not future.cancelled():
+                                projected, group, _, terminal, error, fetched = future.result()
+                                accept(job, projected, group, terminal, error, fetched)
+                        if cancellation.is_set():
+                            blocked = blocked or "run cancelled"
+                            for job in jobs[cursor:]:
+                                groups[job["group_index"]]["stop_reason"] = "cancelled"
+                                for index, _ in job["members"]:
+                                    results[index]["reason"] = blocked
+                if refusal is not None and not cleanup_failed:
                     raise refusal
-                tools.verify(tuple(manifest.tools))
+                if blocked is None:
+                    tools.verify(tuple(manifest.tools))
             if blocked is None:
                 published = set(pending.publish())
                 progress["published"] = True

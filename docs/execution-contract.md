@@ -347,8 +347,11 @@ owned tool material, not caller CPU, memory, process or filesystem resource poli
 A late typed declaration/capability refusal preserves its type and capability while
 retaining available session observations in the strict versioned
 [refusal accounting](result-schema.md#retained-observations-after-a-late-refusal)
-object. It is still a refusal, with no nested overall success verdict and no pending
-publication. An early refusal has no accounting object; bounded unavailability is explicit.
+object, unless a terminal cleanup failure occurs in another unit of the same phase or
+during outer invocation cleanup, in which case the cleanup failure supersedes the
+refusal and the invocation reports an infrastructure failure. Otherwise it is still a
+refusal, with no nested overall success verdict and no pending publication. An early
+refusal has no accounting object; bounded unavailability is explicit.
 
 Public evidence identifies tool names and failure categories, never external source
 paths, file contents, secret values or raw tool stderr. The cache and worker protocol
@@ -666,7 +669,8 @@ rerun; the case must pass again before its result can be reused.
 Each unit can report up to 64 failure entries containing a project-relative file, line
 number, phase (`collect`, `setup`, `call`, or `teardown`), exception type, and hashed
 case identity. Collection failures use `CollectionError` and may have line zero.
-Locations outside the project are labeled `<runtime>`. A location in a project file is
+Locations outside the project or without a project file path (such as generated code or
+a relative code filename) are labeled `<runtime>`. A location in a project file is
 project-relative however the file was imported, including a project module loaded
 through an editable install. Exception messages, source
 snippets, parameter values, stdout/stderr contents, and environment values are not
