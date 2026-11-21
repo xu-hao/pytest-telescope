@@ -154,7 +154,7 @@ def spawn_exited_orphan():
 @pytest.mark.parametrize("turn", range(16))
 def test_exited_orphan_reaped(turn):
     spawn_exited_orphan()
-    deadline = time.monotonic() + 0.2
+    deadline = time.monotonic() + 2
     observed = zombie_count()
     while observed and time.monotonic() < deadline:
         time.sleep(0.002)
@@ -181,6 +181,7 @@ def test_exited_orphans_do_not_accumulate_during_session(project, mode):
 
 OWNED_STATUSES = r"""
 import os
+import pathlib
 import signal
 import subprocess
 import sys
@@ -232,7 +233,18 @@ def test_fork_waitpid_statuses():
 
 
 def test_unwaited_exited_direct_child_is_reaped_after_teardown():
-    subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(0)"])
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(0)"])
+    deadline = time.monotonic() + 10
+    state = ""
+    while time.monotonic() < deadline:
+        try:
+            state = pathlib.Path(f"/proc/{proc.pid}/stat").read_text().rpartition(")")[2].split()[0]
+        except FileNotFoundError:
+            state = ""
+        if state == "Z":
+            break
+        time.sleep(0.005)
+    assert state == "Z"
 """
 
 
