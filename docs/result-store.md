@@ -115,7 +115,8 @@ A record is shared only between runs that compute the same key. Besides the decl
 inputs, a key covers the interpreter build, every installed distribution and its
 version, the pytest-telescope version, the invoking user and group IDs, and the pytest
 options and selectors. Machines therefore share results when they run the same image as
-the same user; the checkout's location does not matter.
+the same user; neither the checkout's path nor the virtual environment's directory path
+matters, in unguarded and `available-v1` guarded runs alike.
 
 pytest-telescope never removes objects. Deleting objects, for example with a bucket
 lifecycle rule that expires old ones, is always safe: the affected groups execute again.
