@@ -15,7 +15,8 @@ from pytest_telescope.plan import make_plan
 
 run(root, *, force=False, no_cache=False, explain=False, cache_dir=None, timeout=60,
     arguments=(), workers=None, suites=None, execution_mode=None, structural_files=None,
-    fixture_guard=None, condition_checks=(), collect_only=False, result_store=None)
+    fixture_guard=None, condition_checks=(), collect_only=False, result_store=None,
+    rootfs=None, rootfs_python=None)
 make_plan(root, *, suites=None, structural_files=None)
 error_result(error, *, fixture_guard=None)
 ```
@@ -47,6 +48,13 @@ error_result(error, *, fixture_guard=None)
   `"gs://bucket/prefix"`; `None` uses `[tool.pytest_telescope.execution] result_store`.
   When neither is set, the run sends no remote request and its result has no
   `result_store` field. A `gs://` URL requires the `pytest-telescope[gcs]` extra.
+- `rootfs` selects `/` or an unpacked container rootfs directory for [unpacked rootfs
+  views](bubblewrap.md#unpacked-container-rootfs-views); `None` uses
+  `[tool.pytest_telescope.execution] rootfs` and preserves host behavior when unset.
+  `rootfs_python` is the canonical absolute interpreter path inside that rootfs view
+  (for example `"/opt/venv/bin/python"`); `None` uses
+  `[tool.pytest_telescope.execution] rootfs_python`. An unpacked `rootfs` other than `/`
+  requires `rootfs_python`, and `rootfs_python` requires `rootfs`.
 - `run` raises `DeclarationError` for invalid declarations and `UnsupportedCapability`
   (a `DeclarationError` subclass with a `capability` attribute) for refusals.
   After a session has started, these typed exceptions can retain immutable, versioned
@@ -60,8 +68,9 @@ error_result(error, *, fixture_guard=None)
 ```sh
 python -m pytest_telescope plan
 python -m pytest_telescope run [--workers N] [--execution-mode case|batch] [--suite NAME]...
-    [--force] [--no-cache] [--explain] [--collect-only] [--cache-dir PATH]
-    [--result-store URL] [--timeout SECONDS] [-- PYTEST-ARGS]
+    [--fixture-guard available-v1] [--force] [--no-cache] [--explain] [--collect-only]
+    [--cache-dir PATH] [--result-store URL] [--rootfs PATH] [--rootfs-python PATH]
+    [--timeout SECONDS] [-- PYTEST-ARGS]
 pytest --telescope [PYTEST-ARGS]
 pytest --telescope-plan
 ```
@@ -77,6 +86,8 @@ Exit statuses: 0 passed, 1 test failure, 3 infrastructure failure,
 mode = "case"   # or "batch"
 workers = 4     # concurrent scoped sandboxes, 1-32, default 1
 result_store = "gs://bucket/prefix"  # optional remote result store, default none
+rootfs = "/var/lib/containers/python-rootfs"  # optional "/" or unpacked rootfs directory
+rootfs_python = "/opt/venv/bin/python"        # interpreter inside rootfs view
 ```
 
 The [marker and project reference](specification.md#project-configuration) defines
@@ -708,10 +719,11 @@ must not contain the project directory. The project must not live inside `/usr` 
 host and would show the project's live files. Nothing is mounted at the project's own
 path, so every other location is accepted, including `/project` itself, a subdirectory
 of `/project`, `/tmp` and `/dev/shm`. An environment directory outside the project must
-not lie inside `/project`, which shows the project, or overlap `/metadata`, `/telescope`,
-`/proc` or `/dev`; an environment inside the project is shown at the same relative path
-below `/project`. A frozen-tool source or original-path alias may not lie inside
-`/project`; it refuses with `tool:layout`.
+not lie inside `/project`, which shows the project, or overlap `/metadata`, `/env`,
+`/telescope`, `/proc` or `/dev` (and an unpacked `rootfs_python` environment may not
+overlap `/tools` or `/tmp`); an environment inside the project is shown at the same
+relative path below `/project`. A frozen-tool source or original-path alias may not lie
+inside `/project` or `/env`; it refuses with `tool:layout`.
 
 ## Capability codes
 
@@ -723,13 +735,14 @@ below `/project`. A frozen-tool source or original-path alias may not lie inside
 | `tool:identity` | A declared lock, runtime or content pin does not match. |
 | `sandbox:bubblewrap` | No `bwrap` executable on `PATH`. |
 | `sandbox:namespaces` | `bwrap` could not create its namespaces; the message includes its error. |
-| `sandbox:environment` | The interpreter could not start in the view, the environment contains the project or overlaps the sandbox's own mount points, the sandbox would show the project's live files (the project is `/` or inside `/usr` or `/etc`), an environment file that names the project directory is too large to show rewritten, or an environment inside the project depends on its host location (see [an environment inside the project](bubblewrap.md#an-environment-inside-the-project)). |
+| `sandbox:environment` | The interpreter could not start in the view, an unpacked `rootfs` or `rootfs_python` is unusable or overlaps reserved sandbox mount points, the environment contains the project or overlaps the sandbox's own mount points, the sandbox would show the project's live files (the project is `/` or inside `/usr` or `/etc`), an environment file that names the project directory is too large to show rewritten, or an environment inside the project depends on its host location (see [an environment inside the project](bubblewrap.md#an-environment-inside-the-project)). |
 | `network:none`, `scratch:noexec` | A suite requested an isolation the sandbox does not provide. |
 | `pytest:distributed-scheduling` | Nested or external distributed scheduling was requested; telescope owns scoped workers. |
 | `pytest:configuration` | Unsupported pytest configuration format. |
 | `execution:batch-size` | A batch exceeds 4,096 selected members. |
 | `metadata:pep621-static-v1` | Local distribution metadata cannot be translated from the supported static PEP 621 fields. |
-| `project-metadata:runtime-conflict` | Declared local metadata conflicts with a distribution in the installed environment. |
+| `metadata:editable-v1` | An `editable-v1` project distribution omits static `[project]` name/version, declares `backend-path`, or cannot be installed into `/env` with `--no-index --no-deps --no-build-isolation`. |
+| `project-metadata:runtime-conflict` | Declared `pep621-static-v1` or `editable-v1` distribution metadata conflicts with a distribution in the base environment. |
 | `project:links` | A project input contains an unsupported directory symlink. |
 | `result-store:backend` | The [remote result store](result-store.md) URL names a scheme other than `gs`. |
 | `result-store:gcs` | A `gs://` result store is configured but the Google Cloud Storage client is not installed; install `pytest-telescope[gcs]`. |

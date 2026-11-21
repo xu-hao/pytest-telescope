@@ -17,9 +17,10 @@ def layout(message="frozen-tool paths do not form a closed declared view"):
 
 
 class Graph:
-    def __init__(self, tool, directory, budget):
+    def __init__(self, tool, directory, budget, *, rootfs=Path("/")):
         self.tool = tool
         self.directory = directory
+        self.rootfs = Path(rootfs)
         self.nodes = {}
         self.mapping = {}
         self.prefixes = {}
@@ -63,10 +64,11 @@ class Graph:
         if first not in PREFIXES:
             return filename
         if first not in self.prefixes:
+            physical = self.rootfs / first.lstrip("/")
             try:
-                before = os.lstat(first)
+                before = os.lstat(physical)
                 if stat.S_ISLNK(before.st_mode):
-                    target = os.readlink(first)
+                    target = os.readlink(physical)
                     mapped = posixpath.normpath(posixpath.join("/", target))
                     if mapped in PREFIXES or mapped == "/" or not mapped.startswith("/"):
                         layout("unsupported frozen-tool baseline prefix mapping")
@@ -79,7 +81,7 @@ class Graph:
                     }
                 else:
                     layout("unsupported frozen-tool baseline prefix type")
-                after = os.lstat(first)
+                after = os.lstat(physical)
                 if self._signature(before) != self._signature(after):
                     raise InfrastructureError("frozen-tool baseline prefix changed during capture")
                 self.prefixes[first] = (row, self._signature(before))
@@ -103,10 +105,11 @@ class Graph:
 
     def verify_prefixes(self):
         for filename, (row, signature) in self.prefixes.items():
+            physical = self.rootfs / filename.lstrip("/")
             try:
-                current = os.lstat(filename)
+                current = os.lstat(physical)
                 if self._signature(current) != signature or (
-                    row["kind"] == "symlink" and os.readlink(filename) != row["target"]
+                    row["kind"] == "symlink" and os.readlink(physical) != row["target"]
                 ):
                     raise InfrastructureError("frozen-tool baseline prefix changed")
             except FileNotFoundError as exc:

@@ -703,6 +703,8 @@ def run(
     fixture_guard=None,
     condition_checks=(),
     result_store=None,
+    rootfs=None,
+    rootfs_python=None,
 ):
     import threading
     from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -711,9 +713,13 @@ def run(
     from .batching import group_jobs, project_result
     from .execution import effective_arguments as suite_arguments
     from .execution import execution_mode as choose_mode
-    from .execution import result_store_url, worker_count
+    from .execution import result_store_url, rootfs_settings, worker_count
     from .model import Unit, scoped_item
-    from .project_metadata import materialize_metadata, metadata_records
+    from .project_metadata import (
+        materialize_metadata,
+        metadata_records,
+        selected_editable_distributions,
+    )
     from .tool_capture import Capture
     from .tool_context import validate_environment
 
@@ -729,6 +735,9 @@ def run(
         Path(cache_dir).resolve() if cache_dir else Path(root).resolve() / ".pytest-telescope/cache"
     )
     manifest = load(root, cache_dir=state, suite_names=suites, structural_files=structural_files)
+    effective_rootfs, effective_rootfs_python = rootfs_settings(
+        manifest.execution, rootfs, rootfs_python, root=manifest.root
+    )
     mode = choose_mode(manifest.execution, execution_mode)
     if fixture_guard is not None:
         if mode != "batch" or any(manifest.ordinary_files[suite.name] for suite in manifest.suites):
@@ -737,7 +746,8 @@ def run(
             )
         from .fixture_guard import framework_definition_ids
 
-        framework_definition_ids(version("pytest"))
+        if effective_rootfs is None:
+            framework_definition_ids(version("pytest"))
     concurrency = worker_count(manifest.execution, workers)
     store_url = result_store_url(manifest.execution, result_store)
     remote = None
@@ -1107,7 +1117,17 @@ def run(
             raise
 
     try:
-        box = sandbox.prepare(manifest.root)
+        box = (
+            sandbox.prepare(manifest.root)
+            if effective_rootfs is None
+            else sandbox.prepare(
+                manifest.root, rootfs=effective_rootfs, executable=effective_rootfs_python
+            )
+        )
+        if fixture_guard is not None and effective_rootfs is not None:
+            from .fixture_guard import framework_definition_ids
+
+            framework_definition_ids(dict(box.description["distributions"]).get("pytest"))
         for attempt in range(2):
             try:
                 sandbox.recover(manifest.root)
@@ -1149,12 +1169,39 @@ def run(
                 record_map = {record["path"]: record for record in records}
                 tools.verify_project(record_map)
                 frozen_scope_hashes, metadata_hashes = {}, {}
+                environments_state = (pool_directory if no_cache else state) / "environments"
+                editable_envs = {}
+                editable_env_lock = threading.Lock()
 
                 def metadata_identity(names):
                     key = tuple(names)
                     if key not in metadata_hashes:
                         metadata_hashes[key] = metadata_records(manifest.distributions, names)
                     return metadata_hashes[key]
+
+                def editable_environment(names, *, cancelled=cancellation):
+                    editable = selected_editable_distributions(manifest.distributions, names)
+                    if not editable:
+                        return None
+                    key = tuple(distribution.name for distribution in editable)
+                    with editable_env_lock:
+                        cached = editable_envs.get(key)
+                    if cached is not None:
+                        return cached
+                    built = sandbox.prepare_editable_environment(
+                        box,
+                        editable,
+                        root=manifest.root,
+                        pool=pool,
+                        record_map=record_map,
+                        environments_directory=environments_state,
+                        invocation_directory=pool_directory,
+                        timeout=timeout,
+                        cancellation=cancelled,
+                    )
+                    with editable_env_lock:
+                        editable_envs[key] = built
+                    return built
 
                 for suite, collection_unit in configured:
                     if collection_unit is None:
@@ -1214,6 +1261,7 @@ def run(
                                     collection_unit.distributions,
                                     metadata,
                                 )
+                                env_directory = editable_environment(collection_unit.distributions)
                                 if frozen_registry.for_view(collection_unit) != registry:
                                     raise InfrastructureError("frozen collection registry changed")
                                 collected = sandbox.execute(
@@ -1228,6 +1276,11 @@ def run(
                                     suite_cwd=suite.cwd,
                                     suite=suite.name,
                                     metadata_directory=metadata,
+                                    **(
+                                        {"env_directory": env_directory}
+                                        if env_directory is not None
+                                        else {}
+                                    ),
                                     tool_view=tools.view(collection_unit.tools),
                                     selection_disabled=disabled,
                                     allow_unknown_selectors=True,
@@ -1414,6 +1467,9 @@ def run(
                                     materialize_metadata(
                                         manifest.distributions, unit.distributions, metadata
                                     )
+                                    env_directory = editable_environment(
+                                        unit.distributions, cancelled=interrupted
+                                    )
                                     if frozen_registry.for_view(unit) != candidate["registry"]:
                                         raise InfrastructureError(
                                             "frozen fixture inspection registry changed"
@@ -1444,6 +1500,11 @@ def run(
                                         suite_cwd=suite.cwd,
                                         suite=suite.name,
                                         metadata_directory=metadata,
+                                        **(
+                                            {"env_directory": env_directory}
+                                            if env_directory is not None
+                                            else {}
+                                        ),
                                         tool_view=tools.view(unit.tools),
                                         cancellation=interrupted,
                                         request=request,
@@ -1650,6 +1711,7 @@ def run(
                                 materialize_metadata(
                                     manifest.distributions, unit.distributions, metadata
                                 )
+                                env_directory = editable_environment(unit.distributions)
                                 if frozen_registry.for_view(unit) != job["registry"]:
                                     raise InfrastructureError("frozen case registry changed")
                                 request = dict(
@@ -1684,6 +1746,11 @@ def run(
                                     suite_cwd=suite.cwd,
                                     suite=suite.name,
                                     metadata_directory=metadata,
+                                    **(
+                                        {"env_directory": env_directory}
+                                        if env_directory is not None
+                                        else {}
+                                    ),
                                     tool_view=tools.view(unit.tools),
                                     cancellation=cancellation,
                                     on_session_start=session_started,
@@ -1952,6 +2019,8 @@ def main(argv=None):
     execution.add_argument("--fixture-guard", choices=("available-v1",))
     execution.add_argument("--workers", type=int)
     execution.add_argument("--result-store")
+    execution.add_argument("--rootfs")
+    execution.add_argument("--rootfs-python")
     execution.add_argument("--suite", action="append", dest="suites")
     execution.add_argument("arguments", nargs=argparse.REMAINDER)
     guard_context = None
@@ -1981,6 +2050,8 @@ def main(argv=None):
                 execution_mode=options.execution_mode,
                 fixture_guard=options.fixture_guard,
                 result_store=options.result_store,
+                rootfs=options.rootfs,
+                rootfs_python=options.rootfs_python,
             )
         print(render_json(result))
         if result.get("status") == "infrastructure_error":

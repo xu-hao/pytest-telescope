@@ -22,7 +22,7 @@ def test_red(): ...
 | --- | --- |
 | `inputs=["path", "data/*.json"]` | Explicit project paths, directories, and globs. Makes the case scoped, including when empty. |
 | `bundles=["pricing"]` | Reusable project declarations. Also makes the case scoped, including when empty. |
-| `distributions=["core"]` | Selected local distribution metadata. Also makes the case scoped, including when empty. |
+| `distributions=["core"]` | Select configured `pep621-static-v1` or `editable-v1` project distributions. Also makes the case scoped, including when empty. |
 | `env=["OPTIONAL_FEATURE"]` | Forward and key named environment variables for this scope. Also makes the case scoped, including when empty. |
 | `tools=["frontend"]` | Select registered frozen tool/runtime closures. Also makes the case scoped, including when empty. |
 | `absent=["app/local_override.json"]` | Assert explicit paths are absent in the source project; does not make a case scoped. |
@@ -344,13 +344,18 @@ exact cache identity, and outcome accounting.
 
 ## Metadata and independent suites
 
-A literal `distributions=["core"]` marker adds selected local metadata and makes the case
-scoped, including an empty list. Distribution names also compose through defaults and
-bundles. Metadata does not grant application source: declare package modules through
-`inputs` as usual. Ordinary cases see the checkout and installed environment as they are.
+A literal `distributions=["core"]` marker selects configured project distributions and
+makes the case scoped, including an empty list. Distribution names also compose through
+defaults and bundles. Each `[tool.pytest_telescope.distributions.<alias>]` entry uses
+either `format = "pep621-static-v1"` (backend-free static metadata mounted at `/metadata`)
+or `format = "editable-v1"` (an isolated read-only virtual environment materialized inside
+Bubblewrap and mounted at `/env`, with `metadata = "<dir>/pyproject.toml"` and optional
+`build_inputs = [...]`). Neither format grants undeclared application source: declare
+package modules read at runtime through `inputs` as usual. Ordinary cases see the checkout
+and installed environment as they are.
 
-The [metadata and suite guide](scoped-execution.md) provides versioned static metadata
-and independent suite configuration. A suite's `root`, `config`,
+The [metadata and suite guide](scoped-execution.md) covers static metadata, isolated
+editable distributions, and independent suite configuration. A suite's `root`, `config`,
 `test_roots`, `include` and `exclude` paths are all outer-project-relative, and every
 `test_roots` entry must lie within that suite's `root` (use a common-ancestor `root` such
 as `"."`, with an independent `cwd` when needed, to cover sibling directories; entries
@@ -422,8 +427,15 @@ def test_isolated_child_imports_declared_source():
 
 The setuptools finder module and `.pth` path entries are both supported, because both
 name the project's host path literally and are shown rewritten. The child's
-`example_core.__file__` is below `/project`, like the test module's own. Without an
-editable install, a child started with `-I`
+`example_core.__file__` is below `/project`, like the test module's own. Alternatively,
+to avoid installing project packages into the base environment at all, declare an
+[isolated `editable-v1` distribution](bubblewrap.md#isolated-editable-v1-project-distributions)
+in `[tool.pytest_telescope.distributions.core]` with `format = "editable-v1"` and select
+`distributions=["core"]`: the worker runs as `/env/bin/python`, so
+`[sys.executable, "-I", "-m", "example_core.worker"]` resolves declared `/project`
+modules while keeping unselected sibling distributions out of `importlib.metadata` and
+`sys.path`. Without either an editable install in the base environment or an
+`editable-v1` distribution, a child started with `-I`
 ignores `PYTHONPATH` and the working directory, so it cannot import declared project
 source. Start it without `-I` and pass the source location explicitly:
 

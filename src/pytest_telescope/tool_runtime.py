@@ -11,9 +11,10 @@ from .tool_graph import layout
 
 
 class Runtime:
-    def __init__(self, graph, budget):
+    def __init__(self, graph, budget, *, sandbox=None):
         self.graph = graph
         self.budget = budget
+        self.sandbox = sandbox
         self.elfs = {}
         self.dependencies = {}
         self.needed_targets = {}
@@ -25,6 +26,18 @@ class Runtime:
         self.native = False
         self.dynamic = False
         self.validate()
+
+    def _worker_executable(self):
+        if self.sandbox is not None:
+            return os.path.normpath(self.sandbox.executable)
+        return os.path.normpath(sys.executable)
+
+    def _worker_prefixes(self):
+        if self.sandbox is not None:
+            startup = self.sandbox.description.get("startup")
+            if type(startup) is dict and "prefix" in startup and "base_prefix" in startup:
+                return (startup["prefix"], startup["base_prefix"])
+        return (sys.prefix, sys.base_prefix)
 
     def covered(self, filename):
         filename = Path(self.graph.resolved_path(filename))
@@ -95,7 +108,7 @@ class Runtime:
             seeds.update(self._resource_elfs(record["resources"], budget))
             # Installed package/runtime associations describe this invoking Python
             # process. They never attach another executable's resources globally.
-            if self.graph.resolve(os.path.normpath(sys.executable), required=False) == key:
+            if self.graph.resolve(self._worker_executable(), required=False) == key:
                 for package in self.graph.tool.document["python"]:
                     seeds.update(
                         self._resource_elfs([*package["packages"], *package["runtime"]], budget)
@@ -166,9 +179,12 @@ class Runtime:
                     "/opt",
                     "/var",
                     "/usr/local",
-                    str(Path.home()),
-                    sys.prefix,
-                    sys.base_prefix,
+                    *(
+                        (str(Path.home()),)
+                        if self.sandbox is None or self.sandbox.rootfs is None
+                        else ()
+                    ),
+                    *self._worker_prefixes(),
                 ) or any(
                     path.is_relative_to(point)
                     for point in (
@@ -179,6 +195,7 @@ class Runtime:
                         "/tools",
                         "/telescope",
                         "/metadata",
+                        "/env",
                     )
                 ):
                     layout("native search roots cannot replace nonlibrary system roots")
@@ -253,7 +270,7 @@ class Runtime:
                     self.executables[current]["interpreter"], kind="file"
                 )
         if dynamic:
-            worker = self.graph.resolve(os.path.normpath(sys.executable))
+            worker = self.graph.resolve(self._worker_executable())
             if worker not in self.executables or self.elf(worker) is None:
                 layout("closed native view lacks the invoking worker executable")
             # Actual imports are checked in the closed view by worker startup, before

@@ -20,9 +20,15 @@ from packaging.version import InvalidVersion, Version
 from .tool_graph import layout
 
 
-def validate(graph, budget):
+def validate(graph, budget, *, sandbox=None):
     records = graph.tool.document["python"]
     declared = {row["name"]: row for row in records}
+    worker_executable = os.path.normpath(
+        sandbox.executable if sandbox is not None else sys.executable
+    )
+    check_magic = sandbox is None or (
+        sandbox.description.get("identity", {}).get("cache_tag") == sys.implementation.cache_tag
+    )
     for record in records:
         name = record["name"]
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or canonicalize_name(name) != name:
@@ -52,7 +58,7 @@ def validate(graph, budget):
         runtime = [graph.reference(row) for row in record["runtime"]]
         for key in runtime:
             graph.preserve(key)
-        worker = graph.resolve(os.path.normpath(sys.executable))
+        worker = graph.resolve(worker_executable)
         if not any(
             graph.original(worker) == graph.original(key)
             or (
@@ -153,7 +159,7 @@ def validate(graph, budget):
                 elif size:
                     layout("hashless installed RECORD row has an unsupported size")
                 if normalized.endswith(".pyc"):
-                    bytecode(graph, key)
+                    bytecode(graph, key, check_magic=check_magic)
         except (UnicodeError, csv.Error):
             layout("invalid installed RECORD encoding")
         expected = {
@@ -167,12 +173,12 @@ def validate(graph, budget):
         for filename in expected - seen:
             if not filename.endswith(".pyc"):
                 layout("installed file is absent from its pinned RECORD")
-            bytecode(graph, graph.resolve(filename))
+            bytecode(graph, graph.resolve(filename), check_magic=check_magic)
         if graph.original(record_key) not in seen:
             layout("installed RECORD omits its own normal self row")
 
 
-def bytecode(graph, key):
+def bytecode(graph, key, *, check_magic=True):
     filename = Path(graph.original(key))
     try:
         source_name = importlib.util.source_from_cache(str(filename))
@@ -183,7 +189,7 @@ def bytecode(graph, key):
         layout("installed bytecode lacks its pinned source")
     with graph.open(key) as stream:
         header = stream.read(16)
-    if len(header) != 16 or header[:4] != importlib.util.MAGIC_NUMBER:
+    if len(header) != 16 or (check_magic and header[:4] != importlib.util.MAGIC_NUMBER):
         layout("installed bytecode does not match the invoking interpreter")
     flags = struct.unpack_from("<I", header, 4)[0]
     if flags not in (0, 1, 3):

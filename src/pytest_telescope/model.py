@@ -684,7 +684,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
                 raise DeclarationError("expanded declarations exceed 100000 paths")
         return sorted(found)
 
-    from .execution import result_store_url, worker_count
+    from .execution import result_store_url, rootfs_settings, worker_count
     from .execution import suites as parse_suites
     from .project_metadata import load_distributions
 
@@ -725,6 +725,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     execution = spec.get("execution", {})
     worker_count(execution)
     result_store_url(execution)
+    configured_rootfs, _ = rootfs_settings(execution, root=root)
     distributions = load_distributions(root, spec.get("distributions", {}), expanded)
     pending_inputs = []
 
@@ -869,7 +870,9 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     for row in registry:
         if row["file"] in potential_files:
             needed_tools.update(declarations[row["id"]].tools)
-    tools = tool_context.load_selected(root, tool_definitions, needed_tools)
+    tools = tool_context.load_selected(
+        root, tool_definitions, needed_tools, rootfs_configured=configured_rootfs is not None
+    )
     tool_links = tool_context.project_links(tools, sorted(tools))
     for unit, inputs, dependencies in pending_inputs:
         effective = set(expanded(inputs, "inputs"))

@@ -27,16 +27,18 @@ def _signature(info):
 
 
 @contextmanager
-def _parent(filename):
+def _parent(filename, *, root=Path("/")):
     """Open every absolute ancestor without following links, including above roots."""
     filename = Path(filename)
-    descriptor = os.open("/", os.O_PATH | os.O_DIRECTORY)
+    root = Path(root)
+    relative = filename.relative_to(root)
+    descriptor = os.open(root, os.O_PATH | os.O_DIRECTORY)
     try:
-        for part in filename.parts[1:-1]:
+        for part in relative.parts[:-1]:
             child = os.open(part, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
-        yield descriptor, filename.name
+        yield descriptor, relative.name
     finally:
         os.close(descriptor)
 
@@ -61,10 +63,26 @@ class Budget:
             declaration.unsupported("bounds", "frozen-tool capture budget exceeded")
 
 
-def _measure(filename, expected, budget, destination=None, *, frozen=False):
+def _open_parent(filename, root):
+    return _parent(filename) if Path(root) == Path("/") else _parent(filename, root=root)
+
+
+def _measure_source(filename, expected, budget, destination=None, *, root=Path("/")):
+    if Path(root) == Path("/"):
+        return _measure(filename, expected, budget, destination)
+    return _measure(filename, expected, budget, destination, root=root)
+
+
+def _source_tree_names(source, budget, *, root=Path("/")):
+    if Path(root) == Path("/"):
+        return _tree_names(source, budget)
+    return _tree_names(source, budget, root=root)
+
+
+def _measure(filename, expected, budget, destination=None, *, frozen=False, root=Path("/")):
     budget.tick(visit=True)
     try:
-        with _parent(filename) as (directory, leaf):
+        with _open_parent(filename, root) as (directory, leaf):
             before = os.stat(leaf, dir_fd=directory, follow_symlinks=False)
             kind = expected["kind"]
             if kind == "symlink":
@@ -144,7 +162,7 @@ def _measure(filename, expected, budget, destination=None, *, frozen=False):
         raise InfrastructureError("cannot capture or verify a frozen-tool input") from exc
 
 
-def _tree_names(source, budget, open_directory=None, *, owned=False):
+def _tree_names(source, budget, open_directory=None, *, owned=False, root=Path("/")):
     """Complete tree enumeration via owned descriptors; never follow directory links."""
     if open_directory is None:
 
@@ -152,7 +170,7 @@ def _tree_names(source, budget, open_directory=None, *, owned=False):
             return os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
 
     found = {"."}
-    with _parent(source) as (parent, leaf):
+    with _open_parent(source, root) as (parent, leaf):
         info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
         if not stat.S_ISDIR(info.st_mode):
             return found
@@ -445,19 +463,40 @@ class Capture:
         for link in declaration.project_links(self.manifest.tools, [tool.name]).values():
             declaration.validate_project_link(self.manifest.root, link)
 
+    def _source_root(self):
+        if self.sandbox is not None and self.sandbox.rootfs is not None:
+            return self.sandbox.rootfs
+        return Path("/")
+
+    def _physical_source(self, source):
+        root = self._source_root()
+        return Path(source) if root == Path("/") else root / str(source).lstrip("/")
+
     def _capture(self, deadline):
         from .tool_graph import Graph
         from .tool_python import validate as validate_python
         from .tool_runtime import Runtime
 
         budget = self._budget(deadline)
+        source_root = self._source_root()
+        startup = {} if self.sandbox is None else self.sandbox.description.get("startup", {})
+        worker_prefixes = (
+            {startup["prefix"], startup["base_prefix"]}
+            if type(startup) is dict and "prefix" in startup and "base_prefix" in startup
+            else set()
+        )
         (self.directory / ".views").mkdir(mode=0o700)
         for name, tool in self.manifest.tools.items():
             self._pins(tool)
             target = self.directory / name
             target.mkdir(mode=0o700)
             for root in tool.document["roots"]:
-                source = Path(root["source"])
+                logical_source = Path(root["source"])
+                source = self._physical_source(root["source"])
+                if root["coverage"] == "tree" and root["source"] in worker_prefixes:
+                    declaration.unsupported(
+                        "layout", "frozen-tool source is not a supported narrow input"
+                    )
                 if root["coverage"] == "tree" and any(
                     row["path"] == "pyvenv.cfg"
                     or "site-packages" in Path(row["path"]).parts
@@ -467,9 +506,9 @@ class Capture:
                     declaration.unsupported(
                         "layout", "an interpreter environment is not a tool root"
                     )
-                if root["coverage"] == "tree" and _tree_names(source, budget) != {
-                    row["path"] for row in root["entries"]
-                }:
+                if root["coverage"] == "tree" and _source_tree_names(
+                    source, budget, root=source_root
+                ) != {row["path"] for row in root["entries"]}:
                     declaration.unsupported(
                         "identity", "frozen-tool tree differs from its complete inventory"
                     )
@@ -479,24 +518,24 @@ class Capture:
                 )
                 for row in ordered:
                     filename = source / row["path"]
-                    if filename == Path("/etc/ld.so.preload") and (
+                    if logical_source / row["path"] == Path("/etc/ld.so.preload") and (
                         row["kind"] != "file" or row["size"] != 0
                     ):
                         declaration.unsupported(
                             "layout", "nonempty or indirect native preload inputs are unsupported"
                         )
-                    self.sources[name, root["id"], row["path"]] = _measure(
-                        filename, row, budget, frozen / row["path"]
+                    self.sources[name, root["id"], row["path"]] = _measure_source(
+                        filename, row, budget, frozen / row["path"], root=source_root
                     )
                 for row in reversed(ordered):
                     if row["kind"] == "directory":
                         self.owned_directories.freeze(frozen / row["path"], row["mode"] & 0o555)
             target.chmod(0o555)
             graph_budget = self._budget(deadline)
-            graph = Graph(tool, target, graph_budget)
+            graph = Graph(tool, target, graph_budget, rootfs=source_root)
             graph.validate_links(graph_budget)
-            runtime = Runtime(graph, self._budget(deadline))
-            validate_python(graph, self._budget(deadline))
+            runtime = Runtime(graph, self._budget(deadline), sandbox=self.sandbox)
+            validate_python(graph, self._budget(deadline), sandbox=self.sandbox)
             self.graphs[name], self.runtimes[name] = graph, runtime
         self.directory.chmod(0o555)
 
@@ -506,6 +545,7 @@ class Capture:
             deadline = time.monotonic() + self.timeout
         budget = self._budget(deadline)
         frozen_budget = self._budget(deadline)
+        source_root = self._source_root()
         for name in names:
             tool = self.manifest.tools[name]
             try:
@@ -517,9 +557,10 @@ class Capture:
                 if raw != tool.raw:
                     raise InfrastructureError("frozen-tool manifest changed during the invocation")
                 for root in tool.document["roots"]:
-                    if root["coverage"] == "tree" and _tree_names(Path(root["source"]), budget) != {
-                        row["path"] for row in root["entries"]
-                    }:
+                    source = self._physical_source(root["source"])
+                    if root["coverage"] == "tree" and _source_tree_names(
+                        source, budget, root=source_root
+                    ) != {row["path"] for row in root["entries"]}:
                         raise InfrastructureError("frozen-tool source tree changed after capture")
                     if self.owned_directories.names(
                         self.directory / name / root["id"], frozen_budget
@@ -528,7 +569,9 @@ class Capture:
                             "owned frozen-tool tree failed integrity verification"
                         )
                     for row in root["entries"]:
-                        observed = _measure(Path(root["source"]) / row["path"], row, budget)
+                        observed = _measure_source(
+                            source / row["path"], row, budget, root=source_root
+                        )
                         recorded = self.sources[name, root["id"], row["path"]]
                         if root["coverage"] == "files" and row["kind"] == "directory":
                             observed, recorded = observed[:3], recorded[:3]

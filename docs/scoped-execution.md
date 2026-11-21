@@ -81,6 +81,12 @@ metadata source, build input, entry point, generated representation, or relevant
 application source invalidates its consumers. Unrelated narrow resources do not.
 Missing/deleted required sources fail validation.
 
+When tests spawn isolated `[sys.executable, "-I", "-m", "<pkg>.<mod>"]` child processes or
+need console-script launchers without installing project packages into the base
+environment, set `format = "editable-v1"` instead of `pep621-static-v1`; see
+[isolated `editable-v1` project distributions](bubblewrap.md#isolated-editable-v1-project-distributions).
+ Both formats can be registered in the same project and co-selected on the same unit.
+
 ## Frozen installed Python tools
 
 `distributions` above generates metadata from project inputs. A selected frozen tool's

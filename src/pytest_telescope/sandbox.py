@@ -21,14 +21,16 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .model import (
     DeclarationError,
     InfrastructureError,
+    Unit,
     UnsupportedCapability,
     environment_names,
     fingerprint,
+    materialize,
 )
 from .result import validate_batch, validate_collection, validate_guarded_batch, validate_result
 
@@ -55,7 +57,11 @@ SYSTEM_LINKS = ("/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
 PROJECT = Path("/project")
 # Paths the sandbox mounts itself; an environment directory outside the project may not
 # overlap them.
-MOUNT_POINTS = (str(PROJECT), "/metadata", "/telescope", "/proc", "/dev")
+MOUNT_POINTS = (str(PROJECT), "/metadata", "/env", "/telescope", "/proc", "/dev")
+UNPACKED_RESERVED = (*MOUNT_POINTS, "/tools", "/tmp")
+ENV_MARKER = ".telescope-env.json"
+_ENV_LOCKS_GUARD = threading.Lock()
+_ENV_LOCKS = {}
 # A startup file that names the project directory is shown rewritten; larger ones refuse.
 MAX_REWRITE = 1_048_576
 # The install records read to tell whether an environment inside the project depends on
@@ -357,6 +363,7 @@ class Sandbox:
     description: dict
     overlays: tuple = ()
     links: tuple = ()
+    rootfs: Path | None = None
 
 
 def _host_environment():
@@ -665,21 +672,97 @@ def invocation(root):
                     signal.signal(signum, handler)
 
 
-def _probe(executable, project):
+def _probe_arguments(bwrap, rootfs, executable, project):
+    arguments = [bwrap, *NAMESPACES]
+    for directory in SYSTEM_DIRECTORIES:
+        arguments += ["--ro-bind", str(rootfs / directory.lstrip("/")), directory]
+    for link in SYSTEM_LINKS:
+        source = rootfs / link.lstrip("/")
+        if os.path.islink(source):
+            arguments += ["--symlink", os.readlink(source), link]
+        elif os.path.isdir(source):
+            arguments += ["--ro-bind", str(source), link]
+    arguments += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/dev/shm"]
+    arguments += ["--remount-ro", "/dev", "--tmpfs", "/tmp"]
+    skipped = {
+        *(name.lstrip("/") for name in SYSTEM_DIRECTORIES),
+        *(name.lstrip("/") for name in SYSTEM_LINKS),
+        *(name.lstrip("/") for name in UNPACKED_RESERVED),
+        "sys",
+        "run",
+    }
+    try:
+        entries = sorted(os.listdir(rootfs))
+    except OSError as exc:
+        raise InfrastructureError("unpacked rootfs directory could not be read") from exc
+    for name in entries:
+        if name in skipped:
+            continue
+        source = rootfs / name
+        destination = "/" + name
+        if os.path.islink(source):
+            arguments += ["--symlink", os.readlink(source), destination]
+        elif os.path.isdir(source):
+            arguments += ["--ro-bind", str(source), destination]
+    arguments += [
+        "--remount-ro",
+        "/",
+        "--chdir",
+        "/",
+        "--clearenv",
+        "--setenv",
+        "PATH",
+        "/usr/local/bin:/usr/bin:/bin",
+        "--setenv",
+        "LC_ALL",
+        "C",
+        "--",
+        executable,
+        "-I",
+        "-B",
+        "-c",
+        PROBE,
+        str(project),
+        str(MAX_REWRITE),
+    ]
+    return arguments
+
+
+def _probe(executable, project, *, rootfs=None, bwrap=None):
     """Describe an interpreter exactly as an isolated child of it sees its environment.
 
-    The interpreter starts on the host with a minimal environment of its own, so it is
-    told not to write bytecode: describing an environment never writes into it, whatever
-    the calling job allows.
+    The interpreter starts on the host (or inside the unpacked Bubblewrap rootfs view)
+    with a minimal environment of its own, so it is told not to write bytecode: describing
+    an environment never writes into it, whatever the calling job allows.
     """
+    if rootfs is not None:
+        bwrap = bwrap or shutil.which("bwrap")
+        if bwrap is None:
+            raise UnsupportedCapability(
+                "sandbox:bubblewrap",
+                "scoped tests need Bubblewrap; install the bwrap command (package bubblewrap)",
+            )
+        argv = _probe_arguments(bwrap, rootfs, executable, project)
+    else:
+        argv = [executable, "-I", "-B", "-c", PROBE, str(project), str(MAX_REWRITE)]
     code, output = capture(
-        [executable, "-I", "-B", "-c", PROBE, str(project), str(MAX_REWRITE)],
+        argv,
         30,
         env=_host_environment(),
         cwd="/",
         limit=MAX_PROBE,
     )
     if code:
+        if rootfs is not None:
+            message = _bwrap_message(output)
+            if message is not None and not re.search(
+                r"Can't (bind )?mount|No such file or directory|Not a directory|execvp", message
+            ):
+                raise UnsupportedCapability(
+                    "sandbox:namespaces",
+                    "Bubblewrap could not create the user, mount and PID namespaces that scoped "
+                    "tests need: " + message,
+                )
         raise UnsupportedCapability(
             "sandbox:environment", "the invoking interpreter could not describe its environment"
         )
@@ -803,6 +886,70 @@ def _symlinks(name):
     return found
 
 
+def _resolve_in_rootfs(rootfs, name):
+    """Resolve `name` inside `rootfs` without escaping `rootfs`."""
+    pending = [part for part in PurePosixPath(name).parts[1:] if part not in ("", ".")]
+    current, found = Path("/"), []
+    while pending:
+        part = pending.pop(0)
+        if part == "..":
+            current = current.parent
+            continue
+        logical = current / part
+        candidate = rootfs / logical.relative_to("/")
+        if not os.path.islink(candidate):
+            current = logical
+            continue
+        if len(found) >= 40:
+            _refuse("an interpreter environment path has too many levels of symbolic links")
+        text = os.readlink(candidate)
+        found.append((logical, text))
+        parts = [item for item in PurePosixPath(text).parts if item not in ("", ".")]
+        if os.path.isabs(text):
+            current = Path("/")
+            parts = parts[1:] if parts and parts[0] == "/" else parts
+        pending = [*parts, *pending]
+    return current, rootfs / current.relative_to("/"), found
+
+
+def _check_unpacked_rootfs(rootfs, executable, project):
+    if project == Path("/") or _inside(project, rootfs) or _inside(rootfs, project):
+        _refuse("the unpacked rootfs cannot overlap the project directory")
+    for directory in SYSTEM_DIRECTORIES:
+        candidate = rootfs / directory.lstrip("/")
+        if os.path.islink(candidate) or not os.path.isdir(candidate):
+            _refuse(f"unpacked rootfs requires a {directory} directory")
+    given = Path(os.path.normpath(executable))
+    real, host_executable, _ = _resolve_in_rootfs(rootfs, executable)
+    for path in (given, real):
+        if any(
+            _inside(path, Path(point)) or _inside(Path(point), path) for point in UNPACKED_RESERVED
+        ):
+            _refuse("an interpreter environment directory overlaps a sandbox mount point")
+    try:
+        info = host_executable.lstat()
+    except OSError:
+        _refuse("rootfs_python does not name an executable file inside rootfs")
+    if not stat.S_ISREG(info.st_mode) or not os.access(host_executable, os.X_OK):
+        _refuse("rootfs_python does not name an executable file inside rootfs")
+
+
+def _check_slash_executable(executable):
+    given = Path(os.path.normpath(executable))
+    real = Path(os.path.realpath(executable))
+    for path in (given, real):
+        if _inside(Path("/tmp"), path) or any(
+            _inside(path, Path(point)) or _inside(Path(point), path) for point in MOUNT_POINTS
+        ):
+            _refuse("an interpreter environment directory overlaps a sandbox mount point")
+    try:
+        info = real.lstat()
+    except OSError:
+        _refuse("rootfs_python does not name an executable file")
+    if not stat.S_ISREG(info.st_mode) or not os.access(real, os.X_OK):
+        _refuse("rootfs_python does not name an executable file")
+
+
 def _link_text(location, text, project):
     """The text of a host link as the sandbox shows it: unchanged where it resolves the
     same way, and otherwise its target's sandbox path."""
@@ -814,7 +961,7 @@ def _link_text(location, text, project):
     return str(_shown(target, project))
 
 
-def _binds(description, project):
+def _binds(description, project, *, rootfs=None):
     """Map the interpreter's prefixes and import directories into the view, read-only.
 
     Every directory is mounted once, at its real path, and every host symbolic link on
@@ -827,6 +974,64 @@ def _binds(description, project):
     location either. Every other directory keeps its host path and may not overlap a
     path the sandbox mounts itself. Returns the binds and the links.
     """
+    if rootfs is not None:
+        system = [_resolve_in_rootfs(rootfs, name)[0] for name in SYSTEM_DIRECTORIES]
+        prefixes = {
+            os.path.normpath(name)
+            for name in [*description["prefixes"], os.path.dirname(description["executable"])]
+        }
+        binds, found = {}, {}
+        for name in [*sorted(prefixes), *description["path"]]:
+            if not os.path.isabs(name):
+                continue
+            given = Path(os.path.normpath(name))
+            real, host_real, symlinks = _resolve_in_rootfs(rootfs, name)
+            if not os.path.exists(host_real):
+                continue
+            if any(_inside(path, directory) for path in (given, real) for directory in system):
+                continue
+            for path in (given, real):
+                if any(
+                    _inside(path, Path(point)) or _inside(Path(point), path)
+                    for point in UNPACKED_RESERVED
+                ):
+                    _refuse("an interpreter environment directory overlaps a sandbox mount point")
+            binds[str(real)] = str(host_real)
+            for location, text in symlinks:
+                if not any(_inside(location, directory) for directory in system):
+                    found[location] = text
+        ordered = []
+        for destination in sorted(binds, key=lambda value: (len(Path(value).parts), value)):
+            source = binds[destination]
+            if any(
+                _inside(Path(destination), Path(parent))
+                and Path(source) == Path(binds[parent]) / Path(destination).relative_to(parent)
+                for parent, _ in ordered
+            ):
+                continue
+            ordered.append((destination, source))
+        links = {}
+        for location, text in found.items():
+            if any(
+                _inside(location, Path(destination))
+                and Path(source) / location.relative_to(destination)
+                == rootfs / location.relative_to("/")
+                for destination, source in ordered
+            ):
+                continue
+            if any(
+                _inside(location, Path(point)) or _inside(Path(point), location)
+                for point in UNPACKED_RESERVED
+            ):
+                _refuse("an interpreter environment directory overlaps a sandbox mount point")
+            links[str(location)] = text
+        return (
+            tuple((source, destination) for destination, source in ordered),
+            tuple(
+                (links[location], location)
+                for location in sorted(links, key=lambda value: (len(Path(value).parts), value))
+            ),
+        )
     _check_project(project)
     system = [Path(os.path.realpath(name)) for name in SYSTEM_DIRECTORIES]
     prefixes = {
@@ -897,22 +1102,26 @@ def _binds(description, project):
     )
 
 
-def _overlays(description):
+def _overlays(description, *, rootfs=None):
     """The rewritten startup files and the stale bytecode they replace, by host path."""
     if description["oversize"]:
         _refuse(
             "an environment file that names the project directory is too large to show "
             "rewritten: " + description["oversize"][0][:200]
         )
+
+    def host_name(name):
+        return name if rootfs is None else str(rootfs / name.lstrip("/"))
+
     try:
         rewritten = tuple(
-            (name, base64.b64decode(content, validate=True), executable)
+            (host_name(name), base64.b64decode(content, validate=True), executable)
             for name, content, executable in description["rewrites"]
         )
     except ValueError as exc:
         raise InfrastructureError("interpreter environment probe returned invalid files") from exc
     # An empty file is not valid bytecode, so the interpreter compiles the shown source.
-    return rewritten + tuple((name, b"", False) for name in description["masks"])
+    return rewritten + tuple((host_name(name), b"", False) for name in description["masks"])
 
 
 NORMALIZERS = (os.path.normpath, os.path.realpath)
@@ -1018,20 +1227,25 @@ def _check_location(description, project):
         )
 
 
-def _project_paths(description, project):
+def _project_paths(description, project, *, rootfs=None):
     """Import directories inside the project, outside every environment prefix."""
-    prefixes = {Path(convert(name)) for name in description["prefixes"] for convert in NORMALIZERS}
+    normalizers = (
+        NORMALIZERS
+        if rootfs is None
+        else (os.path.normpath, lambda name: str(_resolve_in_rootfs(rootfs, name)[0]))
+    )
+    prefixes = {Path(convert(name)) for name in description["prefixes"] for convert in normalizers}
     found = set()
     for name in description["path"]:
         if not os.path.isabs(name):
             continue
-        for path in {Path(convert(name)) for convert in NORMALIZERS}:
+        for path in {Path(convert(name)) for convert in normalizers}:
             if _inside(path, project) and not any(_inside(path, prefix) for prefix in prefixes):
                 found.add(path.relative_to(project).as_posix())
     return sorted(found)
 
 
-def _closed_mountpoints(directory, closed):
+def _closed_mountpoints(directory, closed, *, rootfs=None):
     """Make missing mountpoints privately, preserving the admitted system baseline.
 
     A readonly bind cannot supply a new destination below itself. Reconstruct only
@@ -1040,6 +1254,7 @@ def _closed_mountpoints(directory, closed):
     and no sibling becomes part of a selected frozen tool projection.
     """
     base = Path(directory)
+    physical_base = base if rootfs is None else rootfs / base.relative_to("/")
     missing = {}
     arguments = []
     visits = size = 0
@@ -1057,27 +1272,32 @@ def _closed_mountpoints(directory, closed):
         if visits > 4096:
             raise InfrastructureError("system mountpoint entries exceed their bound")
 
+    def physical(path):
+        return path if rootfs is None else physical_base / path.relative_to(base)
+
     def scaffold(parent, targets):
-        info = parent.lstat()
+        source_parent = physical(parent)
+        info = source_parent.lstat()
         if not stat.S_ISDIR(info.st_mode):
             raise InfrastructureError("system mountpoint parent changed type")
         add("--perms", format(stat.S_IMODE(info.st_mode), "o"), "--tmpfs", str(parent))
         children = {}
-        with os.scandir(parent) as entries:
+        with os.scandir(source_parent) as entries:
             for entry in entries:
                 visit()
                 children[entry.name] = entry.stat(follow_symlinks=False)
         branches = {target.relative_to(parent).parts[0] for target in targets}
         for name, info in sorted(children.items()):
             child = parent / name
+            source_child = physical(child)
             if name in branches:
                 if child in targets or not stat.S_ISDIR(info.st_mode):
                     raise InfrastructureError("system mountpoint ancestor changed type")
                 scaffold(child, [target for target in targets if target.is_relative_to(child)])
             elif stat.S_ISLNK(info.st_mode):
-                add("--symlink", os.readlink(child), str(child))
+                add("--symlink", os.readlink(source_child), str(child))
             elif stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode):
-                add("--ro-bind", str(child), str(child))
+                add("--ro-bind", str(source_child), str(child))
             else:
                 raise InfrastructureError("unsupported system mountpoint sibling type")
         for target in targets:
@@ -1095,7 +1315,7 @@ def _closed_mountpoints(directory, closed):
                 visit()
                 child = parent / part
                 try:
-                    info = child.lstat()
+                    info = physical(child).lstat()
                 except FileNotFoundError:
                     missing[target] = parent
                     break
@@ -1114,23 +1334,26 @@ def _closed_mountpoints(directory, closed):
 def _base_arguments(box, project=None, *, frozen_prefixes=(), native=False, closed_directories=()):
     """System directories, scratch and the environment, except binds below `project`."""
     arguments = [box.bwrap, *NAMESPACES]
+    rootfs = box.rootfs
     for directory in SYSTEM_DIRECTORIES:
+        source = directory if rootfs is None else str(rootfs / directory.lstrip("/"))
         if directory != "/etc" or not native:
-            arguments += ["--ro-bind", directory, directory]
+            arguments += ["--ro-bind", source, directory]
             if native:
-                arguments += _closed_mountpoints(directory, closed_directories)
+                arguments += _closed_mountpoints(directory, closed_directories, rootfs=rootfs)
     prefixes = dict(frozen_prefixes)
     for link in SYSTEM_LINKS:
+        source = Path(link) if rootfs is None else rootfs / link.lstrip("/")
         if link in prefixes:
             row = prefixes[link]
             if row["kind"] == "symlink":
                 arguments += ["--symlink", row["target"], link]
             elif row["kind"] == "directory":
-                arguments += ["--ro-bind", link, link]
-        elif os.path.islink(link):
-            arguments += ["--symlink", os.readlink(link), link]
-        elif os.path.isdir(link):
-            arguments += ["--ro-bind", link, link]
+                arguments += ["--ro-bind", str(source), link]
+        elif os.path.islink(source):
+            arguments += ["--symlink", os.readlink(source), link]
+        elif os.path.isdir(source):
+            arguments += ["--ro-bind", str(source), link]
     arguments += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/dev/shm"]
     arguments += ["--remount-ro", "/dev", "--tmpfs", "/tmp"]
     for source, destination in box.binds:
@@ -1207,7 +1430,10 @@ def _overlay_arguments(box, directory, *, system=True):
     """
     shown = [*box.binds]
     if system:
-        shown += [(os.path.realpath(name), name) for name in SYSTEM_DIRECTORIES]
+        if box.rootfs is not None:
+            shown += [(str(box.rootfs / name.lstrip("/")), name) for name in SYSTEM_DIRECTORIES]
+        else:
+            shown += [(os.path.realpath(name), name) for name in SYSTEM_DIRECTORIES]
     arguments = []
     for index, (name, content, executable) in enumerate(box.overlays):
         original = Path(name)
@@ -1307,7 +1533,7 @@ def _preflight(box):
     )
 
 
-def describe(root, executable=None):
+def describe(root, executable=None, *, rootfs=None, bwrap=None):
     """The view of an interpreter's environment and its cache identity, without bwrap.
 
     The identity covers the interpreter build and every installed distribution visible
@@ -1318,24 +1544,42 @@ def describe(root, executable=None):
     project's path is not part of the identity.
     """
     project = Path(root).resolve()
-    description = _probe(executable or sys.executable, project)
+    unpacked = None
+    if rootfs is not None:
+        resolved_rootfs = Path(rootfs).resolve(strict=True)
+        if resolved_rootfs != Path("/"):
+            unpacked = resolved_rootfs
+            if executable is None:
+                raise DeclarationError("unpacked rootfs requires rootfs_python")
+            _check_unpacked_rootfs(unpacked, executable, project)
+        else:
+            _check_project(project)
+            if executable is not None:
+                _check_slash_executable(executable)
+    description = _probe(executable or sys.executable, project, rootfs=unpacked, bwrap=bwrap)
     if description["external_editables"]:
         name, location = description["external_editables"][0]
         _refuse(
             f"editable distribution {name} at {location} is outside the project; "
             "install external dependencies as regular, non-editable distributions"
         )
-    binds, links = _binds(description, project)
-    _check_location(description, project)
+    binds, links = _binds(description, project, rootfs=unpacked)
+    if unpacked is None:
+        _check_location(description, project)
+    shown_executable = (
+        description["executable"]
+        if unpacked is not None
+        else str(_shown(description["executable"], project))
+    )
     folders = [
-        str(_shown(os.path.dirname(description["executable"]), project)),
+        os.path.dirname(shown_executable),
         "/usr/local/bin",
         "/usr/bin",
         "/bin",
     ]
     return Sandbox(
-        bwrap=None,
-        executable=str(_shown(description["executable"], project)),
+        bwrap=bwrap,
+        executable=shown_executable,
         binds=binds,
         links=links,
         path=":".join(dict.fromkeys(folders)),
@@ -1346,16 +1590,17 @@ def describe(root, executable=None):
                 "distributions": description["distributions"],
                 "project": {
                     "startup": description["references"],
-                    "paths": _project_paths(description, project),
+                    "paths": _project_paths(description, project, rootfs=unpacked),
                 },
             }
         ),
         description=description,
-        overlays=_overlays(description),
+        overlays=_overlays(description, rootfs=unpacked),
+        rootfs=unpacked,
     )
 
 
-def prepare(root):
+def prepare(root, *, rootfs=None, executable=None):
     """Probe the invoking interpreter and check Bubblewrap before any session starts."""
     bwrap = shutil.which("bwrap")
     if bwrap is None:
@@ -1365,14 +1610,331 @@ def prepare(root):
         )
     for attempt in range(2):
         try:
-            box = replace(describe(root), bwrap=bwrap)
+            box = replace(
+                describe(root, executable=executable, rootfs=rootfs, bwrap=bwrap), bwrap=bwrap
+            )
             _preflight(box)
             return box
-        except (CleanupError, UnsupportedCapability):
+        except (CleanupError, UnsupportedCapability, DeclarationError):
             raise
         except InfrastructureError:
             if attempt:
                 raise
+
+
+def _fsync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _remove_tree_writable(path):
+    if not os.path.lexists(path):
+        return
+    if os.path.islink(path) or not os.path.isdir(path):
+        os.unlink(path)
+        return
+    for parent, dirs, _ in os.walk(path, topdown=True):
+        os.chmod(parent, 0o700)
+        for name in dirs:
+            child = os.path.join(parent, name)
+            if not os.path.islink(child):
+                os.chmod(child, 0o700)
+    shutil.rmtree(path)
+
+
+@contextmanager
+def _environment_lock(directory, env_key, timeout):
+    if fcntl is None:
+        raise InfrastructureError("scoped execution requires Linux with advisory file locking")
+    key = (str(directory), env_key)
+    with _ENV_LOCKS_GUARD:
+        thread_lock = _ENV_LOCKS.setdefault(key, threading.Lock())
+    deadline = time.monotonic() + timeout
+    if not thread_lock.acquire(timeout=max(0.01, timeout)):
+        raise InfrastructureError("editable environment lock deadline exceeded")
+    lock_path = directory / f".{env_key}.lock"
+    descriptor = None
+    try:
+        descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise InfrastructureError(
+                        "editable environment lock deadline exceeded"
+                    ) from None
+                time.sleep(0.02)
+        yield
+    finally:
+        if descriptor is not None:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        thread_lock.release()
+
+
+def _valid_editable_environment(target, env_key):
+    try:
+        if target.is_symlink() or not target.is_dir():
+            return False
+        marker = target / ENV_MARKER
+        if marker.is_symlink() or not marker.is_file():
+            return False
+        if not os.path.lexists(target / "bin/python"):
+            return False
+        payload = json.loads(marker.read_bytes())
+        return payload == {"schema": 1, "key": env_key}
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def _configure_base_venv_bridge(box, root, env_stage):
+    startup = box.description.get("startup", {})
+    prefix = startup.get("prefix")
+    base_prefix = startup.get("base_prefix")
+    if not prefix or not base_prefix or prefix == base_prefix:
+        return
+    box_cfg = (
+        box.rootfs / prefix.lstrip("/") if box.rootfs is not None else Path(prefix)
+    ) / "pyvenv.cfg"
+    include_system = "false"
+    try:
+        if box_cfg.is_file():
+            for line in box_cfg.read_text(encoding="utf-8").splitlines():
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    if key.strip().lower() == "include-system-site-packages":
+                        include_system = value.strip().lower()
+    except OSError as exc:
+        raise InfrastructureError("cannot read invoking virtual environment configuration") from exc
+    env_cfg = env_stage / "pyvenv.cfg"
+    if include_system != "true" and env_cfg.is_file():
+        lines = []
+        for line in env_cfg.read_text(encoding="utf-8").splitlines():
+            if (
+                "=" in line
+                and line.partition("=")[0].strip().lower() == "include-system-site-packages"
+            ):
+                lines.append("include-system-site-packages = false")
+            else:
+                lines.append(line)
+        env_cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    project = Path(root).resolve()
+    shown_prefix = Path(prefix) if box.rootfs is not None else _shown(Path(prefix), project)
+    site_entries = []
+    for candidate in (
+        startup.get("purelib"),
+        startup.get("platlib"),
+        *(startup.get("sites") or ()),
+    ):
+        if type(candidate) is not str or not os.path.isabs(candidate):
+            continue
+        shown_entry = (
+            Path(candidate) if box.rootfs is not None else _shown(Path(candidate), project)
+        )
+        text = str(shown_entry)
+        if _inside(shown_entry, shown_prefix) and text not in site_entries:
+            site_entries.append(text)
+    if site_entries:
+        site_dirs = sorted((env_stage / "lib").glob("python*/site-packages"))
+        if not site_dirs:
+            raise InfrastructureError(
+                "editable virtual environment lacks a site-packages directory"
+            )
+        (site_dirs[0] / "zzz_telescope_base.pth").write_text(
+            "\n".join(site_entries) + "\n", encoding="utf-8"
+        )
+
+
+def _freeze_editable_environment(env_stage, env_key):
+    for cache_dir in sorted(env_stage.rglob("__pycache__"), reverse=True):
+        if not cache_dir.is_symlink() and cache_dir.is_dir():
+            shutil.rmtree(cache_dir)
+    for bytecode_file in (*env_stage.rglob("*.pyc"), *env_stage.rglob("*.pyo")):
+        if os.path.lexists(bytecode_file):
+            bytecode_file.unlink()
+    marker = env_stage / ENV_MARKER
+    marker.write_bytes(json.dumps({"schema": 1, "key": env_key}, sort_keys=True).encode("utf-8"))
+    marker.chmod(0o444)
+    for parent, dirs, files in os.walk(env_stage, topdown=False):
+        parent_path = Path(parent)
+        for name in files:
+            item = parent_path / name
+            info = item.lstat()
+            if not stat.S_ISLNK(info.st_mode):
+                item.chmod(0o555 if info.st_mode & 0o111 else 0o444)
+            os.utime(item, ns=(0, 0), follow_symlinks=False)
+        for name in dirs:
+            child = parent_path / name
+            info = child.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                os.utime(child, ns=(0, 0), follow_symlinks=False)
+            else:
+                child.chmod(0o555)
+                os.utime(child, ns=(0, 0))
+    env_stage.chmod(0o555)
+    os.utime(env_stage, ns=(0, 0))
+
+
+def prepare_editable_environment(
+    box,
+    distributions,
+    *,
+    root,
+    pool,
+    record_map,
+    environments_directory,
+    invocation_directory,
+    timeout,
+    cancellation=None,
+):
+    """Build or reuse an isolated read-only /env for selected editable-v1 distributions."""
+    from .project_metadata import EDITABLE_CAPABILITY
+
+    installed = {name for name, _ in box.description["distributions"]}
+    if any(distribution.name in installed for distribution in distributions):
+        raise UnsupportedCapability(
+            "project-metadata:runtime-conflict",
+            "local metadata conflicts with a distribution installed in the environment",
+        )
+    env_key = fingerprint(
+        {
+            "schema": 1,
+            "sandbox": box.identity,
+            "distributions": [list(distribution.input_records) for distribution in distributions],
+        }
+    )
+    environments_directory = Path(environments_directory)
+    environments_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if environments_directory.is_symlink() or not environments_directory.is_dir():
+        raise InfrastructureError("editable environment cache must be an owned directory")
+    target = environments_directory / env_key
+    if _valid_editable_environment(target, env_key):
+        return target
+    with _environment_lock(environments_directory, env_key, timeout * 2 + 30):
+        if _valid_editable_environment(target, env_key):
+            return target
+        prefix = f".env-{env_key[:16]}-"
+        for leftover in list(environments_directory.iterdir()):
+            if leftover.name.startswith(prefix):
+                _remove_tree_writable(leftover)
+        build_inputs = sorted(
+            {item for distribution in distributions for item in distribution.inputs}
+        )
+        editable_targets = [
+            argument
+            for distribution in distributions
+            for argument in (
+                "-e",
+                str(PROJECT)
+                if distribution.directory == "."
+                else f"{PROJECT}/{distribution.directory}",
+            )
+        ]
+        for attempt in range(2):
+            if cancellation is not None and cancellation.is_set():
+                raise InvocationInterrupted("editable environment build cancelled")
+            work = Path(invocation_directory) / ("env-build-" + uuid.uuid4().hex)
+            env_stage = environments_directory / (prefix + uuid.uuid4().hex)
+            try:
+                work.mkdir(mode=0o700)
+                build_project = work / "project"
+                materialize(
+                    pool,
+                    Unit("editable-build", [], build_inputs, [], True),
+                    build_project,
+                    record_map,
+                )
+                env_stage.mkdir(mode=0o755)
+
+                def run_step(command, failure_message):
+                    argv = [
+                        *_base_arguments(box, PROJECT),
+                        *_project_arguments(box, build_project),
+                        *_overlay_arguments(box, work / "startup"),
+                        "--bind",
+                        str(env_stage),
+                        "/env",
+                        "--remount-ro",
+                        "/",
+                        "--chdir",
+                        str(PROJECT),
+                        *_environment(
+                            box,
+                            {
+                                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+                                "PIP_NO_CACHE_DIR": "1",
+                                "SOURCE_DATE_EPOCH": "0",
+                            },
+                        ),
+                        "--",
+                        *command,
+                    ]
+                    code, output = capture(
+                        argv,
+                        timeout,
+                        env=_host_environment(),
+                        limit=MAX_COLLECTION,
+                        cancellation=cancellation,
+                    )
+                    if code != 0:
+                        message = _bwrap_message(output)
+                        if message is not None:
+                            raise InfrastructureError("sandbox startup failed: " + message)
+                        raise UnsupportedCapability(EDITABLE_CAPABILITY, failure_message)
+
+                run_step(
+                    [
+                        box.executable,
+                        "-m",
+                        "venv",
+                        "--system-site-packages",
+                        "--without-pip",
+                        "/env",
+                    ],
+                    "could not create isolated virtual environment for editable distributions",
+                )
+                _configure_base_venv_bridge(box, root, env_stage)
+                run_step(
+                    [
+                        box.executable,
+                        "-m",
+                        "pip",
+                        "--python",
+                        "/env/bin/python",
+                        "install",
+                        "--no-index",
+                        "--no-deps",
+                        "--no-build-isolation",
+                        "--no-compile",
+                        *editable_targets,
+                    ],
+                    "editable distribution installation failed inside Bubblewrap",
+                )
+                _freeze_editable_environment(env_stage, env_key)
+                if not _valid_editable_environment(target, env_key):
+                    os.replace(env_stage, target)
+                    _fsync_directory(environments_directory)
+                return target
+            except (CleanupError, DeclarationError):
+                raise
+            except (InfrastructureError, OSError) as exc:
+                if attempt == 1:
+                    if isinstance(exc, InfrastructureError):
+                        raise
+                    raise InfrastructureError(
+                        "editable environment storage operation failed"
+                    ) from exc
+            finally:
+                with ignore_termination_signals():
+                    _remove_tree_writable(env_stage)
+                    _remove_tree_writable(work)
 
 
 def execute(
@@ -1389,6 +1951,7 @@ def execute(
     suite_cwd=".",
     suite="default",
     metadata_directory=None,
+    env_directory=None,
     tool_view=None,
     cancellation=None,
     on_session_start=None,
@@ -1487,6 +2050,14 @@ def execute(
         metadata_directory = Path(metadata_directory).resolve()
         if metadata_directory.parent != directory or metadata_directory.name != "metadata":
             raise InfrastructureError("metadata requires an owned worker directory")
+    if env_directory is not None:
+        env_directory = Path(env_directory).resolve()
+        if (
+            env_directory.is_symlink()
+            or not env_directory.is_dir()
+            or not (env_directory / ENV_MARKER).is_file()
+        ):
+            raise InfrastructureError("worker requires a validated editable environment")
     nonce = uuid.uuid4().hex + uuid.uuid4().hex if guarded else uuid.uuid4().hex
     guard_envelope = None
     if request["mode"] == "guard-capture":
@@ -1567,6 +2138,11 @@ def execute(
         if type(native) is not bool:
             raise InfrastructureError("tool view has an invalid native profile")
         if native:
+            if env_directory is not None:
+                raise UnsupportedCapability(
+                    "tool:layout",
+                    "editable project distributions are unsupported with closed native startup",
+                )
             from .tool_startup import environment as startup_environment
             from .tool_startup import signature
 
@@ -1607,10 +2183,17 @@ def execute(
             argv += ["--symlink", target, location]
     if metadata_directory is not None:
         argv += ["--ro-bind", str(metadata_directory), "/metadata"]
-    controlled = box
+    if env_directory is not None:
+        argv += ["--ro-bind", str(env_directory), "/env"]
+    path_entries = []
     if tool_view is not None and tool_view.command_path is not None:
-        controlled = replace(box, path=tool_view.command_path + ":" + box.path)
-    startup = [box.executable, "-I", "-B", WORKER_PATH]
+        path_entries.append(tool_view.command_path)
+    if env_directory is not None:
+        path_entries.append("/env/bin")
+    path_entries.extend(box.path.split(":"))
+    controlled = replace(box, path=":".join(dict.fromkeys(path_entries)))
+    worker_executable = "/env/bin/python" if env_directory is not None else box.executable
+    startup = [worker_executable, "-I", "-B", WORKER_PATH]
     argv += [
         "--ro-bind",
         str(WORKER),
@@ -1698,7 +2281,10 @@ def execute(
 
             if code != 0:
                 raise InfrastructureError("fixture inspection worker failed")
-            expected_framework = framework_definition_ids(version("pytest"))
+            pytest_version = dict(box.description.get("distributions", ())).get(
+                "pytest"
+            ) or version("pytest")
+            expected_framework = framework_definition_ids(pytest_version)
             if request["mode"] == "guard-capture":
                 return validate_capture(
                     result,
