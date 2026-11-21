@@ -315,6 +315,13 @@ budget: pytest-telescope sets no CPU, memory, process or scratch limits and does
 infer them from the host. Limit resources in the job that runs pytest; every sandbox is a
 child process of the invocation and stays inside those limits.
 
+Runs against the same checkout may overlap. Each run owns its outer frozen copy and
+up to `workers` worker copies; live owners do not share a 64-directory ceiling.
+Scratch recovery counts only abandoned copies, with at most 64 accepted in one scan.
+Allocation refuses when 64 abandoned copies await recovery, and recovery refuses
+without deleting copies if that bound is exceeded. Inspect the scratch state after
+such a refusal. The caller must bound aggregate resources across overlapping runs.
+
 Collection and ordinary sessions run one at a time; independent scoped case misses or
 batches then use up to `workers` sandboxes. With the
 [fixture guard](batching.md#fixture-guard), `workers` bounds the inspection sandboxes
