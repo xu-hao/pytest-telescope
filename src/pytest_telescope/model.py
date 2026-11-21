@@ -799,11 +799,19 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
     inventory = set()
     for suite in configured_suites:
         members = set()
+        suite_root = (root / suite.root).resolve()
         for name in suite.test_roots:
             if excluded_namespace(root, name, excluded):
                 raise DeclarationError("test_roots cannot expose excluded namespaces")
             path = root / name
-            if not path.exists() or not path.resolve().is_relative_to(root) or path.is_symlink():
+            if (
+                not path.exists()
+                or any(
+                    (root / Path(*Path(name).parts[:depth])).is_symlink()
+                    for depth in range(1, len(Path(name).parts) + 1)
+                )
+                or not path.resolve().is_relative_to(suite_root)
+            ):
                 raise DeclarationError("test_roots require existing project files or directories")
             candidates = (
                 walk_bounded(root, path, excluded=excluded, budget=budget, max_visits=max_visits)
@@ -822,7 +830,7 @@ def load(root, *, cache_dir=None, suite_names=None, structural_files=None):
                     fnmatch.fnmatchcase(candidate.name, pattern) for pattern in suite.patterns
                 ):
                     continue
-                if candidate.is_symlink() or not candidate.resolve().is_relative_to(root):
+                if candidate.is_symlink() or not candidate.resolve().is_relative_to(suite_root):
                     raise DeclarationError("test source must be a regular project file")
                 members.add(filename)
                 if len(members) > 100_000:

@@ -6,7 +6,7 @@ import json
 import shlex
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .model import (
     DeclarationError,
@@ -289,6 +289,12 @@ def suites(root, spec, selected=None):
             relative(value)
             for value in sequence(entry.get("test_roots", [directory]), "suite test_roots")
         ]
+        for test_root in roots:
+            if not PurePosixPath(test_root).is_relative_to(PurePosixPath(directory)):
+                raise DeclarationError(
+                    f"suite {name!r} test_roots entry {test_root!r} lies outside "
+                    f"suite root {directory!r}"
+                )
         includes = [
             relative(value) for value in sequence(entry.get("include", ["**"]), "suite include")
         ]
