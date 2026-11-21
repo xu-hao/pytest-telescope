@@ -668,7 +668,9 @@ rerun; the case must pass again before its result can be reused.
 
 Each unit can report up to 64 failure entries containing a project-relative file, line
 number, phase (`collect`, `setup`, `call`, or `teardown`), exception type, and hashed
-case identity. Collection failures use `CollectionError` and may have line zero.
+case identity. Collection failures use `CollectionError` and may have line zero; phase
+failures without an exception use `UnexpectedPass` and name the module that collected the
+test.
 Locations outside the project or without a project file path (such as generated code or
 a relative code filename) are labeled `<runtime>`. A location in a project file is
 project-relative however the file was imported, including a project module loaded
