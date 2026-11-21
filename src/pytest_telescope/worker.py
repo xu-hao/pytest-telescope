@@ -517,6 +517,16 @@ def fixture_source_roots(
             value = env_paths.get(role)
             if value:
                 candidates.append((role, value))
+        bridge = (
+            Path(env_paths["purelib"]) / "zzz_telescope_base.pth"
+            if paths is None and prefixes is None and env_paths.get("purelib")
+            else None
+        )
+        if bridge is not None and bridge.is_file():
+            for line in bridge.read_text(encoding="utf-8").splitlines():
+                entry = line.strip()
+                if entry and not entry.startswith("#"):
+                    candidates.append(("purelib", entry))
     candidates.extend(active_prefixes)
     if env_root is not None and os.path.lexists(env_root):
         candidates.append(("env", env_root))

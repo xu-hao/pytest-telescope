@@ -1,16 +1,18 @@
-"""Version 1 static PEP 621 projection; never imports or invokes build backends.
+"""Version 1 project distributions: static PEP 621 projection and editable-v1 environments.
 
-The complete frozen pyproject bytes, including build-system and inert tool tables,
-are provenance. This intentionally supports only the documented static subset;
-METADATA and entry_points.txt are discoverable metadata, not an installation.
+Static PEP 621 projection never imports or invokes build backends: METADATA and
+entry_points.txt are discoverable metadata, not an installation. Editable-v1 freezes
+declared metadata and build inputs so scoped sessions materialize an isolated read-only
+virtual environment at /env inside Bubblewrap.
 """
 
 import hashlib
 import os
 import re
+import stat
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from packaging.markers import Marker
 from packaging.requirements import InvalidRequirement, Requirement
@@ -20,8 +22,10 @@ from packaging.version import InvalidVersion, Version
 
 from .model import (
     DeclarationError,
+    InfrastructureError,
     UnsupportedCapability,
     mapping,
+    parent_fd,
     regular_bytes,
     relative,
     sequence,
@@ -31,9 +35,13 @@ MAX_DISTRIBUTIONS = 256
 MAX_SOURCE_BYTES = 1024 * 1024
 MAX_DISTRIBUTION_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = 16 * 1024 * 1024
+MAX_EDITABLE_FILE_BYTES = 16 * 1024 * 1024
+MAX_EDITABLE_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_ITEMS = 4096
 FORMAT = "pep621-static-v1"
+EDITABLE_FORMAT = "editable-v1"
 CAPABILITY = "metadata:pep621-static-v1"
+EDITABLE_CAPABILITY = "metadata:editable-v1"
 _FIELDS = {
     "name",
     "version",
@@ -61,10 +69,17 @@ class Distribution:
     inputs: list[str]
     source_hashes: dict[str, str]
     files: dict[str, bytes]
+    format: str = FORMAT
+    directory: str = "."
+    input_records: tuple[dict, ...] = ()
 
 
 def _unsupported(message):
     raise UnsupportedCapability(CAPABILITY, message)
+
+
+def _editable_unsupported(message):
+    raise UnsupportedCapability(EDITABLE_CAPABILITY, message)
 
 
 def _text(value, label, *, allow_empty=False):
@@ -180,6 +195,128 @@ def _files(project):
     return name, files
 
 
+def _editable_distribution(
+    root: Path, source: str, raw: bytes, document: dict, entry: dict, expand_inputs
+):
+    build = mapping(document.get("build-system", {}), "build-system")
+    if "backend-path" in build:
+        _editable_unsupported("in-tree build backends are not supported")
+    if "project" not in document:
+        _editable_unsupported("editable distribution requires a project table")
+    project = mapping(document["project"], "project")
+    if "dynamic" in project:
+        dynamic = sequence(project["dynamic"], "project.dynamic")
+        if "name" in dynamic or "version" in dynamic:
+            _editable_unsupported("editable distribution requires static project name and version")
+    if "version" not in project:
+        _editable_unsupported("project requires a static version")
+    name = _normalized_name(project.get("name"), "project.name")
+    try:
+        Version(_text(project["version"], "project.version"))
+    except InvalidVersion as error:
+        raise DeclarationError("invalid project.version") from error
+    build_inputs = sequence(entry.get("build_inputs", []), "distribution.build_inputs")
+    inputs = sorted(
+        {
+            *expand_inputs([source], "distribution metadata"),
+            *expand_inputs(build_inputs, "distribution build inputs"),
+        }
+    )
+    input_set = set(inputs)
+    directory = PurePosixPath(source).parent.as_posix()
+    source_hashes = {}
+    records = []
+    size = 0
+    for item in inputs:
+        try:
+            with parent_fd(root, item) as (parent, leaf):
+                before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+                if stat.S_ISLNK(before.st_mode):
+                    target = os.readlink(leaf, dir_fd=parent)
+                    if Path(target).is_absolute():
+                        raise DeclarationError("leaf symlinks must use relative targets")
+                    resolved = (root / item).resolve(strict=False)
+                    if (
+                        not resolved.is_relative_to(root)
+                        or resolved.relative_to(root).as_posix() not in input_set
+                    ):
+                        raise DeclarationError(
+                            "editable build input symlink target must be declared in build_inputs"
+                        )
+                    after = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+                    if (before.st_ino, before.st_mtime_ns, target) != (
+                        after.st_ino,
+                        after.st_mtime_ns,
+                        os.readlink(leaf, dir_fd=parent),
+                    ):
+                        raise InfrastructureError("input changed while freezing its snapshot")
+                    records.append(
+                        {
+                            "format": EDITABLE_FORMAT,
+                            "distribution": name,
+                            "directory": directory,
+                            "path": item,
+                            "kind": "symlink",
+                            "target": target,
+                        }
+                    )
+                elif stat.S_ISDIR(before.st_mode):
+                    records.append(
+                        {
+                            "format": EDITABLE_FORMAT,
+                            "distribution": name,
+                            "directory": directory,
+                            "path": item,
+                            "kind": "directory",
+                            "mode": 0o755,
+                        }
+                    )
+                elif stat.S_ISREG(before.st_mode):
+                    content, measured = regular_bytes(
+                        root,
+                        item,
+                        MAX_EDITABLE_FILE_BYTES,
+                        oversize="editable build input exceeds its file size limit",
+                    )
+                    size += len(content)
+                    if size > MAX_EDITABLE_TOTAL_BYTES:
+                        raise DeclarationError("editable build inputs exceed the size limit")
+                    digest = hashlib.sha256(content).hexdigest()
+                    mode = 0o444 | (stat.S_IMODE(measured.st_mode) & 0o111)
+                    source_hashes[item] = digest
+                    records.append(
+                        {
+                            "format": EDITABLE_FORMAT,
+                            "distribution": name,
+                            "directory": directory,
+                            "path": item,
+                            "kind": "file",
+                            "sha256": digest,
+                            "size": len(content),
+                            "mode": mode,
+                        }
+                    )
+                else:
+                    raise DeclarationError(
+                        "inputs must be regular files, directories, or leaf symlinks"
+                    )
+        except OSError as error:
+            raise DeclarationError("cannot read declared distribution build input") from error
+    source_hashes[source] = hashlib.sha256(raw).hexdigest()
+    return (
+        Distribution(
+            name,
+            inputs,
+            source_hashes,
+            {},
+            format=EDITABLE_FORMAT,
+            directory=directory,
+            input_records=tuple(records),
+        ),
+        size,
+    )
+
+
 def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Distribution]:
     """Freeze sources and translate configured aliases without running project code."""
     entries = mapping(entries, "distributions")
@@ -188,13 +325,17 @@ def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Di
     result = {}
     names = set()
     total = 0
+    editable_total = 0
     for alias, entry in sorted(entries.items()):
         _text(alias, "distribution alias")
         entry = mapping(entry, "distribution", {"format", "metadata", "build_inputs"})
-        if entry.get("format") != FORMAT:
-            _unsupported("distribution requires format pep621-static-v1")
+        fmt = entry.get("format")
+        if fmt not in {FORMAT, EDITABLE_FORMAT}:
+            _unsupported("distribution requires format pep621-static-v1 or editable-v1")
         source = relative(_text(entry.get("metadata"), "distribution.metadata"))
         if Path(source).name != "pyproject.toml":
+            if fmt == EDITABLE_FORMAT:
+                _editable_unsupported("editable distribution requires a pyproject.toml source")
             _unsupported("static metadata requires a pyproject.toml source")
         try:
             raw, _ = regular_bytes(root, source, MAX_SOURCE_BYTES)
@@ -204,6 +345,18 @@ def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Di
             document = tomllib.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
             raise DeclarationError("invalid distribution metadata TOML") from error
+        if fmt == EDITABLE_FORMAT:
+            distribution, editable_size = _editable_distribution(
+                root, source, raw, document, entry, expand_inputs
+            )
+            if distribution.name in names:
+                raise DeclarationError("duplicate normalized distribution name")
+            names.add(distribution.name)
+            editable_total += editable_size
+            if editable_total > MAX_EDITABLE_TOTAL_BYTES:
+                raise DeclarationError("editable build inputs exceed the total size limit")
+            result[alias] = distribution
+            continue
         build = mapping(document.get("build-system", {}), "build-system")
         if "backend-path" in build:
             _unsupported("in-tree build backends are not supported")
@@ -223,20 +376,51 @@ def load_distributions(root: Path, entries: dict, expand_inputs) -> dict[str, Di
                 *expand_inputs(build_inputs, "distribution build inputs"),
             }
         )
-        result[alias] = Distribution(name, inputs, {source: hashlib.sha256(raw).hexdigest()}, files)
+        result[alias] = Distribution(
+            name,
+            inputs,
+            {source: hashlib.sha256(raw).hexdigest()},
+            files,
+            format=FORMAT,
+            directory=PurePosixPath(source).parent.as_posix(),
+        )
     return result
 
 
-def _selected_files(distributions, names):
+def _selected_names(distributions, names):
     selected = sequence(names, "selected distributions")
-    if len(set(selected)) > MAX_DISTRIBUTIONS:
+    unique = sorted(set(selected))
+    if len(unique) > MAX_DISTRIBUTIONS:
         raise DeclarationError("too many selected distributions")
-    files = {}
-    total = 0
-    for name in sorted(set(selected)):
+    for name in unique:
         if name not in distributions:
             raise DeclarationError("unknown selected distribution")
+    return unique
+
+
+def selected_editable_distributions(distributions, names) -> tuple[Distribution, ...]:
+    """Return selected editable-v1 distributions ordered deterministically by package name."""
+    unique = _selected_names(distributions, names)
+    return tuple(
+        sorted(
+            (
+                distributions[name]
+                for name in unique
+                if distributions[name].format == EDITABLE_FORMAT
+            ),
+            key=lambda distribution: distribution.name,
+        )
+    )
+
+
+def _selected_files(distributions, names):
+    unique = _selected_names(distributions, names)
+    files = {}
+    total = 0
+    for name in unique:
         distribution = distributions[name]
+        if distribution.format == EDITABLE_FORMAT:
+            continue
         size = 0
         if len(distribution.files) > 2:
             raise DeclarationError("invalid generated metadata files")
@@ -260,10 +444,13 @@ def _selected_files(distributions, names):
 
 def metadata_records(distributions, names):
     """Return deterministic selected representation identity for case keys."""
-    return [
+    records = [
         {"path": path, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
         for path, data in _selected_files(distributions, names).items()
     ]
+    for distribution in selected_editable_distributions(distributions, names):
+        records.extend(distribution.input_records)
+    return records
 
 
 def materialize_metadata(distributions, names, destination: Path) -> None:

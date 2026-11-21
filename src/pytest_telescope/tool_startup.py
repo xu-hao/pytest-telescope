@@ -85,7 +85,16 @@ class Startup:
                 layout("native startup prefix overlaps the project")
             if any(
                 current.is_relative_to(p) or Path(p).is_relative_to(current)
-                for p in ("/proc", "/dev", "/sys", "/run", "/tools", "/telescope", "/metadata")
+                for p in (
+                    "/proc",
+                    "/dev",
+                    "/sys",
+                    "/run",
+                    "/tools",
+                    "/telescope",
+                    "/metadata",
+                    "/env",
+                )
             ):
                 layout("native startup prefix overlaps a protocol or control path")
         minor = (version >> 16) & 255

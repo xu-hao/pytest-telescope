@@ -225,7 +225,7 @@ def _entry(value):
     return dict(value)
 
 
-def _root(value, project):
+def _root(value, project, *, rootfs_configured=False):
     exact(value, ROOT_FIELDS)
     named(value["id"])
     if type(value["coverage"]) is not str or value["coverage"] not in {"tree", "files"}:
@@ -241,16 +241,17 @@ def _root(value, project):
         or project.is_relative_to(source)
         or PROTECTED_PARTS.intersection(source.parts)
         or source.name in {"site-packages", "dist-packages"}
-        or source == PurePosixPath(Path.home())
+        or (not rootfs_configured and source == PurePosixPath(Path.home()))
         or (
-            value["coverage"] == "tree"
+            not rootfs_configured
+            and value["coverage"] == "tree"
             and source in {PurePosixPath(sys.prefix), PurePosixPath(sys.base_prefix)}
         )
         or source in map(PurePosixPath, ("/home", "/root", "/tmp", "/dev/shm"))
         or (source.is_relative_to("/dev") and not source.is_relative_to("/dev/shm"))
         or any(
             source.is_relative_to(prefix)
-            for prefix in ("/proc", "/run", "/sys", "/tools", "/telescope", "/metadata")
+            for prefix in ("/proc", "/run", "/sys", "/tools", "/telescope", "/metadata", "/env")
         )
         or (
             value["coverage"] == "tree"
@@ -303,7 +304,7 @@ def _references(value, roots):
     return refs
 
 
-def parse(project, name, registration):
+def parse(project, name, registration, *, rootfs_configured=False):
     """Read only declared project JSON and validate its exact supported structure."""
     try:
         raw, _ = regular_bytes(project, registration["manifest"], MAX_MANIFEST_BYTES)
@@ -322,7 +323,10 @@ def parse(project, name, registration):
         invalid()
     if document["schema"] != 1:
         unsupported("frozen-v1", "unsupported frozen-tool manifest version")
-    roots = [_root(row, PurePosixPath(project)) for row in items(document["roots"], MAX_ROOTS)]
+    roots = [
+        _root(row, PurePosixPath(project), rootfs_configured=rootfs_configured)
+        for row in items(document["roots"], MAX_ROOTS)
+    ]
     unique([row["id"] for row in roots])
     root_map = {row["id"]: row for row in roots}
     entries = {row["id"]: {entry["path"]: entry for entry in row["entries"]} for row in roots}
@@ -426,11 +430,14 @@ def parse(project, name, registration):
     )
 
 
-def load_selected(project, definitions, names):
+def load_selected(project, definitions, names, *, rootfs_configured=False):
     """Unreferenced registrations never cause external or manifest I/O."""
     if set(names) - definitions.keys():
         invalid()
-    result = {name: parse(project, name, definitions[name]) for name in sorted(set(names))}
+    result = {
+        name: parse(project, name, definitions[name], rootfs_configured=rootfs_configured)
+        for name in sorted(set(names))
+    }
     if sum(len(tool.raw) for tool in result.values()) > MAX_TOTAL_MANIFEST_BYTES:
         unsupported("bounds", "selected frozen-tool manifests exceed their aggregate limit")
     if (

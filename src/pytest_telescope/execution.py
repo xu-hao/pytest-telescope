@@ -3,6 +3,7 @@
 import configparser
 import hashlib
 import json
+import os
 import shlex
 import tomllib
 from dataclasses import dataclass
@@ -33,7 +34,79 @@ def execution_config(config):
     for name, message in REMOVED_EXECUTION.items():
         if name in config:
             raise DeclarationError(message)
-    return mapping(config, "execution", {"mode", "workers", "result_store"})
+    return mapping(
+        config, "execution", {"mode", "workers", "result_store", "rootfs", "rootfs_python"}
+    )
+
+
+def _path_text(value, label, *, allow_pathlike=False):
+    if isinstance(value, bool) or not isinstance(
+        value, (str, os.PathLike) if allow_pathlike else str
+    ):
+        raise DeclarationError(f"{label} requires a nonempty path string")
+    text = os.fspath(value)
+    if not isinstance(text, str) or not text:
+        raise DeclarationError(f"{label} requires a nonempty path string")
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeError as exc:
+        raise DeclarationError(f"{label} requires valid UTF-8") from exc
+    if len(encoded) > 4096 or any(ord(char) < 32 or ord(char) == 127 for char in text):
+        raise DeclarationError(f"{label} exceeds 4096 bytes or contains control characters")
+    return text
+
+
+def _rootfs_python_path(value, *, allow_pathlike=False):
+    text = _path_text(value, "rootfs_python", allow_pathlike=allow_pathlike)
+    parsed = PurePosixPath(text)
+    if (
+        not text.startswith("/")
+        or text.startswith("//")
+        or text == "/"
+        or "\\" in text
+        or parsed.as_posix() != text
+        or len(parsed.parts) > 64
+        or any(part in ("", ".", "..") for part in text.split("/")[1:])
+    ):
+        raise DeclarationError("rootfs_python requires a canonical absolute interpreter path")
+    return text
+
+
+def rootfs_settings(config, rootfs=None, rootfs_python=None, *, root=None):
+    """Validate optional unpacked rootfs and rootfs interpreter settings."""
+    config = execution_config(config)
+    configured_rootfs = (
+        None if config.get("rootfs") is None else _path_text(config["rootfs"], "execution.rootfs")
+    )
+    configured_python = (
+        None
+        if config.get("rootfs_python") is None
+        else _rootfs_python_path(config["rootfs_python"])
+    )
+    override_rootfs = None if rootfs is None else _path_text(rootfs, "rootfs", allow_pathlike=True)
+    override_python = (
+        None if rootfs_python is None else _rootfs_python_path(rootfs_python, allow_pathlike=True)
+    )
+    chosen_rootfs = configured_rootfs if override_rootfs is None else override_rootfs
+    chosen_python = configured_python if override_python is None else override_python
+    if chosen_rootfs is None:
+        if chosen_python is not None:
+            raise DeclarationError("rootfs_python requires rootfs")
+        return None, None
+    candidate = (
+        Path(root) / chosen_rootfs
+        if override_rootfs is None and root is not None and not os.path.isabs(chosen_rootfs)
+        else Path(chosen_rootfs)
+    )
+    try:
+        if not candidate.exists() or not candidate.is_dir():
+            raise DeclarationError("rootfs must name an existing directory")
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise DeclarationError("rootfs must name an existing directory") from exc
+    if resolved != Path("/") and chosen_python is None:
+        raise DeclarationError("unpacked rootfs requires rootfs_python")
+    return resolved, chosen_python
 
 
 def worker_count(config, override=None):

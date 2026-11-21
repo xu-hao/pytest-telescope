@@ -68,10 +68,12 @@ invocation. Inside, the filesystem looks like this:
 | Path in the sandbox | Contents | Access |
 | --- | --- | --- |
 | `/project` | Frozen copy of the effective declared project files for this case or batch | read-only |
+| `/metadata` | Static `pep621-static-v1` distribution metadata selected by this unit | read-only |
+| `/env` | Cached virtual environment materialized for `editable-v1` distributions selected by this unit (absent when none are selected) | read-only |
 | The project directory's host path | Absent: nothing is mounted there | none |
-| Host interpreter and environment paths | `sys.prefix`, base and exec prefixes, and every import directory on the interpreter's isolated `sys.path` outside the project, at their host paths | read-only |
+| Interpreter and environment paths | `sys.prefix`, base and exec prefixes, and every import directory on the interpreter's isolated `sys.path` outside the project, from the host or unpacked `rootfs` | read-only |
 | Environment files that name the project directory | Rewritten copies in which that directory reads `/project`, over the originals | read-only |
-| `/usr`, `/etc`, `/bin`, `/sbin`, `/lib*` | Host system directories (symbolic links stay links) | read-only |
+| `/usr`, `/etc`, `/bin`, `/sbin`, `/lib*` | System directories from the host or unpacked `rootfs` (symbolic links stay links) | read-only |
 | `/proc` | A new process filesystem for the sandbox's PID namespace | kernel-controlled |
 | `/dev` | Minimal device nodes | read-only, except `/dev/shm` |
 | `/tmp`, `/dev/shm` | Private, empty, discarded scratch | writable |
@@ -337,9 +339,70 @@ all marker declarations; invalid names refuse before any session starts. See the
 Suite plugins are loaded explicitly; autoload remains disabled.
 
 Selected tools may prepend their readonly command directory to the controlled PATH.
+When a unit selects one or more `editable-v1` project distributions, `/env/bin` is also
+prepended ahead of the base interpreter directory, and the worker starts as
+`/env/bin/python -I -B /telescope/worker.py`.
 Conflicting effective environment declarations refuse rather than being overwritten;
 the [tool reference](bubblewrap-api.md#scripts-and-pinned-command-lookup) defines this
 scope-local rule. Nonconsumers retain the environment behavior above.
+
+### Unpacked container rootfs views
+
+A bare-metal Linux host and a container worker can run the exact same `/usr`, `/etc`,
+`/lib*`, and Python environment by pointing `--rootfs` at an unpacked container root
+filesystem directory and `--rootfs-python` at the interpreter path inside that view
+(for example `/opt/venv/bin/python` or `/usr/local/bin/python3`). When `rootfs` is
+omitted, scoped sandboxes use the host's own system directories and invoking
+interpreter unchanged. When `rootfs` is `/`, scoped sandboxes use `/` with
+`rootfs_python` (or the invoking interpreter if `rootfs_python` is omitted).
+
+When `rootfs` names an unpacked directory other than `/`, Bubblewrap mounts
+`<rootfs>/usr` at `/usr`, `<rootfs>/etc` at `/etc`, `<rootfs>`'s `/bin`, `/sbin`, and
+`/lib*` links or directories, and the environment prefixes inside `<rootfs>` required by
+`rootfs_python` (such as `<rootfs>/opt/venv` at `/opt/venv`). Neither `rootfs_python`
+nor its environment prefixes may overlap `/project`, `/metadata`, `/env`, `/telescope`,
+`/tools`, `/proc`, `/dev`, or `/tmp`. The controller runs its environment probe inside
+that Bubblewrap rootfs view and resolves any declared frozen tools against `<rootfs>`.
+Running on a host with `--rootfs <unpacked_dir> --rootfs-python <interp>` therefore
+computes the same `sandbox.identity`, local cache keys, and [remote result
+store](result-store.md) keys as running inside a container whose `/` contains that
+identical tree with `--rootfs / --rootfs-python <interp>`.
+
+### Isolated `editable-v1` project distributions
+
+Declaring `[tool.pytest_telescope.distributions.<alias>]` with `format = "editable-v1"`,
+`metadata = "<dir>/pyproject.toml"`, and optional `build_inputs = [...]` lets individual
+scoped units install only their declared project distributions into an isolated,
+read-only virtual environment at `/env`, without installing project packages into the
+base environment.
+
+For each unique combination of `sandbox.identity` and the frozen SHA-256 digests of the
+selected `editable-v1` distributions' `metadata` and `build_inputs`, the controller
+builds and caches a virtual environment under `<cache_dir>/environments` (or private
+invocation scratch when `--no-cache` is set) inside Bubblewrap with only those frozen
+build inputs mounted read-only at `/project`:
+
+1. `<box.executable> -m venv --system-site-packages --without-pip /env`
+2. `<box.executable> -m pip --python /env/bin/python install --no-index --no-deps --no-build-isolation --no-compile -e /project/<dir> ...`
+
+When the base interpreter is itself a virtual environment, `/env` bridges only that
+base environment's site directories and matches its `include-system-site-packages`
+setting so host system packages excluded by the base environment stay excluded. The
+resulting directory is frozen read-only and mounted at `/env` during scoped collection,
+fixture-guard capture and inspection, and case, batch, or guarded-batch execution.
+Because the worker starts as `/env/bin/python -I -B /telescope/worker.py`,
+`sys.executable` is `/env/bin/python`:
+
+- `importlib.metadata` and `entry_points()` expose only the base environment plus the
+  unit's declared distributions (including any co-selected `pep621-static-v1`
+  distributions mounted at `/metadata`).
+- Isolated child processes such as `[sys.executable, "-I", "-m", "<pkg>.<mod>"]` import
+  declared source files below `/project`, while undeclared modules and undeclared
+  sibling distributions fail with `ModuleNotFoundError` or `PackageNotFoundError`.
+- Editing an unselected distribution's `pyproject.toml` does not invalidate cached
+  results of units that did not declare it.
+- Declaring an `editable-v1` distribution whose normalized name is already installed in
+  the base environment refuses with `project-metadata:runtime-conflict`.
 
 Bubblewrap creates a user namespace, a mount namespace and a PID namespace. The PID
 namespace is required for a correct view: the host `/proc` would expose other processes'
@@ -573,10 +636,12 @@ that refuses or stops after ordinary sessions started does not prove that no tes
 | --- | --- |
 | `bwrap` is not installed | `unsupported`, `sandbox:bubblewrap` |
 | Bubblewrap cannot create the user, mount or PID namespace | `unsupported`, `sandbox:namespaces` |
-| The interpreter cannot start in the view, an environment prefix contains the project, or an environment directory outside the project overlaps a path the sandbox mounts itself (`/project`, `/metadata`, `/telescope`, `/proc`, `/dev`, or contains `/tmp`) | `unsupported`, `sandbox:environment` |
+| The interpreter cannot start in the view, an unpacked `rootfs` lacks `/usr` or `/etc` or overlaps the project, `rootfs_python` is missing or non-executable, an environment prefix contains the project, or an environment directory outside the project overlaps a path the sandbox mounts itself (`/project`, `/metadata`, `/env`, `/telescope`, `/proc`, `/dev`, or `/tools`/`/tmp` for an unpacked `rootfs`, or contains `/tmp`) | `unsupported`, `sandbox:environment` |
 | The sandbox would show the project's live files: the project lives in `/usr` or `/etc`, or is `/` | `unsupported`, `sandbox:environment` |
 | An environment file that names the project directory is too large to show rewritten | `unsupported`, `sandbox:environment` |
 | An [environment inside the project](#an-environment-inside-the-project) depends on its host location: its `conda-meta` records list a file with its location written in that the sandbox does not show rewritten, or the records are over their bound or cannot be read | `unsupported`, `sandbox:environment` |
+| An `editable-v1` distribution uses an in-tree `backend-path`, omits static `[project]` name/version, or fails isolated `venv` / `pip install --no-index --no-deps --no-build-isolation` creation inside Bubblewrap | `unsupported`, `metadata:editable-v1` |
+| Declared `pep621-static-v1` or `editable-v1` distribution metadata collides with a distribution installed in the base environment | `unsupported`, `project-metadata:runtime-conflict` |
 | A suite requests `network:none` or `scratch:noexec` | `unsupported`, that capability |
 | Invalid, unsupported or mutated declaration | `declaration_error` |
 
