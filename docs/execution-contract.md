@@ -666,7 +666,8 @@ rerun; the case must pass again before its result can be reused.
 Each unit can report up to 64 failure entries containing a project-relative file, line
 number, phase (`collect`, `setup`, `call`, or `teardown`), exception type, and hashed
 case identity. Collection failures use `CollectionError` and may have line zero.
-Locations outside the project are labeled `<runtime>`. A location in a project file is
+Locations outside the project or without a project file path (such as generated code or
+a relative code filename) are labeled `<runtime>`. A location in a project file is
 project-relative however the file was imported, including a project module loaded
 through an editable install. Exception messages, source
 snippets, parameter values, stdout/stderr contents, and environment values are not
