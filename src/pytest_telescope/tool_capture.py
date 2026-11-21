@@ -387,7 +387,10 @@ class Capture:
                     raise error
 
     def __exit__(self, *exc):
-        self._cleanup()
+        from .sandbox import ignore_termination_signals
+
+        with ignore_termination_signals():
+            self._cleanup()
 
     def _cleanup(self):
         self.owned_directories.close()

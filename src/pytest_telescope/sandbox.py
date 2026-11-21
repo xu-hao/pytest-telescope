@@ -422,6 +422,20 @@ def recover(root):
 
 
 @contextmanager
+def ignore_termination_signals():
+    """Ignore further SIGINT and SIGTERM in the main thread while draining or cleaning up."""
+    previous = {}
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous[signum] = signal.signal(signum, signal.SIG_IGN)
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+@contextmanager
 def invocation(root):
     """A private scratch directory, locked by its owner and removed afterwards."""
     state = _state(root)
@@ -436,15 +450,22 @@ def invocation(root):
         descriptor = os.open(directory / "owner.lock", os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
     previous = {}
+    completed = False
 
     def interrupted(signum, frame):
+        for handled in previous:
+            signal.signal(handled, signal.SIG_IGN)
         raise InvocationInterrupted("controller interrupted; owned sandboxes stopped")
 
+    interrupted._telescope_interrupt = True
     if threading.current_thread() is threading.main_thread():
         for signum in (signal.SIGTERM, signal.SIGINT):
-            previous[signum] = signal.signal(signum, interrupted)
+            current = signal.getsignal(signum)
+            if current != signal.SIG_IGN:
+                previous[signum] = signal.signal(signum, interrupted)
     try:
         yield directory
+        completed = True
     finally:
         # Cleanup must finish even when a second termination signal arrives.
         for signum in previous:
@@ -454,7 +475,8 @@ def invocation(root):
         finally:
             os.close(descriptor)
             for signum, handler in previous.items():
-                signal.signal(signum, handler)
+                if completed or not getattr(handler, "_telescope_interrupt", False):
+                    signal.signal(signum, handler)
 
 
 def _probe(executable, project):

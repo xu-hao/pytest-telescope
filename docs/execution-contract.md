@@ -347,8 +347,11 @@ owned tool material, not caller CPU, memory, process or filesystem resource poli
 A late typed declaration/capability refusal preserves its type and capability while
 retaining available session observations in the strict versioned
 [refusal accounting](result-schema.md#retained-observations-after-a-late-refusal)
-object. It is still a refusal, with no nested overall success verdict and no pending
-publication. An early refusal has no accounting object; bounded unavailability is explicit.
+object, unless a terminal cleanup failure occurs in another unit of the same phase or
+during outer invocation cleanup, in which case the cleanup failure supersedes the
+refusal and the invocation reports an infrastructure failure. Otherwise it is still a
+refusal, with no nested overall success verdict and no pending publication. An early
+refusal has no accounting object; bounded unavailability is explicit.
 
 Public evidence identifies tool names and failure categories, never external source
 paths, file contents, secret values or raw tool stderr. The cache and worker protocol
