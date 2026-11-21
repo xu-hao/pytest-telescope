@@ -451,6 +451,125 @@ def qualified_framework_identity(session, definition, identities):
     )
 
 
+def fixture_source_roots(
+    project_root=None,
+    *,
+    metadata_root="/metadata",
+    env_root="/env",
+    paths=None,
+    base_paths=None,
+    prefixes=None,
+):
+    """Ordered `(resolved_root, role)` pairs for normalizing worker fixture and plugin files."""
+    import sysconfig
+
+    root = PROJECT_ROOT if project_root is None else project_root
+    if root is None:
+        raise ValueError("missing project root")
+    active_paths = sysconfig.get_paths() if paths is None else paths
+    if base_paths is None and paths is None and prefixes is None:
+        base_vars = {
+            "base": sys.base_prefix,
+            "platbase": sys.base_exec_prefix,
+            "installed_base": sys.base_prefix,
+            "installed_platbase": sys.base_exec_prefix,
+        }
+        base_paths = sysconfig.get_paths(vars=base_vars)
+    active_prefixes = (
+        (
+            ("prefix", sys.prefix),
+            ("exec_prefix", sys.exec_prefix),
+            ("base_prefix", sys.base_prefix),
+            ("base_exec_prefix", sys.base_exec_prefix),
+        )
+        if prefixes is None
+        else tuple(prefixes)
+    )
+    candidates = [("project", root)]
+    if metadata_root is not None:
+        candidates.append(("metadata", metadata_root))
+    if isinstance(active_paths, dict):
+        for role in ("purelib", "platlib", "stdlib", "platstdlib"):
+            value = active_paths.get(role)
+            if value:
+                candidates.append((role, value))
+    if isinstance(base_paths, dict):
+        for role in ("purelib", "platlib", "stdlib", "platstdlib"):
+            value = base_paths.get(role)
+            if value:
+                candidates.append((role, value))
+    if paths is None and prefixes is None:
+        import site
+
+        for site_dir in site.getsitepackages():
+            if site_dir:
+                candidates.append(("purelib", site_dir))
+    if env_root is not None and os.path.lexists(env_root):
+        env_text = os.fspath(env_root)
+        env_vars = {
+            "base": env_text,
+            "platbase": env_text,
+            "installed_base": env_text,
+            "installed_platbase": env_text,
+        }
+        env_paths = sysconfig.get_paths(vars=env_vars)
+        for role in ("purelib", "platlib"):
+            value = env_paths.get(role)
+            if value:
+                candidates.append((role, value))
+    candidates.extend(active_prefixes)
+    if env_root is not None and os.path.lexists(env_root):
+        candidates.append(("env", env_root))
+
+    by_resolved = {}
+    for role, raw in candidates:
+        if raw is None:
+            continue
+        text = os.fspath(raw)
+        if type(text) is not str or not os.path.isabs(text):
+            if role == "project":
+                raise ValueError("invalid project root")
+            continue
+        resolved = Path(text).resolve()
+        if resolved == Path("/"):
+            if role == "project":
+                raise ValueError("invalid project root")
+            continue
+        by_resolved.setdefault(resolved, role)
+    if not any(role == "project" for role in by_resolved.values()):
+        raise ValueError("invalid project root")
+    return tuple(sorted(by_resolved.items(), key=lambda item: (-len(item[0].parts), str(item[0]))))
+
+
+def normalize_fixture_source_path(path, roots=None):
+    """Normalize a `.py` fixture or plugin path to `<role>:<relpath>` or fail closed."""
+    raw = os.fspath(path)
+    if type(raw) is not str or not os.path.isabs(raw):
+        raise ValueError("invalid fixture source path")
+    resolved = Path(raw).resolve(strict=True)
+    if resolved.suffix != ".py":
+        raise ValueError("unsupported fixture source")
+    admitted = fixture_source_roots() if roots is None else roots
+    for root_path, role in admitted:
+        if resolved == root_path or not resolved.is_relative_to(root_path):
+            continue
+        rel = resolved.relative_to(root_path)
+        rel_text = rel.as_posix()
+        if (
+            not rel_text
+            or rel_text == "."
+            or len(rel.parts) > 64
+            or any(ord(char) < 32 for char in rel_text)
+            or "\\" in rel_text
+        ):
+            raise ValueError("invalid fixture source path")
+        normalized = f"{role}:{rel_text}"
+        if len(normalized.encode("utf-8")) > 4096:
+            raise ValueError("invalid fixture source path")
+        return normalized
+    raise ValueError("fixture source outside admitted roots")
+
+
 def fixture_inspection_rows(session, items, case_ids, suite, identities):
     """Construct bounded opaque per-item records from actual available fixtures.
 
@@ -469,7 +588,9 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
     ):
         raise ValueError("invalid fixture inspection membership")
     result = []
+    roots = fixture_source_roots()
     source_hashes = {}
+    normalized_paths = {}
     source_bytes = 0
     available, _ = available_fixture_definitions(session, items)
     for (item, definitions), case in zip(available, case_ids):
@@ -538,6 +659,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
             if path.suffix != ".py":
                 raise ValueError("unsupported fixture source")
             if path not in source_hashes:
+                normalized_paths[path] = normalize_fixture_source_path(path, roots)
                 with path.open("rb") as stream:
                     data = stream.read(MAX_INVENTORY + 1)
                 if len(data) > MAX_INVENTORY:
@@ -559,7 +681,7 @@ def fixture_inspection_rows(session, items, case_ids, suite, identities):
                 canonical(
                     {
                         "module": function.__module__,
-                        "path": str(path),
+                        "path": normalized_paths[path],
                         "source": source_hashes[path],
                         "line": code.co_firstlineno,
                         "qualname": function.__qualname__,
@@ -623,7 +745,8 @@ def fixture_registry_commitment(session, items, identities, observer):
     import types
 
     _, definitions = available_fixture_definitions(session, items)
-    entries, source_hashes = [], {}
+    roots = fixture_source_roots()
+    entries, source_hashes, normalized_paths = [], {}, {}
     source_bytes = 0
     for definition in definitions:
         function = definition.func
@@ -638,6 +761,7 @@ def fixture_registry_commitment(session, items, identities, observer):
         if path.suffix != ".py":
             raise ValueError("unsupported fixture source")
         if path not in source_hashes:
+            normalized_paths[path] = normalize_fixture_source_path(path, roots)
             with path.open("rb") as stream:
                 data = stream.read(MAX_INVENTORY + 1)
             if len(data) > MAX_INVENTORY:
@@ -662,7 +786,7 @@ def fixture_registry_commitment(session, items, identities, observer):
             {
                 "name": definition.argname,
                 "module": function.__module__,
-                "path": str(path),
+                "path": normalized_paths[path],
                 "source": source_hashes[path],
                 "line": function.__code__.co_firstlineno,
                 "qualname": function.__qualname__,
@@ -702,6 +826,7 @@ def fixture_registry_commitment(session, items, identities, observer):
         if path.suffix != ".py":
             raise ValueError("unsupported plugin source")
         if path not in source_hashes:
+            normalized_paths[path] = normalize_fixture_source_path(path, roots)
             with path.open("rb") as stream:
                 data = stream.read(MAX_INVENTORY + 1)
             if len(data) > MAX_INVENTORY:
@@ -717,7 +842,7 @@ def fixture_registry_commitment(session, items, identities, observer):
                 "name": name,
                 "module": module.__name__,
                 "kind": kind,
-                "path": str(path),
+                "path": normalized_paths[path],
                 "source": source_hashes[path],
             }
         )
