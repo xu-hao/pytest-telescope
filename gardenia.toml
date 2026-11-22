@@ -1,5 +1,5 @@
 # Tracked repository profile managed by gardenia.
-gate = "python scripts/check.py --functional-workers 4 --artifacts <new-dir>"
+gate = 'python scripts/check.py --functional-workers 4 --artifacts "$(mktemp -u "${TMPDIR:-/var/tmp}/telescope-gate.XXXXXX")"'
 cpu = 4
 memory_gb = 8
 tmpfs_gb = 4
