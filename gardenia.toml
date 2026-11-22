@@ -1,0 +1,10 @@
+# Tracked repository profile managed by gardenia.
+gate = "python scripts/check.py --functional-workers 4 --artifacts <new-dir>"
+cpu = 4
+memory_gb = 8
+tmpfs_gb = 4
+no_overflow = true
+routing = "agroute"
+agcoord = "auto"
+docs_exemption = true
+claude_symlink = true
