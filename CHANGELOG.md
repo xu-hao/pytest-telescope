@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- **Accept harmless `uv venv` metadata keys in frozen native `pyvenv.cfg` validation.**
+  Closed native startup validation for frozen virtual environments now accepts the
+  informational metadata keys written by `uv venv` (`implementation` matching `cpython`
+  case-insensitively, `uv`, `version_info`, `seed` as `true` or `false`, `relocatable`
+  as `true` or `false`, and `gourgeist`) alongside the standard stdlib `venv` keys, and
+  binds the normalized `pyvenv.cfg` mapping into startup view identity. Unknown and
+  startup-altering keys (such as `applocal`, `venvlauncher`, and `virtualenv`
+  `base-prefix` rewrites) continue to refuse with `tool:layout`.
+
 ## 0.2.0
 
 Unpacked container rootfs views, isolated `editable-v1` project distributions,

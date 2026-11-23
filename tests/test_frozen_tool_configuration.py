@@ -220,24 +220,13 @@ def test_environment_overlay_outside_closed_prefix_refuses(configured):
     assert caught.value.capability == "tool:layout"
 
 
-@pytest.mark.parametrize(
-    "case", ["valid", "missing", "oversize", "wrong-home", "duplicate", "unknown-key"]
-)
-def test_owned_venv_path_model_requires_exact_bounded_configuration(configured, case):
-    # This is a Startup path-model fixture, not an executed virtual environment.
+def _configure_venv(configured, content):
     venv = configured.prefix / "venv"
-    (venv / "bin").mkdir(parents=True)
-    (venv / "bin/python").symlink_to(str(configured.executable))
-    content = f"home = {configured.prefix}/bin\ninclude-system-site-packages = false\n"
-    if case == "oversize":
-        content += "prompt = " + "x" * 65536
-    elif case == "wrong-home":
-        content = content.replace(str(configured.prefix / "bin"), "/outside/bin")
-    elif case == "duplicate":
-        content += "home = duplicate\n"
-    elif case == "unknown-key":
-        content += "unknown = value\n"
-    if case != "missing":
+    (venv / "bin").mkdir(parents=True, exist_ok=True)
+    python = venv / "bin/python"
+    if not python.is_symlink():
+        python.symlink_to(str(configured.executable))
+    if content is not None:
         put(venv, "pyvenv.cfg", content)
 
     def change(description):
@@ -251,8 +240,26 @@ def test_owned_venv_path_model_requires_exact_bounded_configuration(configured, 
         )
 
     configured.description(change)
-    configured.box = replace(configured.box, executable=str(venv / "bin/python"))
+    configured.box = replace(configured.box, executable=str(python))
     configured.save()
+    return venv
+
+
+@pytest.mark.parametrize(
+    "case", ["valid", "missing", "oversize", "wrong-home", "duplicate", "unknown-key"]
+)
+def test_owned_venv_path_model_requires_exact_bounded_configuration(configured, case):
+    # This is a Startup path-model fixture, not an executed virtual environment.
+    content = f"home = {configured.prefix}/bin\ninclude-system-site-packages = false\n"
+    if case == "oversize":
+        content += "prompt = " + "x" * 65536
+    elif case == "wrong-home":
+        content = content.replace(str(configured.prefix / "bin"), "/outside/bin")
+    elif case == "duplicate":
+        content += "home = duplicate\n"
+    elif case == "unknown-key":
+        content += "unknown = value\n"
+    _configure_venv(configured, None if case == "missing" else content)
     if case == "valid":
         with configured.capture() as capture:
             assert capture.view(["native"]).native
@@ -261,6 +268,98 @@ def test_owned_venv_path_model_requires_exact_bounded_configuration(configured, 
             with configured.capture() as capture:
                 capture.view(["native"])
         assert caught.value.capability == "tool:layout"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "implementation = CPython\nuv = 0.11.24\nversion_info = 3.12.3\nseed = true\n",
+        "implementation = cpython\nuv = 0.11.24\nversion_info = 3.12.3\n",
+        (
+            "implementation = CPython\ngourgeist = 0.0.1\nversion_info = 3.12.3.final.0\n"
+            "seed = false\nrelocatable = false\nprompt = uv-env\n"
+        ),
+        "implementation = CPython\nuv = 0.11.24\nversion_info = 3.12.3\nrelocatable = true\n",
+    ],
+)
+def test_owned_venv_accepts_harmless_uv_metadata_keys(configured, extra):
+    base = f"home = {configured.prefix}/bin\ninclude-system-site-packages = false\n"
+    _configure_venv(configured, base + extra)
+    with configured.capture() as capture:
+        view = capture.view(["native"])
+        assert view.native
+
+
+def test_owned_venv_startup_identity_binds_normalized_pyvenv_cfg(configured):
+    from pytest_telescope import tool_startup
+
+    base = f"home = {configured.prefix}/bin\ninclude-system-site-packages = false\n"
+    _configure_venv(
+        configured,
+        base + "implementation = CPython\nuv = 0.11.24\nversion_info = 3.12.3\nseed = true\n",
+    )
+    with configured.capture() as capture:
+        first_view = capture.view(["native"])
+        first_startup = capture.views[("native",)].startup
+        assert first_view.startup_identity == tool_startup.signature(configured.box)
+        assert first_startup.signature == tool_startup.signature(configured.box)
+
+    # Key casing, implementation casing, line order, and surrounding whitespace
+    # normalize to the same Startup identity.
+    _configure_venv(
+        configured,
+        "SEED = true\n"
+        "Version_Info = 3.12.3\n"
+        "UV = 0.11.24\n"
+        "Implementation = cpython\n"
+        "INCLUDE-SYSTEM-SITE-PACKAGES = false\n"
+        f"HOME = {configured.prefix}/bin\n",
+    )
+    with configured.capture() as capture:
+        capture.view(["native"])
+        normalized_startup = capture.views[("native",)].startup
+        assert normalized_startup.identity == first_startup.identity
+        assert normalized_startup.signature == first_startup.signature
+
+    # Changing a metadata value changes both Startup identity and view identity.
+    _configure_venv(
+        configured,
+        base + "implementation = CPython\nuv = 0.11.25\nversion_info = 3.12.3\nseed = true\n",
+    )
+    with configured.capture() as capture:
+        updated_view = capture.view(["native"])
+        updated_startup = capture.views[("native",)].startup
+        assert updated_startup.identity != first_startup.identity
+        assert updated_view.identity != first_view.identity
+        assert updated_view.startup_identity == tool_startup.signature(configured.box)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "base-prefix = /outside\n",
+        "base-exec-prefix = /outside\n",
+        "base-executable = /usr/bin/python3\n",
+        "virtualenv = 20.26.0\n",
+        "applocal = true\n",
+        "venvlauncher = /usr/bin/python3\n",
+        "implementation = PyPy\n",
+        "implementation = \n",
+        "seed = yes\n",
+        "seed = True\n",
+        "relocatable = yes\n",
+        "relocatable = 1\n",
+        "uv = 0.11.24\nUV = 0.11.25\n",
+    ],
+)
+def test_owned_venv_rejects_startup_altering_and_invalid_pyvenv_keys(configured, extra):
+    base = f"home = {configured.prefix}/bin\ninclude-system-site-packages = false\n"
+    _configure_venv(configured, base + extra)
+    with pytest.raises(UnsupportedCapability) as caught:
+        with configured.capture() as capture:
+            capture.view(["native"])
+    assert caught.value.capability == "tool:layout"
+    assert "unsupported frozen virtual environment configuration" in str(caught.value)
 
 
 def test_owned_projection_cleanup_finishes_and_never_changes_sources(configured):
