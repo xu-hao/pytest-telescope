@@ -481,10 +481,16 @@ Both potential `pyvenv.cfg` locations, the adjacent `bin` directory and its pref
 are closed. An adjacent `bin/pyvenv.cfg` is unsupported. A base-only interpreter has no
 selected virtual-environment configuration. A virtual environment requires its selected
 regular `PREFIX/pyvenv.cfg`, at most 64 KiB of UTF-8, with `home=BASE_PREFIX/bin` and
-`include-system-site-packages=true` or `false`. Only standard `home`,
-`include-system-site-packages`, `version`, `executable`, `command` and `prompt` keys are
-accepted, without duplicates. If present, `executable` must name a pinned alias and
-target in the base `bin`. A nested base configuration is unsupported.
+`include-system-site-packages=true` or `false`. Only standard `venv` keys (`home`,
+`include-system-site-packages`, `version`, `executable`, `command` and `prompt`) and
+harmless `uv` informational metadata keys (`implementation`, `uv`, `version_info`,
+`seed`, `relocatable` and `gourgeist`) are accepted, without duplicates; unknown or
+startup-altering keys (such as `applocal`, `venvlauncher` or `virtualenv`
+`base-prefix` rewrites) refuse. If present, `implementation` must match `cpython`
+case-insensitively, `seed` and `relocatable` must be `true` or `false`, and
+`executable` must name a pinned alias and target in the base `bin`. The normalized
+`pyvenv.cfg` key-value mapping binds startup view identity. A nested base configuration
+is unsupported.
 
 Startup zip libraries, `._pth`, `.pth`, `.egg-link`, `sitecustomize` and `usercustomize`
 modules/packages/extensions/bytecode, and build-tree startup files are unsupported as

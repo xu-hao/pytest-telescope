@@ -11,6 +11,23 @@ from pathlib import Path
 from .tool_context import digest
 from .tool_graph import layout
 
+PYVENV_KEYS = frozenset(
+    {
+        "home",
+        "include-system-site-packages",
+        "version",
+        "executable",
+        "command",
+        "prompt",
+        "implementation",
+        "uv",
+        "version_info",
+        "seed",
+        "relocatable",
+        "gourgeist",
+    }
+)
+
 
 def signature(box):
     return digest([box.executable, box.binds, box.links, box.description, "-I"])
@@ -157,6 +174,7 @@ class Startup:
             if str(root / "bin" / "pyvenv.cfg") in originals:
                 layout("interpreter-adjacent virtual environment configuration is unsupported")
         config = prefix / "pyvenv.cfg"
+        config_values = None
         if prefix == base:
             if str(config) in originals:
                 layout("base interpreter cannot declare virtual environment configuration")
@@ -173,18 +191,19 @@ class Startup:
                     if not separator or name in values:
                         raise ValueError
                     values[name] = value
-                if set(values) - {
-                    "home",
-                    "include-system-site-packages",
-                    "version",
-                    "executable",
-                    "command",
-                    "prompt",
-                }:
+                if set(values) - PYVENV_KEYS:
                     raise ValueError
                 if values.get("home") != str(base / "bin") or values.get(
                     "include-system-site-packages"
                 ) not in ("true", "false"):
+                    raise ValueError
+                if "implementation" in values:
+                    if values["implementation"].lower() != "cpython":
+                        raise ValueError
+                    values["implementation"] = "cpython"
+                if "seed" in values and values["seed"] not in ("true", "false"):
+                    raise ValueError
+                if "relocatable" in values and values["relocatable"] not in ("true", "false"):
                     raise ValueError
                 if "executable" in values:
                     configured = path(values["executable"])
@@ -198,7 +217,10 @@ class Startup:
                 layout("unsupported frozen virtual environment configuration")
             if str(base / "pyvenv.cfg") in originals:
                 layout("nested base virtual environment configuration is unsupported")
-        self.identity = digest(["cpython-prefix-closure-v1", self.roots, self.signature])
+            config_values = values
+        self.identity = digest(
+            ["cpython-prefix-closure-v1", self.roots, self.signature, config_values]
+        )
 
     def regular(self, filename):
         self.budget.tick()
