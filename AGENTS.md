@@ -71,11 +71,11 @@ and [docs/publishing.md](docs/publishing.md) for documentation and package relea
   and no-direct-target-push rules still apply.
 - On Linux hosts with `agcoord` (`agc`), route checks and pull-request landing through
   the local coordinator with integer byte memory claims:
-  - Check: `agc run --no-overflow --resource cpu=4 --resource memory=8589934592 --resource tmpfs=4294967296 -- python scripts/check.py --functional-workers 4 --artifacts <new-dir>`
-  - Land: `agc land <pr> --no-overflow --resource cpu=4 --resource memory=8589934592 --resource tmpfs=4294967296 -- python scripts/check.py --functional-workers 4 --artifacts <new-dir>`
+  - Check: `agc run --no-overflow --resource cpu=4 --resource memory=8589934592 --resource tmpfs=4294967296 -- python scripts/check.py --functional-workers 4 --artifacts "$(mktemp -u "${TMPDIR:-/var/tmp}/telescope-gate.XXXXXX")"`
+  - Land: `agc land <pr> --no-overflow --resource cpu=4 --resource memory=8589934592 --resource tmpfs=4294967296 -- python scripts/check.py --functional-workers 4 --artifacts "$(mktemp -u "${TMPDIR:-/var/tmp}/telescope-gate.XXXXXX")"`
   Never submit coordinated work recursively inside an admitted job, and never bypass or
   separate the gate verdict from publication. On hosts without `agc`, run
-  `python scripts/check.py --functional-workers 4 --artifacts <new-dir>` directly and merge through the forge after checks pass.
+  `python scripts/check.py --functional-workers 4 --artifacts "$(mktemp -u "${TMPDIR:-/var/tmp}/telescope-gate.XXXXXX")"` directly and merge through the forge after checks pass.
 - Tests must own and stop every process, repository, and temporary directory they
   create, and must never inspect or mutate real host state (`~/.codex`, `~/.claude`,
   `~/.gemini`, `~/.config`, or `~/.local`).
